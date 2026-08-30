@@ -84,15 +84,15 @@ bash <(curl -Ls https://raw.githubusercontent.com/javadtifusi-eng/Tifusi-Bot/mai
 بعد از نصب، هر وقت در ترمینال بزنید `tifusi` این منو برمی‌گردد:
 
 ```
-1) نصب ربات
-2) آپدیت ربات (تنظیمات حفظ می‌شود)
-3) ویرایش توکن
-4) ویرایش ادمین
-5) ری‌استارت ربات
-6) وضعیت ربات
-7) مشاهده لاگ زنده
-8) حذف کامل
-0) خروج
+1) Install / Reinstall bot
+2) Update bot (from GitHub — settings preserved)
+3) Edit bot token
+4) Edit admin ID
+5) Restart bot
+6) Bot status
+7) Live logs (exit: Ctrl+C)
+8) Uninstall bot
+0) Exit
 ```
 
 ---
@@ -157,9 +157,6 @@ python3 /root/bot.py
 
 **رباتم ارور داد، VPN کاربرها برای لحظه‌ای قطع شد. چرا؟**
 پنل vpn-ui بعد از هر تغییر کلاینت، Xray را ری‌استارت می‌کند (معماری خود پنل است) و ترافیک ۱ تا ۲ ثانیه قطع می‌شود. نسخه ۴.۰ تعداد درخواست‌ها را حداقل کرده تا این وقفه کمترین باشد.
-
-**می‌خواهم سایت‌های ایرانی با VPN باز نشوند؟**
-از منوی **Xray Configs** پنل، بخش Block Connections: گزینه‌های `🇮🇷 Iran` برای IP و دامنه را فعال کنید.
 
 **توکن رباتم لو رفت؟**
 در @BotFather دستور `/revoke` را بزنید و توکن جدید را از منوی `tifusi` (گزینه ۳) وارد کنید.
