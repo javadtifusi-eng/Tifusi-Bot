@@ -296,6 +296,109 @@ class VpnUI:
         return int((time.time() - t0) * 1000)
 
 
+class PasarGuardAPI:
+    """کلاینت API پنل PasarGuard (بر پایه‌ی Marzban - VLESS/VMess/Trojan/Shadowsocks/WireGuard/Hysteria2).
+    این پنل L2TP/PPTP/IKEv2/OpenVPN را پشتیبانی نمی‌کند - یک خانواده‌ی کاملاً جدا از پروتکل‌های
+    مبتنی بر Xray است، برای همین جدا از VpnUI و با معماری خودش (لینک subscription) وصل می‌شود."""
+
+    def __init__(self, url, username, password, timeout=15):
+        self.base = url.rstrip("/")
+        self.username = username
+        self.password = password
+        self.timeout = timeout
+        self.s = requests.Session()
+        self.s.verify = False
+        self.s.headers.update({"Accept": "application/json"})
+
+    def _u(self, path):
+        return self.base + path
+
+    def login(self):
+        try:
+            r = self.s.post(self._u("/api/admin/token"),
+                            data={"username": self.username, "password": self.password},
+                            timeout=self.timeout)
+        except requests.RequestException as e:
+            raise PanelError(f"خطای اتصال: {e}")
+        if r.status_code != 200:
+            raise PanelError("ورود به پنل ناموفق بود (آدرس/یوزرنیم/پسورد را چک کنید)")
+        try:
+            token = r.json().get("access_token")
+        except ValueError:
+            token = None
+        if not token:
+            raise PanelError("ورود به پنل ناموفق بود (توکن دریافت نشد)")
+        self.s.headers.update({"Authorization": f"Bearer {token}"})
+        return True
+
+    def _call(self, path, method="get", **kwargs):
+        try:
+            if method == "get":
+                r = self.s.get(self._u(path), timeout=self.timeout, **kwargs)
+            elif method == "delete":
+                r = self.s.delete(self._u(path), timeout=self.timeout, **kwargs)
+            else:
+                r = self.s.post(self._u(path), timeout=self.timeout, **kwargs)
+        except requests.RequestException as e:
+            raise PanelError(f"خطای اتصال: {e}")
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("detail")
+            except ValueError:
+                msg = None
+            raise PanelError(str(msg) if msg else f"عملیات ناموفق (HTTP {r.status_code})")
+        if not r.content:
+            return None
+        try:
+            return r.json()
+        except ValueError:
+            return None
+
+    def list_groups(self):
+        """دریافت لیست گروه‌های تعریف‌شده در پنل - معادل inbound در vpn-ui."""
+        obj = self._call("/api/groups") or {}
+        groups = obj.get("groups", []) if isinstance(obj, dict) else (obj or [])
+        result = []
+        for g in groups:
+            result.append({
+                "inbound_id": g.get("id"),
+                "remark": g.get("name", ""),
+                "port": 0,
+                "protocol": "xray_group",
+                "enabled": not g.get("is_disabled", False),
+            })
+        return result
+
+    def add_user(self, group_ids, username, total_gb, expire_ts):
+        """ساخت کاربر با پروتکل‌های پیش‌فرض گروه (VLESS/VMess/Trojan/...) - لینک subscription برمی‌گرداند."""
+        data = {
+            "username": username,
+            "expire": int(expire_ts),
+            "data_limit": int(total_gb) * 1024 ** 3,
+            "group_ids": [int(g) for g in group_ids],
+            "proxy_settings": {},
+            "status": "active",
+        }
+        return self._call("/api/user", "post", json=data)
+
+    def del_user(self, username):
+        try:
+            return self._call(f"/api/user/{username}", "delete")
+        except PanelError:
+            return None
+
+    def get_user(self, username):
+        try:
+            return self._call(f"/api/user/{username}")
+        except PanelError:
+            return None
+
+    def ping(self):
+        t0 = time.time()
+        self.login()
+        return int((time.time() - t0) * 1000)
+
+
 # ══════════════════════ دیتابیس SQLite (database) ══════════════════════
 
 class DB:
@@ -414,6 +517,17 @@ class DB:
             self.x("ALTER TABLE users ADD COLUMN is_blocked INTEGER DEFAULT 0")
         except Exception:
             pass
+        # مهاجرت: نوع پنل - 'vpnui' (پیش‌فرض، L2TP/PPTP/IKEv2/OpenVPN) یا 'pasarguard'
+        # (VLESS/VMess/Trojan/Shadowsocks/WireGuard/Hysteria2 - معماری کاملاً جدا)
+        try:
+            self.x("ALTER TABLE panels ADD COLUMN type TEXT DEFAULT 'vpnui'")
+        except Exception:
+            pass
+        # مهاجرت: لینک subscription برای سفارش‌های PasarGuard
+        try:
+            self.x("ALTER TABLE orders ADD COLUMN sub_url TEXT DEFAULT ''")
+        except Exception:
+            pass
         # مهاجرت: ستون PSK سرور (کلید L2TP)
         try:
             self.x("ALTER TABLE panels ADD COLUMN psk TEXT DEFAULT ''")
@@ -499,12 +613,13 @@ class DB:
     # ---------- پنل‌ها ----------
     def add_panel(self, d):
         return self.x("""INSERT INTO panels (name,url,username,password,location,psk,max_users,status,
-            ovpn_server,ovpn_port_udp,ovpn_port_tcp,ovpn_ca,ovpn_tls_crypt,ovpn_raw,created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ovpn_server,ovpn_port_udp,ovpn_port_tcp,ovpn_ca,ovpn_tls_crypt,ovpn_raw,type,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (d.get("name", ""), d.get("url", ""), d.get("username", ""), d.get("password", ""),
              d.get("location", ""), d.get("psk", ""), int(d.get("max_users", 200)), d.get("status", "active"),
              d.get("ovpn_server", ""), int(d.get("ovpn_port_udp", 0)), int(d.get("ovpn_port_tcp", 0)),
-             d.get("ovpn_ca", ""), d.get("ovpn_tls_crypt", ""), d.get("ovpn_raw", ""), int(time.time())))
+             d.get("ovpn_ca", ""), d.get("ovpn_tls_crypt", ""), d.get("ovpn_raw", ""),
+             d.get("type", "vpnui"), int(time.time())))
 
     def get_panels(self, active_only=False):
         if active_only:
@@ -650,6 +765,8 @@ PROTO_NAMES = {
     "openvpn": "🏧 OpenVPN",
     "l2tp": "L2TP", "pptp": "PPTP", "ikev2": "IKEv2",
     "openvpn_udp": "OpenVPN UDP", "openvpn_tcp": "OpenVPN TCP", "other": "سایر",
+    "xray_group": "🌐 Xray group (PasarGuard)",
+    "xray": "🌐 VLESS/VMess/Trojan",
 }
 PROTO_CYCLE = ["l2tp", "pptp", "ikev2", "openvpn_udp", "openvpn_tcp", "other"]
 UNIFIED_NEED = ["l2tp", "pptp", "ikev2"]
@@ -952,7 +1069,12 @@ def pick_panel(protocol=None):
             continue
         if protocol:
             protos = {i["protocol"] for i in db.get_inbounds(p["id"], enabled_only=True)}
-            if protocol == "unified":
+            if protocol == "xray":
+                if p["type"] != "pasarguard" or "xray_group" not in protos:
+                    continue
+            elif p["type"] == "pasarguard":
+                continue
+            elif protocol == "unified":
                 if not all(n in protos for n in UNIFIED_NEED):
                     continue
             elif not any(pp in ("openvpn_udp", "openvpn_tcp") for pp in protos):
@@ -1007,8 +1129,37 @@ def order_inbounds(o):
     return [(p, i) for p, i in pairs if i]
 
 
+def create_xray_service_on_panel(user_id, plan, username):
+    """ساخت اکانت روی پنل PasarGuard (VLESS/VMess/Trojan/...) - معماری کاملاً جدا از vpn-ui:
+    یک کاربر با یک لینک subscription ساخته می‌شود که همه‌ی پروتکل‌های فعال گروه را شامل می‌شود،
+    نه یک username/password مشترک روی چند inbound مثل جریان L2TP/PPTP/IKEv2."""
+    panel = pick_panel("xray")
+    if not panel:
+        raise PanelError("ظرفیت همه پنل‌های PasarGuard تکمیل است یا پنلی فعال نیست")
+    groups = [ib["inbound_id"] for ib in db.get_inbounds(panel["id"], enabled_only=True)
+              if ib["protocol"] == "xray_group"]
+    if not groups:
+        raise PanelError(f"پنل «{panel['name']}» هیچ گروه فعالی ندارد")
+    expire_at = now() + plan["days"] * 86400
+    client = PasarGuardAPI(panel["url"], panel["username"], panel["password"])
+    client.login()
+    obj = client.add_user(groups, username, plan["volume_gb"], expire_at)
+    sub_url = (obj or {}).get("subscription_url", "")
+    oid = db.create_order({
+        "user_id": user_id, "panel_id": panel["id"], "plan_id": plan["id"],
+        "protocol": "xray", "username": username, "password": "", "psk": "",
+        "inbound_id": groups[0], "extra_inbound_id": 0, "third_inbound_id": 0,
+        "price": plan["price"], "volume_gb": plan["volume_gb"], "days": plan["days"],
+        "expire_at": expire_at,
+    })
+    db.update_order(oid, sub_url=sub_url)
+    return db.get_order(oid), panel
+
+
 def create_service_on_panel(user_id, plan, protocol, username, password=None):
     """ساخت خودکار سرویس روی خلوت‌ترین پنل + Rollback در صورت خطا."""
+    if protocol == "xray":
+        return create_xray_service_on_panel(user_id, plan, username)
     panel = pick_panel(protocol)
     if not panel:
         raise PanelError("ظرفیت همه پنل‌ها تکمیل است یا پنلی با این پروتکل فعال نیست")
@@ -1111,6 +1262,18 @@ async def deliver_service(context, chat_id, order, panel):
             f"⏳ اعتبار: {order['days']} روز — تا {dt}\n\n"
             f"📚 آموزش اتصال را از منوی «📚 آموزش» ببینید.")
         await context.bot.send_message(chat_id, text, parse_mode="Markdown")
+    elif order["protocol"] == "xray":
+        sub_url = order["sub_url"] or ""
+        text = (
+            f"✅ سرویس شما ساخته شد!\n\n"
+            f"🌐 VLESS / VMess / Trojan — #{order['id']}\n"
+            f"🖥 پنل: {panel['name']} {panel['location']}\n\n"
+            f"👤 یوزرنیم: `{order['username']}`\n"
+            f"🔗 لینک اشتراک (Subscription):\n`{sub_url}`\n\n"
+            f"📦 حجم: {vol_text(order['volume_gb'])}\n"
+            f"⏳ اعتبار: {order['days']} روز — تا {dt}\n\n"
+            f"📱 این لینک را در اپ V2rayNG / Streisand / v2Box و مشابه وارد کنید (Import from URL / Subscription).")
+        await context.bot.send_message(chat_id, text, parse_mode="Markdown")
     else:
         text = (
             f"✅ سرویس شما ساخته شد!\n\n"
@@ -1131,9 +1294,36 @@ async def deliver_service(context, chat_id, order, panel):
                                                 caption=f"🏧 کانفیگ OpenVPN {proto.upper()} — {panel['name']}")
 
 
+def do_renew_xray(order, plan):
+    """تمدید سرویس PasarGuard - حذف و ساخت مجدد با همان یوزرنیم (لینک subscription ثابت می‌ماند)."""
+    panel = db.get_panel(order["panel_id"])
+    if not panel:
+        raise PanelError("پنل این سرویس حذف شده است")
+    client = PasarGuardAPI(panel["url"], panel["username"], panel["password"])
+    client.login()
+    client.del_user(order["username"])
+    base = max(now(), order["expire_at"])
+    expire_at = base + plan["days"] * 86400
+    groups = [ib["inbound_id"] for ib in db.get_inbounds(panel["id"], enabled_only=True)
+              if ib["protocol"] == "xray_group"]
+    if not groups:
+        groups = [order["inbound_id"]] if order["inbound_id"] else []
+    try:
+        obj = client.add_user(groups, order["username"], plan["volume_gb"], expire_at)
+    except Exception:
+        raise PanelError("خطا در ساخت مجدد سرویس روی پنل")
+    sub_url = (obj or {}).get("subscription_url", "")
+    db.update_order(order["id"], expire_at=expire_at, volume_gb=plan["volume_gb"], days=plan["days"],
+                    price=plan["price"], plan_id=plan.get("id", order["plan_id"]) or order["plan_id"],
+                    status="active", sub_url=sub_url)
+    return db.get_order(order["id"]), panel
+
+
 # ---------- تمدید ----------
 def do_renew(order, plan):
     """حذف و ساخت مجدد روی همان پنل — یوزرنیم ثابت، پسورد جدید."""
+    if order["protocol"] == "xray":
+        return do_renew_xray(order, plan)
     panel = db.get_panel(order["panel_id"])
     if not panel:
         raise PanelError("پنل این سرویس حذف شده است")
@@ -1203,7 +1393,7 @@ async def show_services(query, uid):
     text = f"🛍 سرویس‌های شما:\n\n"
     rows = []
     for o in orders:
-        icon = "🛜" if o["protocol"] == "unified" else "🏧"
+        icon = "🛜" if o["protocol"] == "unified" else ("🌐" if o["protocol"] == "xray" else "🏧")
         status = "" if o["status"] == "active" else " ⏳(درخواست حذف)"
         text += f"{icon} {o['username']} ← {PROTO_NAMES.get(o['protocol'], o['protocol'])}\n"
         rows.append([btn(f"{icon} {o['username']}{status}", f"svc:{o['id']}")])
@@ -1218,7 +1408,7 @@ async def show_service_detail(query, uid, oid):
         return
     panel = db.get_panel(o["panel_id"])
     pname = panel["name"] if panel else "حذف‌شده"
-    icon = "🛜" if o["protocol"] == "unified" else "🏧"
+    icon = "🛜" if o["protocol"] == "unified" else ("🌐" if o["protocol"] == "xray" else "🏧")
     dt = datetime.datetime.fromtimestamp(o["expire_at"]).strftime("%Y-%m-%d — %H:%M")
 
     # مصرف از همان پنلی که سرویس روی آن ساخته شده
@@ -1243,6 +1433,8 @@ async def show_service_detail(query, uid, oid):
     if o["protocol"] == "unified":
         creds = (f"🌐 سرور: `{(panel['ovpn_server'] or panel_host(panel['url'])) if panel else '-'}`\n"
                  f"👤 یوزرنیم: `{o['username']}`\n🔑 پسورد: `{o['password']}`\n🛡 PSK: `{o['psk']}`")
+    elif o["protocol"] == "xray":
+        creds = f"👤 یوزرنیم: `{o['username']}`\n🔗 لینک اشتراک: `{o['sub_url'] or '-'}`"
     else:
         creds = f"👤 یوزرنیم: `{o['username']}`\n🔑 پسورد: `{o['password']}`"
     text = (f"{icon} سرویس {PROTO_NAMES.get(o['protocol'], o['protocol'])} — #{o['id']}\n"
@@ -1853,7 +2045,8 @@ async def admin_panel_test(query, pid):
         return
     await safe_edit(query, f"🔄 در حال تست پنل {p['name']}...")
     try:
-        ms = await asyncio.to_thread(VpnUI(p["url"], p["username"], p["password"]).ping)
+        cls = PasarGuardAPI if p["type"] == "pasarguard" else VpnUI
+        ms = await asyncio.to_thread(cls(p["url"], p["username"], p["password"]).ping)
         await query.message.reply_text(f"✅ پنل {p['name']} — Online ({ms}ms)",
             reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", f"pb:{pid}")]]))
     except Exception as e:
@@ -1963,6 +2156,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 rows.append([btn("🛜 L2TP / PPTP / IKEv2 (یکپارچه)", "proto:unified")])
             if pick_panel("openvpn"):
                 rows.append([btn("🏧 OpenVPN (UDP+TCP)", "proto:openvpn")])
+            if pick_panel("xray"):
+                rows.append([btn("🌐 VLESS / VMess / Trojan (PasarGuard)", "proto:xray")])
             if not rows:
                 await safe_edit(query, "❌ فعلاً ظرفیت خالی برای ساخت سرویس وجود ندارد. کمی بعد تلاش کن.",
                                 reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "menu:buy")]]))
@@ -2272,7 +2467,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if parts[1] == "ok":
                 panel = db.get_panel(o["panel_id"])
                 err = ""
-                if panel:
+                if panel and o["protocol"] == "xray":
+                    try:
+                        xclient = PasarGuardAPI(panel["url"], panel["username"], panel["password"])
+                        await asyncio.to_thread(xclient.login)
+                        await asyncio.to_thread(xclient.del_user, o["username"])
+                    except Exception as e:
+                        err = str(e)
+                elif panel:
                     try:
                         client = VpnUI(panel["url"], panel["username"], panel["password"])
                         await asyncio.to_thread(client.login)
@@ -2327,11 +2529,21 @@ async def on_callback_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     try:
+        if cmd == "pbtype":
+            ptype = parts[1]
+            db.set_state(uid, "ap_name", {"type": ptype})
+            label = "vpn-ui" if ptype == "vpnui" else "PasarGuard"
+            await safe_edit(query, f"➕ افزودن پنل {label}\n\n۱) نام پنل را وارد کنید (مثلاً «سرور آلمان ۱»):",
+                            reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:panels")]]))
+            return
         if cmd == "pb":
             if parts[1] == "add":
-                db.set_state(uid, "ap_name", {})
-                await safe_edit(query, "➕ افزودن پنل vpn-ui\n\n۱) نام پنل را وارد کنید (مثلاً «سرور آلمان ۱»):",
-                                reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:panels")]]))
+                kb = InlineKeyboardMarkup([
+                    [btn("🛜 vpn-ui (L2TP/PPTP/IKEv2/OpenVPN)", "pbtype:vpnui")],
+                    [btn("🌐 PasarGuard (VLESS/VMess/Trojan/...)", "pbtype:pasarguard")],
+                    [btn("🔙 انصراف", "admin:panels")],
+                ])
+                await safe_edit(query, "➕ افزودن پنل\n\nنوع پنل را انتخاب کنید:", reply_markup=kb)
             elif parts[1] == "test":
                 await admin_panel_test(query, int(parts[2]))
             elif parts[1] == "toggle":
@@ -2439,8 +2651,17 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             await msg.reply_text("❌ نام کاربری نامعتبر است.\nباید با حرف انگلیسی شروع شود، ۳ تا ۲۰ کاراکتر، بدون @ و فاصله و خط تیره:")
             return True
         # چک تکراری نبودن یوزرنیم روی پنل مقصد
-        panel = pick_panel()
-        if panel:
+        panel = pick_panel(sd.get("protocol"))
+        if panel and panel["type"] == "pasarguard":
+            try:
+                cl = PasarGuardAPI(panel["url"], panel["username"], panel["password"])
+                await asyncio.to_thread(cl.login)
+                if await asyncio.to_thread(cl.get_user, text):
+                    await msg.reply_text("❌ این یوزرنیم قبلاً روی سرور استفاده شده. لطفاً یوزرنیم دیگری انتخاب کنید:")
+                    return True
+            except Exception:
+                pass
+        elif panel:
             try:
                 cl = VpnUI(panel["url"], panel["username"], panel["password"])
                 await asyncio.to_thread(cl.login)
@@ -2631,7 +2852,8 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
 
     # ---------- ادمین: جادوی افزودن پنل ----------
     if state == "ap_name" and is_admin(uid):
-        db.set_state(uid, "ap_url", {"name": text})
+        sd["name"] = text
+        db.set_state(uid, "ap_url", sd)
         await msg.reply_text("۲) آدرس پنل را وارد کنید (مثلاً https://panel1.example.com:8000):")
         return True
 
@@ -2652,17 +2874,24 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
 
     if state == "ap_pass" and is_admin(uid):
         sd["password"] = text
-        wait = await msg.reply_text("🔄 در حال تست اتصال و کشف Inbound ها...")
+        is_pasarguard = sd.get("type") == "pasarguard"
+        wait = await msg.reply_text("🔄 در حال تست اتصال و کشف " +
+                                    ("گروه‌ها" if is_pasarguard else "Inbound") + " ها...")
         try:
-            client = VpnUI(sd["url"], sd["username"], sd["password"])
-            await asyncio.to_thread(client.login)
-            inbounds = await asyncio.to_thread(client.list_inbounds)
+            if is_pasarguard:
+                client = PasarGuardAPI(sd["url"], sd["username"], sd["password"])
+                await asyncio.to_thread(client.login)
+                inbounds = await asyncio.to_thread(client.list_groups)
+            else:
+                client = VpnUI(sd["url"], sd["username"], sd["password"])
+                await asyncio.to_thread(client.login)
+                inbounds = await asyncio.to_thread(client.list_inbounds)
         except Exception as e:
             await wait.edit_text(f"❌ اتصال ناموفق: {e}\n\nاز اول شروع کنید: 🖥 مدیریت پنل‌ها ← ➕ افزودن پنل")
             db.set_state(uid, "none")
             return True
         if not inbounds:
-            await wait.edit_text("❌ هیچ inbound ای روی پنل پیدا نشد.")
+            await wait.edit_text("❌ هیچ " + ("گروهی" if is_pasarguard else "inbound ای") + " روی پنل پیدا نشد.")
             db.set_state(uid, "none")
             return True
         for ib in inbounds:
@@ -2692,6 +2921,10 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             await msg.reply_text("❌ عدد وارد کنید (یا - برای پیش‌فرض):")
             return True
         sd["status"] = "active"
+        if sd.get("type") == "pasarguard":
+            sd["psk"] = ""
+            await finish_panel_wizard(msg, uid, sd)
+            return True
         db.set_state(uid, "ap_psk", sd)
         await msg.reply_text(
             "🛡 PSK (کلید L2TP/IPsec) این سرور را وارد کنید.\n\n"
@@ -2909,7 +3142,8 @@ async def health_job(context: ContextTypes.DEFAULT_TYPE):
         if p["status"] == "inactive":
             continue  # غیرفعال دستی — از چرخه خارج است
         try:
-            await asyncio.to_thread(VpnUI(p["url"], p["username"], p["password"]).login)
+            cls = PasarGuardAPI if p["type"] == "pasarguard" else VpnUI
+            await asyncio.to_thread(cls(p["url"], p["username"], p["password"]).login)
             ok = True
         except Exception:
             ok = False
