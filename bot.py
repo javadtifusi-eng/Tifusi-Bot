@@ -1829,8 +1829,9 @@ async def admin_admins(query):
         text += f"👤 ادمین: {a}\n"
     text += "\nℹ️ ادمین‌ها دسترسی کامل دارند: تایید پرداخت، تنظیمات و همه بخش‌ها."
     rows = [[btn("➕ افزودن ادمین", "adm:add")]]
-    for a in ads:
-        rows.append([btn(f"🗑 حذف {a}", f"adm:del:{a}")])
+    del_btns = [btn(f"🗑 حذف {a}", f"adm:del:{a}") for a in ads]
+    for i in range(0, len(del_btns), 2):
+        rows.append(del_btns[i:i + 2])
     rows.append([btn("🔙 بازگشت", "admin:menu")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
@@ -1847,8 +1848,7 @@ async def admin_user_panel(query, uid_target):
             f"🛍 سرویس‌ها: {len(services)} عدد\n"
             f"👥 زیرمجموعه: {db.referral_count(u['id'])} نفر")
     kb = InlineKeyboardMarkup([
-        [btn("➕ شارژ دستی کیف پول", f"au:charge:{u['id']}")],
-        [btn("🛍 مشاهده سرویس‌ها", f"au:svcs:{u['id']}")],
+        [btn("➕ شارژ کیف پول", f"au:charge:{u['id']}"), btn("🛍 سرویس‌ها", f"au:svcs:{u['id']}")],
         [btn("🔙 بازگشت", "admin:menu")],
     ])
     await safe_edit(query, text, reply_markup=kb)
@@ -1873,7 +1873,11 @@ async def admin_settings(query):
         if key == "faq_text" and val != "—":
             val = "✅ تنظیم شده"
         text += f"{label}: {val}\n"
-    rows = [[btn(f"✏️ {label}", f"set:{key}")] for key, label in SETTING_KEYS]
+    rows = []
+    keys = [(k, l) for k, l in SETTING_KEYS]
+    for i in range(0, len(keys), 2):
+        pair = keys[i:i + 2]
+        rows.append([btn(f"✏️ {label}", f"set:{key}") for key, label in pair])
     rows.append([btn("🔙 بازگشت", "admin:menu")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
@@ -1883,8 +1887,7 @@ async def admin_channel(query):
             f"کانال: {db.setting('channel_id', '—')}\nگروه: {db.setting('group_id', '—')}\n\n"
             f"آیدی را با @ یا عدد -100 وارد کنید. ربات باید در کانال/گروه ادمین باشد.")
     kb = InlineKeyboardMarkup([
-        [btn("✏️ آیدی کانال", "set:channel_id")],
-        [btn("✏️ آیدی گروه", "set:group_id")],
+        [btn("📢 آیدی کانال", "set:channel_id"), btn("👥 آیدی گروه", "set:group_id")],
         [btn("🔙 بازگشت", "admin:menu")],
     ])
     await safe_edit(query, text, reply_markup=kb)
@@ -1945,9 +1948,7 @@ def report_text(title, ts):
 
 async def admin_report_menu(query):
     kb = InlineKeyboardMarkup([
-        [btn("📅 امروز", "report:day")],
-        [btn("📅 هفتگی", "report:week")],
-        [btn("📅 ماهانه", "report:month")],
+        [btn("📅 امروز", "report:day"), btn("🗓 هفتگی", "report:week"), btn("📆 ماهانه", "report:month")],
         [btn("🔙 بازگشت", "admin:menu")],
     ])
     await safe_edit(query, f"📈 گزارش\n\nبازه گزارش را انتخاب کنید:", reply_markup=kb)
@@ -1978,12 +1979,9 @@ async def admin_plan_detail(query, pid):
     ul_text = f"{ul} کاربره" if ul else "پیروی از اینباند"
     text = f"📦 پلن #{p['id']}\n🛍️ {plan_label(p)}\n👥 لیمت دستگاه همزمان: {ul_text}\n📌 وضعیت: {st}"
     kb = InlineKeyboardMarkup([
-        [btn("✏️ عنوان", f"ple:{pid}:title")],
-        [btn("✏️ حجم (گیگ)", f"ple:{pid}:volume_gb")],
-        [btn("✏️ مدت (روز)", f"ple:{pid}:days")],
-        [btn("✏️ قیمت (تومان)", f"ple:{pid}:price")],
-        [btn("👥 تعداد کاربر (0 تا 5)", f"ple:{pid}:user_limit")],
-        [btn("🔁 فعال / غیرفعال", f"pl:toggle:{pid}")],
+        [btn("📝 عنوان", f"ple:{pid}:title"), btn("📦 حجم (گیگ)", f"ple:{pid}:volume_gb")],
+        [btn("⏳ مدت (روز)", f"ple:{pid}:days"), btn("💵 قیمت (تومان)", f"ple:{pid}:price")],
+        [btn("👥 تعداد کاربر", f"ple:{pid}:user_limit"), btn("🔁 فعال/غیرفعال", f"pl:toggle:{pid}")],
         [btn("🗑 حذف پلن", f"pl:del:{pid}")],
         [btn("🔙 بازگشت", "admin:plans")],
     ])
@@ -2030,10 +2028,8 @@ async def admin_panel_detail(query, pid):
             f"🔐 ovpn: {'✅ دارد' if p['ovpn_ca'] else '❌ ندارد'}\n\n"
             f"📡 Inbound ها:\n{ib_text or '  —'}")
     kb = InlineKeyboardMarkup([
-        [btn("🔄 تست اتصال", f"pb:test:{pid}")],
-        [btn("🔁 فعال / غیرفعال", f"pb:toggle:{pid}")],
-        [btn("✏️ ویرایش پنل", f"pb:edit:{pid}")],
-        [btn("🗑 حذف پنل", f"pb:del:{pid}")],
+        [btn("🔄 تست اتصال", f"pb:test:{pid}"), btn("🔁 فعال/غیرفعال", f"pb:toggle:{pid}")],
+        [btn("✏️ ویرایش پنل", f"pb:edit:{pid}"), btn("🗑 حذف پنل", f"pb:del:{pid}")],
         [btn("🔙 بازگشت", "admin:panels")],
     ])
     await safe_edit(query, text, reply_markup=kb)
@@ -2056,14 +2052,10 @@ async def admin_panel_test(query, pid):
 
 async def admin_panel_edit(query, pid):
     kb = InlineKeyboardMarkup([
-        [btn("✏️ نام", f"pbe:{pid}:name")],
-        [btn("✏️ آدرس", f"pbe:{pid}:url")],
-        [btn("✏️ یوزرنیم", f"pbe:{pid}:username")],
-        [btn("✏️ پسورد", f"pbe:{pid}:password")],
-        [btn("✏️ موقعیت", f"pbe:{pid}:location")],
-        [btn("✏️ سقف کاربر", f"pbe:{pid}:max_users")],
-        [btn("🛡 PSK (کلید L2TP)", f"pbe:{pid}:psk")],
-        [btn("📤 آپلود مجدد ovpn", f"pbe:{pid}:ovpn")],
+        [btn("📝 نام", f"pbe:{pid}:name"), btn("🌐 آدرس", f"pbe:{pid}:url")],
+        [btn("👤 یوزرنیم", f"pbe:{pid}:username"), btn("🔒 پسورد", f"pbe:{pid}:password")],
+        [btn("📍 موقعیت", f"pbe:{pid}:location"), btn("👥 سقف کاربر", f"pbe:{pid}:max_users")],
+        [btn("🛡 PSK (کلید L2TP)", f"pbe:{pid}:psk"), btn("📤 آپلود ovpn", f"pbe:{pid}:ovpn")],
         [btn("🔙 بازگشت", f"pb:{pid}")],
     ])
     await safe_edit(query, "✏️ کدام مورد را ویرایش می‌کنید؟", reply_markup=kb)
@@ -2074,8 +2066,10 @@ def inbound_sel_kb(inbounds):
     for i, ib in enumerate(inbounds):
         en = "✅" if ib.get("enabled") else "❌"
         proto = PROTO_NAMES.get(ib.get("protocol", "other"), "سایر")
-        rows.append([btn(f"{en} #{ib['inbound_id']} پورت {ib['port']} → {proto}", f"inb:t:{i}")])
-        rows.append([btn(f"🔁 تغییر نوع inbound #{ib['inbound_id']}", f"inb:p:{i}")])
+        rows.append([
+            btn(f"{en} #{ib['inbound_id']} پورت {ib['port']} → {proto}", f"inb:t:{i}"),
+            btn("🔁 تغییر نوع", f"inb:p:{i}"),
+        ])
     rows.append([btn("✅ پایان و ادامه", "inb:done")])
     return InlineKeyboardMarkup(rows)
 
