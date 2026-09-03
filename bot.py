@@ -2,6 +2,8 @@
 """ربات فروش اشتراک VPN v4.0 — تک‌فایلی (همه‌چیز در همین یک فایل) — فقط vpn-ui | چندپنلی.
 فقط BOT_TOKEN و ADMIN_ID را در بالای فایل پر کنید و اجرا کنید: python bot.py"""
 import re
+import os
+import sys
 import json
 import time
 import random
@@ -9,6 +11,7 @@ import string
 import asyncio
 import logging
 import datetime
+import subprocess
 from urllib.parse import urlparse
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
@@ -29,6 +32,9 @@ ADMIN_ID = 0        # آیدی عددی ادمین از @userinfobot
 DEFAULT_PSK = "123456"   # PSK پیش‌فرض L2TP — باید با Secret تنظیم‌شده در پنل یکی باشد
 DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل — وقتی پنل به این عدد برسد، خریدهای جدید می‌روند پنل بعدی (تمدیدها همیشه روی همان پنل انجام می‌شوند)
 # ════════════════════════════════════════════════════════════════════════════════════
+
+BOT_UPDATE_URL = "https://raw.githubusercontent.com/javadtifusi-eng/Tifusi-Bot/main/bot.py"
+BOT_SERVICE_NAME = "bot"
 
 
 
@@ -1988,6 +1994,76 @@ async def admin_plan_detail(query, pid):
     await safe_edit(query, text, reply_markup=kb)
 
 
+# ---------- بروزرسانی ربات ----------
+def _fetch_latest_bot_code():
+    r = requests.get(f"{BOT_UPDATE_URL}?x={int(time.time() * 1000)}", timeout=15, verify=False)
+    r.raise_for_status()
+    return r.text
+
+
+def _preserve_settings(old_code, new_code):
+    def cur(pattern, default=""):
+        m = re.search(pattern, old_code, re.M)
+        return m.group(1) if m else default
+
+    token = cur(r'^BOT_TOKEN\s*=\s*"([^"]*)"')
+    admin = cur(r'^ADMIN_ID\s*=\s*(\d+)', str(ADMIN_ID))
+    maxu = cur(r'^DEFAULT_PANEL_MAX_USERS\s*=\s*(\d+)', str(DEFAULT_PANEL_MAX_USERS))
+    psk = cur(r'^DEFAULT_PSK\s*=\s*"([^"]*)"', DEFAULT_PSK)
+    new_code = re.sub(r'^BOT_TOKEN\s*=.*$', f'BOT_TOKEN = "{token}"', new_code, count=1, flags=re.M)
+    new_code = re.sub(r'^ADMIN_ID\s*=.*$', f'ADMIN_ID = {admin}        # admin numeric id',
+                       new_code, count=1, flags=re.M)
+    new_code = re.sub(r'^DEFAULT_PANEL_MAX_USERS\s*=.*$', f'DEFAULT_PANEL_MAX_USERS = {maxu}',
+                       new_code, count=1, flags=re.M)
+    new_code = re.sub(r'^DEFAULT_PSK\s*=.*$', f'DEFAULT_PSK = "{psk}"', new_code, count=1, flags=re.M)
+    return new_code
+
+
+async def do_self_update(query):
+    await safe_edit(query, "🔄 در حال دانلود آخرین نسخه از گیت‌هاب...")
+    try:
+        new_code = await asyncio.to_thread(_fetch_latest_bot_code)
+    except Exception as e:
+        await query.message.reply_text(f"❌ دانلود ناموفق بود: {e}",
+            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        return
+    try:
+        compile(new_code, "bot.py", "exec")
+    except SyntaxError as e:
+        await query.message.reply_text(f"❌ نسخه دانلودشده خراب است (خطای نحوی) — بروزرسانی لغو شد.\n{e}",
+            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        return
+
+    bot_file = os.path.abspath(__file__)
+    backup_file = bot_file + ".bak"
+    try:
+        with open(bot_file, "r", encoding="utf-8") as f:
+            old_code = f.read()
+        with open(backup_file, "w", encoding="utf-8") as f:
+            f.write(old_code)
+        new_code = _preserve_settings(old_code, new_code)
+        with open(bot_file, "w", encoding="utf-8") as f:
+            f.write(new_code)
+    except Exception as e:
+        await query.message.reply_text(f"❌ خطا در نوشتن فایل جدید: {e}",
+            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        return
+
+    await query.message.reply_text(
+        "✅ نسخه جدید جایگزین شد — ربات در حال ری‌استارت است (چند ثانیه طول می‌کشد)...\n"
+        "اگر نسخه جدید بالا نیامد، خودکار به نسخه قبلی برمی‌گردد.")
+    watcher = (
+        f'sleep 2; systemctl restart {BOT_SERVICE_NAME}; sleep 4; '
+        f'systemctl is-active --quiet {BOT_SERVICE_NAME} || '
+        f'{{ cp "{backup_file}" "{bot_file}"; systemctl restart {BOT_SERVICE_NAME}; }}'
+    )
+    try:
+        subprocess.Popen(["bash", "-c", watcher], start_new_session=True,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        os.execv(sys.executable, [sys.executable, bot_file])
+
+
 # ---------- مدیریت پنل‌ها ----------
 async def admin_panels(query):
     panels = db.get_panels()
@@ -2353,8 +2429,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif what == "update":
                 await safe_edit(query,
                     f"🆕 نسخه ربات: {db.setting('bot_version', '3.0')}\n"
-                    f"📅 تاریخ نسخه: {db.setting('bot_version_date', '—')}",
-                    reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+                    f"📅 تاریخ نسخه: {db.setting('bot_version_date', '—')}\n\n"
+                    f"با زدن «بروزرسانی الان»، آخرین نسخه از گیت‌هاب دانلود و جایگزین می‌شود "
+                    f"و ربات خودکار ری‌استارت می‌شود (بدون نیاز به ترمینال). تنظیمات شما "
+                    f"(توکن، آیدی ادمین و...) حفظ می‌شوند.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [btn("🔄 بروزرسانی الان", "admin:doupdate")],
+                        [btn("🔙 بازگشت", "admin:menu")],
+                    ]))
+            elif what == "doupdate":
+                await do_self_update(query)
             elif what == "channel":
                 await admin_channel(query)
             elif what == "report":
