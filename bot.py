@@ -3171,7 +3171,7 @@ def main():
         raise SystemExit("❌ ابتدا BOT_TOKEN و ADMIN_ID را در بالای همین فایل (bot.py) پر کنید.")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(on_callback_admin, pattern=r"^(pb|pbe|pl|ple|inb|ap):"))
+    app.add_handler(CallbackQueryHandler(on_callback_admin, pattern=r"^(pbtype|pb|pbe|pl|ple|inb|ap):"))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, on_photo))
     app.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, on_document))
