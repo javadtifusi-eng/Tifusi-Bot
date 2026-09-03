@@ -2533,7 +2533,8 @@ async def on_callback_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cmd == "pb":
             if parts[1] == "add":
                 kb = InlineKeyboardMarkup([
-                    [btn("🖥️ Vpn-ui", "pbtype:vpnui"), btn("🖥️ Psar Guard", "pbtype:pasarguard")],
+                    [btn("🖥️ Vpn-ui", "pbtype:vpnui")],
+                    [btn("🖥️ Psar Guard", "pbtype:pasarguard")],
                     [btn("🔙 انصراف", "admin:panels")],
                 ])
                 await safe_edit(query, "➕ افزودن پنل\n\nنوع پنل را انتخاب کنید:", reply_markup=kb)
