@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""ربات فروش اشتراک VPN v4.0 — تک‌فایلی (همه‌چیز در همین یک فایل) — فقط vpn-ui | چندپنلی.
+"""ربات فروش اشتراک VPN v4.0 — تک‌فایلی (همه‌چیز در همین یک فایل) — فقط Tifusi Panel (Xray / WireGuard / IKEv2 / L2TP) | چندپنلی.
 فقط BOT_TOKEN و ADMIN_ID را در بالای فایل پر کنید و اجرا کنید: python bot.py"""
 import re
 import json
 import time
-import random
-import string
+import io
 import asyncio
 import logging
 import datetime
@@ -17,7 +16,6 @@ from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler,
 
 import sqlite3
 import threading
-import uuid
 import requests
 import urllib3
 
@@ -26,385 +24,100 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ══════════════════════ تنظیمات — فقط همین دو مقدار را پر کنید ══════════════════════
 BOT_TOKEN = ""      # توکن ربات از @BotFather
 ADMIN_ID = 0        # آیدی عددی ادمین از @userinfobot
-DEFAULT_PSK = "123456"   # PSK پیش‌فرض L2TP — باید با Secret تنظیم‌شده در پنل یکی باشد
 DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل — وقتی پنل به این عدد برسد، خریدهای جدید می‌روند پنل بعدی (تمدیدها همیشه روی همان پنل انجام می‌شوند)
 # ════════════════════════════════════════════════════════════════════════════════════
 
 
 
+# ══════════════════════ سرویس‌ها (services) ══════════════════════
+
+# ربات فقط از طریق Tifusi Panel می‌فروشد. هر سرویس روی هر پنل به یک «گروه» پنل وصل می‌شود؛
+# گروه تعیین می‌کند کاربر به کدام سرورها دسترسی دارد (سروری که در هیچ گروهی نیست برای همه است).
+# ترتیب همین دیکشنری ترتیب دکمه‌های خرید است. سرویسی که هیچ پنلی برایش گروه انتخاب نکرده به مشتری
+# نشان داده نمی‌شود — مثلاً WireGuard تا وقتی به پنل اضافه نشده و ادمین گروهی برایش انتخاب نکرده.
+SERVICES = {
+    "xray": "🌐 Xray (VLESS / VMess / Trojan)",
+    "wireguard": "🔒 WireGuard",
+    "ikev2": "🛡 IKEv2",
+    "l2tp": "🔗 L2TP",
+}
+# اکانت تست روی اولین سرویسِ در دسترس به همین ترتیب ساخته می‌شود
+TEST_SERVICE_ORDER = ["ikev2", "xray", "l2tp", "wireguard"]
+# سفارش‌های نسخه‌ی قبلی Tifusi Panel (یک سرویس کلی با کلید tifusi) هم با همان منطق Tifusi تمدید/حذف می‌شوند
+TIFUSI_ORDER_KEYS = set(SERVICES) | {"tifusi"}
+
+APP_ANDROID_URL = "https://github.com/javadtifusi-eng/Tifusi-VPN/releases/latest/download/tifusi-vpn.apk"
+APP_WINDOWS_URL = "https://github.com/javadtifusi-eng/Tifusi-VPN/releases/latest/download/TifusiVPN.exe"
+
+
 # ══════════════════════ آموزش اتصال (training) ══════════════════════
 
+# هر آموزش فقط سیستم‌عامل‌هایی را دارد که برایش معنی دارد؛ اگر یکی باشد مستقیم همان نمایش داده می‌شود
+TUT_OS = [("windows", "🪟 ویندوز"), ("android", "🤖 اندروید"), ("ios", "🍎 آیفون")]
+
 TRAININGS = {
-    "l2tp": {
-        "title": "🛜 آموزش L2TP / PPTP / IKEv2",
-        "windows": """🪟 ویندوز:
+    "app": {
+        "title": "📱 اپ Tifusi VPN با کد اپ (اندروید / ویندوز)",
+        "android": f"""🤖 اندروید:
 
-1️⃣ Settings → Network & Internet → VPN → Add VPN
-2️⃣ VPN type: L2TP/IPsec with pre-shared key
-3️⃣ Server: آدرس سروری که ربات داده
-4️⃣ Pre-shared key: همان PSK
-5️⃣ یوزرنیم و پسورد را وارد کنید و Connect
+1️⃣ اپ Tifusi VPN را دانلود و نصب کنید:
+{APP_ANDROID_URL}
+2️⃣ اپ را باز کنید و به تب «سرورها» بروید
+3️⃣ «کد اپ» که ربات فرستاده (به شکل CODE@آدرس-پنل) را وارد کنید و «دریافت سرورها» را بزنید
+4️⃣ یک سرور را انتخاب کنید و وصل شوید
 
-💡 برای IKEv2 نوع VPN را IKEv2 انتخاب کنید (بدون PSK) — فیلد Remote ID را دقیقاً همان آدرس سرور بگذارید. اگر گواهی سرور self-signed باشد، IKEv2 روی آیفون بدون نصب گواهی وصل نمی‌شود.""",
-        "android": """🤖 اندروید:
+💡 به‌جای کد، لینک اشتراک را هم می‌توانید وارد کنید. با تمدید سرویس، کد و لینک عوض نمی‌شوند.""",
+        "windows": f"""🪟 ویندوز:
 
-1️⃣ تنظیمات → Network & Internet → VPN → ➕
-2️⃣ Type: L2TP/IPSec PSK
-3️⃣ Server address: آدرس سرور
-4️⃣ IPSec pre-shared key: همان PSK
-5️⃣ ذخیره و اتصال با یوزرنیم/پسورد""",
-        "ios": """🍎 آیفون:
+1️⃣ برنامه Tifusi VPN را دانلود و اجرا کنید:
+{APP_WINDOWS_URL}
+2️⃣ به تب «سرورها» بروید
+3️⃣ «کد اپ» (CODE@آدرس-پنل) را وارد کنید و «دریافت سرورها» را بزنید
+4️⃣ یک سرور را انتخاب کنید و وصل شوید
 
-1️⃣ Settings → General → VPN & Device Management → Add VPN
-2️⃣ Type: L2TP
-3️⃣ Server / Account / Password / Secret (PSK) را وارد کنید
-4️⃣ Done و سپس روشن کردن VPN""",
+💡 به‌جای کد، لینک اشتراک را هم می‌توانید وارد کنید.""",
     },
-    "openvpn": {
-        "title": "🏧 آموزش OpenVPN",
-        "windows": """🪟 ویندوز:
+    "iphone": {
+        "title": "🍎 آیفون با لینک اشتراک (پروفایل IKEv2)",
+        "ios": """🍎 آیفون / آیپد:
 
-1️⃣ نرم‌افزار OpenVPN Connect را نصب کنید
-2️⃣ فایل .ovpn ارسال‌شده توسط ربات را Import کنید
-3️⃣ یوزرنیم/پسورد را وارد کنید و Connect
+1️⃣ لینک اشتراکی که ربات فرستاده را کپی کنید
+2️⃣ لینک را در Safari باز کنید (نه در مرورگر داخل تلگرام)
+3️⃣ پروفایل IKEv2 را دانلود کنید و از Settings ← Profile Downloaded نصب کنید
+4️⃣ از Settings ← VPN اتصال را روشن کنید
 
-💡 فایل UDP سریع‌تر است، فایل TCP پایدارتر.""",
-        "android": """🤖 اندروید:
+💡 برای سرویس Xray روی آیفون، آموزش «Xray با v2rayNG / Streisand» را ببینید.""",
+    },
+    "xray": {
+        "title": "🌐 Xray با v2rayNG / Streisand",
+        "android": """🤖 اندروید (v2rayNG):
 
-1️⃣ اپ OpenVPN Connect را از گوگل‌پلی نصب کنید
-2️⃣ فایل .ovpn را Import کنید (Upload File)
-3️⃣ یوزرنیم/پسورد را وارد کنید و Connect""",
-        "ios": """🍎 آیفون:
+1️⃣ اپ v2rayNG را نصب کنید
+2️⃣ لینک اشتراک را کپی کنید
+3️⃣ در اپ از منوی ☰ ← Subscription group setting ← ➕ لینک را اضافه کنید
+4️⃣ منوی ⋮ ← Update subscription، سپس یک کانفیگ را انتخاب کنید و ▶️ را بزنید
 
-1️⃣ اپ OpenVPN Connect را از اپ‌استور نصب کنید
-2️⃣ فایل .ovpn را با اپ باز کنید (Share → OpenVPN)
-3️⃣ یوزرنیم/پسورد را وارد کنید و Connect""",
+💡 اپ Tifusi VPN هم با کد اپ همین سرویس را وصل می‌کند.""",
+        "ios": """🍎 آیفون (Streisand):
+
+1️⃣ اپ Streisand را از اپ‌استور نصب کنید
+2️⃣ لینک اشتراک را کپی کنید
+3️⃣ در اپ ➕ را بزنید و لینک را به‌عنوان Subscription اضافه کنید
+4️⃣ یک سرور را انتخاب کنید و اتصال را روشن کنید""",
     },
 }
 
 
-# ══════════════════════ اتصال به پنل vpn-ui (panel) ══════════════════════
+# ══════════════════════ اتصال به Tifusi Panel (panel) ══════════════════════
 
 class PanelError(Exception):
     pass
 
 
-# حدس پروتکل از روی پورت یا اسم inbound
-PORT_PROTOCOLS = {1701: "l2tp", 1723: "pptp", 500: "ikev2", 4500: "ikev2"}
-
-
-def guess_protocol(port, remark=""):
-    r = (remark or "").lower()
-    if "l2tp" in r:
-        return "l2tp"
-    if "pptp" in r:
-        return "pptp"
-    if "ike" in r:
-        return "ikev2"
-    if "openvpn" in r or "ovpn" in r:
-        return "openvpn_tcp" if "tcp" in r else "openvpn_udp"
-    if port in PORT_PROTOCOLS:
-        return PORT_PROTOCOLS[port]
-    if port in (1194, 1195, 1196, 1197):
-        return "openvpn_udp"
-    return "other"
-
-
-def parse_ovpn(text):
-    """استخراج خودکار اطلاعات از فایل ovpn: آدرس سرور، پورت، پروتکل، CA و tls-crypt."""
-    out = {"server": "", "port": 0, "proto": "udp", "ca": "", "tls_crypt": "", "tls_auth": ""}
-    m = re.search(r"^\s*remote\s+(\S+)\s+(\d+)", text, re.M)
-    if m:
-        out["server"] = m.group(1)
-        out["port"] = int(m.group(2))
-    m = re.search(r"^\s*proto\s+(\S+)", text, re.M)
-    if m:
-        out["proto"] = m.group(1).lower().replace("-client", "")
-    for tag, key in (("ca", "ca"), ("tls-crypt", "tls_crypt"), ("tls-auth", "tls_auth")):
-        m = re.search(r"<%s>(.*?)</%s>" % (tag, tag), text, re.S)
-        if m:
-            out[key] = m.group(1).strip()
-    return out
-
-
-class VpnUI:
-    """کلاینت API پنل vpn-ui (سازگار با x-ui / 3x-ui)."""
-
-    def __init__(self, url, username, password, timeout=15):
-        self.base = url.rstrip("/")
-        self.username = username
-        self.password = password
-        self.timeout = timeout
-        self.prefix = ""
-        self.s = requests.Session()
-        self.s.verify = False
-        self.s.headers.update({"Accept": "application/json"})
-
-    def _u(self, path):
-        return self.base + self.prefix + path
-
-    def login(self):
-        """لاگین و تشخیص خودکار webBasePath (مثل /oocHETpJabEVemhM یا /panel)."""
-        bases = [self.base]
-        if self.base.endswith("/panel"):
-            bases.insert(0, self.base[: -len("/panel")])
-        for base in bases:
-            for prefix in ("", "/panel"):
-                try:
-                    r = self.s.post(base + prefix + "/login",
-                                    data={"username": self.username, "password": self.password},
-                                    timeout=self.timeout)
-                    if r.status_code == 200:
-                        try:
-                            if r.json().get("success"):
-                                self.base = base
-                                self.prefix = prefix
-                                return True
-                        except ValueError:
-                            pass
-                except requests.RequestException:
-                    continue
-        raise PanelError("ورود به پنل ناموفق بود (آدرس/یوزرنیم/پسورد را چک کنید)")
-
-    def _call(self, path, method="post", **kwargs):
-        try:
-            if method == "get":
-                r = self.s.get(self._u(path), timeout=self.timeout, **kwargs)
-            else:
-                r = self.s.post(self._u(path), timeout=self.timeout, **kwargs)
-        except requests.RequestException as e:
-            raise PanelError(f"خطای اتصال: {e}")
-        try:
-            data = r.json()
-        except ValueError:
-            raise PanelError(f"پاسخ نامعتبر از پنل (HTTP {r.status_code})")
-        if not data.get("success"):
-            raise PanelError(data.get("msg") or "عملیات ناموفق")
-        return data.get("obj")
-
-    def list_inbounds(self):
-        """دریافت خودکار لیست inbound ها از پنل."""
-        try:
-            obj = self._call("/panel/api/inbounds/list", "get")
-        except PanelError:
-            obj = self._call("/panel/api/inbounds/list", "post")
-        result = []
-        for ib in obj or []:
-            result.append({
-                "inbound_id": ib.get("id"),
-                "remark": ib.get("remark", ""),
-                "port": ib.get("port", 0),
-                "protocol": guess_protocol(ib.get("port", 0), ib.get("remark", "")),
-                "enabled": bool(ib.get("enable", True)),
-            })
-        return result
-
-    def add_client(self, inbound_id, username, total_gb, expiry_ms, password="", user_limit=0):
-        """ساخت کاربر روی یک inbound (حذف‌نشدنی بودن کاربران قبلی تضمین می‌شود — append).
-        نکته حیاتی vpn-ui: برای پروتکل‌های L2TP/PPTP/IKEv2/OpenVPN فیلد «id» همان
-        یوزرنیم واقعی VPN است (email فقط برای ردیابی است) — پس id باید دقیقاً همان
-        یوزرنیمی باشد که کاربر انتخاب کرده، نه UUID تصادفی!
-        user_limit = تعداد دستگاه همزمان (userLimitOverride در vpn-ui — فقط می‌تواند
-        از User Limit اینباند کمتر باشد؛ پس User Limit اینباند را روی بیشترین پلن بگذارید)."""
-        client = {
-            "id": username,
-            "email": username,
-            "password": password,
-            "limitIp": 0,
-            "totalGB": int(total_gb) * 1024 ** 3,
-            "expiryTime": int(expiry_ms),
-            "enable": True,
-            "tgId": "",
-            "subId": "",
-        }
-        if user_limit and int(user_limit) > 0:
-            client["userLimitOverride"] = int(user_limit)
-        return self._call("/panel/api/inbounds/addClient", "post",
-                          json={"id": int(inbound_id),
-                                "settings": json.dumps({"clients": [client]})})
-
-    def add_client_multi(self, inbound_id, username, total_gb, expiry_ms, password="", member_ids=None, user_limit=0):
-        """ساخت یک اکانت با عضویت همزمان در چند inbound — قابلیت multi-inbound در vpn-ui.
-        پنل با فیلد تکرارشونده «inboundIds» کاربر را یک‌جا عضو همه inboundها می‌کند
-        (همان تیک‌زدن چک‌باکس‌های Inbounds در مودال پنل) تا کاربر واقعاً روی هر سه
-        پروتکل L2TP/PPTP/IKEv2 ثبت شود، نه فقط روی اولی.
-        user_limit = تعداد دستگاه همزمان (userLimitOverride)."""
-        client = {
-            "id": username,
-            "email": username,
-            "password": password,
-            "limitIp": 0,
-            "totalGB": int(total_gb) * 1024 ** 3,
-            "expiryTime": int(expiry_ms),
-            "enable": True,
-            "tgId": "",
-            "subId": "",
-        }
-        if user_limit and int(user_limit) > 0:
-            client["userLimitOverride"] = int(user_limit)
-        # API پنل فرم‌انکد می‌خواهد (مستندات api-reference): فیلد inboundIds تکراری
-        data = {"id": str(int(inbound_id)),
-                "settings": json.dumps({"clients": [client]})}
-        others = [str(int(x)) for x in (member_ids or []) if int(x) != int(inbound_id)]
-        if others:
-            data["inboundIds"] = [str(int(inbound_id))] + others
-        return self._call("/panel/api/inbounds/addClient", "post", data=data)
-
-    def email_exists(self, inbound_ids, username):
-        """چک کند یوزرنیم (با یا بدون پسوند پروتکل) روی این inboundها وجود دارد یا نه."""
-        for iid in inbound_ids:
-            try:
-                obj = self._call(f"/panel/api/inbounds/get/{int(iid)}", "get")
-            except PanelError:
-                continue
-            try:
-                settings = json.loads((obj or {}).get("settings", "{}"))
-            except (ValueError, TypeError):
-                continue
-            for c in settings.get("clients", []):
-                em = c.get("email", "")
-                if em == username or em.startswith(username + "-"):
-                    return True
-        return False
-
-    def del_client(self, inbound_id, username):
-        try:
-            return self._call(f"/panel/api/inbounds/{int(inbound_id)}/delClient/{username}", "post")
-        except PanelError:
-            return None  # کاربر ممکن است از قبل حذف شده باشد
-
-    def client_traffics(self, username):
-        """آمار مصرف یک کاربر: up / down / total / expiryTime."""
-        try:
-            obj = self._call(f"/panel/api/inbounds/getClientTraffics/{username}", "get")
-        except PanelError:
-            return None
-        if not obj:
-            return None
-        return {
-            "up": obj.get("up", 0),
-            "down": obj.get("down", 0),
-            "total": obj.get("total", 0),
-            "expiryTime": obj.get("expiryTime", 0),
-            "enable": obj.get("enable", False),
-        }
-
-    def ping(self):
-        """تست اتصال — برمی‌گرداند: تأخیر به میلی‌ثانیه."""
-        t0 = time.time()
-        self.login()
-        return int((time.time() - t0) * 1000)
-
-
-class PasarGuardAPI:
-    """کلاینت API پنل PasarGuard (بر پایه‌ی Marzban - VLESS/VMess/Trojan/Shadowsocks/WireGuard/Hysteria2).
-    این پنل L2TP/PPTP/IKEv2/OpenVPN را پشتیبانی نمی‌کند - یک خانواده‌ی کاملاً جدا از پروتکل‌های
-    مبتنی بر Xray است، برای همین جدا از VpnUI و با معماری خودش (لینک subscription) وصل می‌شود."""
-
-    def __init__(self, url, username, password, timeout=15):
-        self.base = url.rstrip("/")
-        self.username = username
-        self.password = password
-        self.timeout = timeout
-        self.s = requests.Session()
-        self.s.verify = False
-        self.s.headers.update({"Accept": "application/json"})
-
-    def _u(self, path):
-        return self.base + path
-
-    def login(self):
-        try:
-            r = self.s.post(self._u("/api/admin/token"),
-                            data={"username": self.username, "password": self.password},
-                            timeout=self.timeout)
-        except requests.RequestException as e:
-            raise PanelError(f"خطای اتصال: {e}")
-        if r.status_code != 200:
-            raise PanelError("ورود به پنل ناموفق بود (آدرس/یوزرنیم/پسورد را چک کنید)")
-        try:
-            token = r.json().get("access_token")
-        except ValueError:
-            token = None
-        if not token:
-            raise PanelError("ورود به پنل ناموفق بود (توکن دریافت نشد)")
-        self.s.headers.update({"Authorization": f"Bearer {token}"})
-        return True
-
-    def _call(self, path, method="get", **kwargs):
-        try:
-            if method == "get":
-                r = self.s.get(self._u(path), timeout=self.timeout, **kwargs)
-            elif method == "delete":
-                r = self.s.delete(self._u(path), timeout=self.timeout, **kwargs)
-            else:
-                r = self.s.post(self._u(path), timeout=self.timeout, **kwargs)
-        except requests.RequestException as e:
-            raise PanelError(f"خطای اتصال: {e}")
-        if r.status_code >= 400:
-            try:
-                msg = r.json().get("detail")
-            except ValueError:
-                msg = None
-            raise PanelError(str(msg) if msg else f"عملیات ناموفق (HTTP {r.status_code})")
-        if not r.content:
-            return None
-        try:
-            return r.json()
-        except ValueError:
-            return None
-
-    def list_groups(self):
-        """دریافت لیست گروه‌های تعریف‌شده در پنل - معادل inbound در vpn-ui."""
-        obj = self._call("/api/groups") or {}
-        groups = obj.get("groups", []) if isinstance(obj, dict) else (obj or [])
-        result = []
-        for g in groups:
-            result.append({
-                "inbound_id": g.get("id"),
-                "remark": g.get("name", ""),
-                "port": 0,
-                "protocol": "xray_group",
-                "enabled": not g.get("is_disabled", False),
-            })
-        return result
-
-    def add_user(self, group_ids, username, total_gb, expire_ts):
-        """ساخت کاربر با پروتکل‌های پیش‌فرض گروه (VLESS/VMess/Trojan/...) - لینک subscription برمی‌گرداند."""
-        data = {
-            "username": username,
-            "expire": int(expire_ts),
-            "data_limit": int(total_gb) * 1024 ** 3,
-            "group_ids": [int(g) for g in group_ids],
-            "proxy_settings": {},
-            "status": "active",
-        }
-        return self._call("/api/user", "post", json=data)
-
-    def del_user(self, username):
-        try:
-            return self._call(f"/api/user/{username}", "delete")
-        except PanelError:
-            return None
-
-    def get_user(self, username):
-        try:
-            return self._call(f"/api/user/{username}")
-        except PanelError:
-            return None
-
-    def ping(self):
-        t0 = time.time()
-        self.login()
-        return int((time.time() - t0) * 1000)
-
-
 class TifusiPanelAPI:
-    """کلاینت API پنل Tifusi Panel (IKEv2/L2TP) - هر کاربر یک لینک اشتراک و یک «شناسه‌ی اپ» می‌گیرد
-    که مستقیم در اپ Tifusi VPN وارد می‌شود. گروه‌های پنل تعیین می‌کنند کاربر به کدام سرورها دسترسی
-    دارد؛ سروری که در هیچ گروهی نیست برای همه‌ی کاربران است."""
-
-    APP_DOWNLOAD_URL = "https://github.com/javadtifusi-eng/Tifusi-VPN/releases/latest/download/tifusi-vpn.apk"
+    """کلاینت API پنل Tifusi Panel (هسته‌های Xray / IKEv2 / L2TP) - هر کاربر یک لینک اشتراک و یک «کد اپ»
+    می‌گیرد که مستقیم در اپ Tifusi VPN وارد می‌شود. گروه‌های پنل تعیین می‌کنند کاربر به کدام سرورها دسترسی
+    دارد؛ سروری که در هیچ گروهی نیست برای همه‌ی کاربران است. رمز کاربر را خود پنل مدیریت می‌کند."""
 
     def __init__(self, url, username, password, timeout=15):
         self.base = url.rstrip("/")
@@ -457,15 +170,15 @@ class TifusiPanelAPI:
             return None
 
     def list_groups(self):
-        """گروه‌های پنل - معادل inbound در vpn-ui. پنلی که گروه ندارد همه‌ی سرورهایش عمومی است،
-        برای همین یک ردیف «سرورهای عمومی» (بدون گروه) برمی‌گردد تا بشود پنل را اضافه کرد."""
+        """گروه‌های پنل برای نگاشت سرویس ← گروه. پنلی که گروه ندارد همه‌ی سرورهایش عمومی است،
+        برای همین یک ردیف «سرورهای عمومی» (بدون گروه، شناسه ۰) برمی‌گردد تا بشود پنل را اضافه کرد."""
         obj = self._call("/api/groups", params={"limit": 200}) or {}
         groups = obj.get("groups", []) if isinstance(obj, dict) else (obj or [])
         result = [{"inbound_id": g.get("id"), "remark": g.get("name", ""), "port": 0,
-                   "protocol": "tifusi_group", "enabled": True} for g in groups]
+                   "protocol": "group", "enabled": True} for g in groups]
         if not result:
             result.append({"inbound_id": 0, "remark": "سرورهای عمومی (بدون گروه)", "port": 0,
-                           "protocol": "tifusi_group", "enabled": True})
+                           "protocol": "group", "enabled": True})
         return result
 
     def find_user(self, username):
@@ -531,10 +244,6 @@ class TifusiPanelAPI:
         return int((time.time() - t0) * 1000)
 
 
-def panel_api_class(panel_type):
-    return {"pasarguard": PasarGuardAPI, "tifusi": TifusiPanelAPI}.get(panel_type, VpnUI)
-
-
 # ══════════════════════ دیتابیس SQLite (database) ══════════════════════
 
 class DB:
@@ -565,15 +274,9 @@ class DB:
                 username TEXT,
                 password TEXT,
                 location TEXT DEFAULT '',
-                psk TEXT DEFAULT '',
                 max_users INTEGER DEFAULT 200,
                 status TEXT DEFAULT 'active',
-                ovpn_server TEXT DEFAULT '',
-                ovpn_port_udp INTEGER DEFAULT 0,
-                ovpn_port_tcp INTEGER DEFAULT 0,
-                ovpn_ca TEXT DEFAULT '',
-                ovpn_tls_crypt TEXT DEFAULT '',
-                ovpn_raw TEXT DEFAULT '',
+                type TEXT DEFAULT 'tifusi',
                 created_at INTEGER
             );
             CREATE TABLE IF NOT EXISTS panel_inbounds (
@@ -582,7 +285,8 @@ class DB:
                 inbound_id INTEGER,
                 protocol TEXT,
                 port INTEGER,
-                enabled INTEGER DEFAULT 1
+                enabled INTEGER DEFAULT 1,
+                remark TEXT DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS plans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -653,13 +357,18 @@ class DB:
             self.x("ALTER TABLE users ADD COLUMN is_blocked INTEGER DEFAULT 0")
         except Exception:
             pass
-        # مهاجرت: نوع پنل - 'vpnui' (پیش‌فرض، L2TP/PPTP/IKEv2/OpenVPN)، 'pasarguard' یا 'tifusi' (IKEv2/L2TP + اپ)
-        # (VLESS/VMess/Trojan/Shadowsocks/WireGuard/Hysteria2 - معماری کاملاً جدا)
+        # مهاجرت: نوع پنل. فقط 'tifusi' استفاده می‌شود؛ پنل‌های دیتابیس‌های خیلی قدیمی که این ستون را
+        # نداشتند 'legacy' می‌شوند و مثل هر نوع دیگری غیر از tifusi فقط به‌عنوان «قدیمی» نمایش داده می‌شوند.
         try:
-            self.x("ALTER TABLE panels ADD COLUMN type TEXT DEFAULT 'vpnui'")
+            self.x("ALTER TABLE panels ADD COLUMN type TEXT DEFAULT 'legacy'")
         except Exception:
             pass
-        # مهاجرت: لینک subscription برای سفارش‌های PasarGuard
+        # مهاجرت: نام گروه پنل در نگاشت سرویس ← گروه (جدول panel_inbounds)
+        try:
+            self.x("ALTER TABLE panel_inbounds ADD COLUMN remark TEXT DEFAULT ''")
+        except Exception:
+            pass
+        # مهاجرت: لینک اشتراک سفارش
         try:
             self.x("ALTER TABLE orders ADD COLUMN sub_url TEXT DEFAULT ''")
         except Exception:
@@ -667,16 +376,6 @@ class DB:
         # مهاجرت: شناسه‌ی اپ Tifusi VPN برای سفارش‌های Tifusi Panel
         try:
             self.x("ALTER TABLE orders ADD COLUMN app_code TEXT DEFAULT ''")
-        except Exception:
-            pass
-        # مهاجرت: ستون PSK سرور (کلید L2TP)
-        try:
-            self.x("ALTER TABLE panels ADD COLUMN psk TEXT DEFAULT ''")
-        except Exception:
-            pass
-        # مهاجرت: متن خام فایل ovpn آپلودشده
-        try:
-            self.x("ALTER TABLE panels ADD COLUMN ovpn_raw TEXT DEFAULT ''")
         except Exception:
             pass
 
@@ -753,14 +452,11 @@ class DB:
 
     # ---------- پنل‌ها ----------
     def add_panel(self, d):
-        return self.x("""INSERT INTO panels (name,url,username,password,location,psk,max_users,status,
-            ovpn_server,ovpn_port_udp,ovpn_port_tcp,ovpn_ca,ovpn_tls_crypt,ovpn_raw,type,created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        return self.x("""INSERT INTO panels (name,url,username,password,location,max_users,status,type,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
             (d.get("name", ""), d.get("url", ""), d.get("username", ""), d.get("password", ""),
-             d.get("location", ""), d.get("psk", ""), int(d.get("max_users", 200)), d.get("status", "active"),
-             d.get("ovpn_server", ""), int(d.get("ovpn_port_udp", 0)), int(d.get("ovpn_port_tcp", 0)),
-             d.get("ovpn_ca", ""), d.get("ovpn_tls_crypt", ""), d.get("ovpn_raw", ""),
-             d.get("type", "vpnui"), int(time.time())))
+             d.get("location", ""), int(d.get("max_users", 200)), d.get("status", "active"),
+             d.get("type", "tifusi"), int(time.time())))
 
     def get_panels(self, active_only=False):
         if active_only:
@@ -780,18 +476,20 @@ class DB:
         self.x("DELETE FROM panel_inbounds WHERE panel_id=?", (pid,))
         self.x("DELETE FROM panels WHERE id=?", (pid,))
 
-    def set_inbounds(self, panel_id, inbounds):
+    def set_service_map(self, panel_id, mapping):
+        """نگاشت سرویس ← گروه پنل در جدول panel_inbounds: protocol = کلید سرویس، inbound_id = شناسه‌ی گروه
+        (۰ = سرورهای عمومی)، remark = نام گروه. mapping: {service: {"id": ..., "name": ...}}"""
         self.x("DELETE FROM panel_inbounds WHERE panel_id=?", (panel_id,))
-        for ib in inbounds:
-            self.x("INSERT INTO panel_inbounds (panel_id,inbound_id,protocol,port,enabled) VALUES (?,?,?,?,?)",
-                   (panel_id, int(ib["inbound_id"]), ib.get("protocol", "other"),
-                    int(ib.get("port", 0)), 1 if ib.get("enabled") else 0))
+        for key in SERVICES:
+            g = mapping.get(key)
+            if g:
+                self.x("INSERT INTO panel_inbounds (panel_id,inbound_id,protocol,port,enabled,remark) VALUES (?,?,?,0,1,?)",
+                       (panel_id, int(g.get("id") or 0), key, g.get("name", "")))
 
-    def get_inbounds(self, panel_id, enabled_only=False):
-        sql = "SELECT * FROM panel_inbounds WHERE panel_id=?"
-        if enabled_only:
-            sql += " AND enabled=1"
-        return self.q(sql, (panel_id,))
+    def get_service_map(self, panel_id):
+        """{کلید سرویس: ردیف} فقط برای سرویس‌های فعلی؛ ردیف‌های قدیمی (inbound یا گروه نسخه‌های قبل) نادیده گرفته می‌شوند."""
+        rows = self.q("SELECT * FROM panel_inbounds WHERE panel_id=? AND enabled=1 ORDER BY id", (panel_id,))
+        return {r["protocol"]: r for r in rows if r["protocol"] in SERVICES}
 
     # ---------- پلن‌ها ----------
     def add_plan(self, volume_gb, days, price, title="", user_limit=0):
@@ -818,13 +516,13 @@ class DB:
 
     # ---------- سفارش‌ها ----------
     def create_order(self, d):
-        return self.x("""INSERT INTO orders (user_id,panel_id,plan_id,protocol,username,password,psk,
-            inbound_id,extra_inbound_id,third_inbound_id,price,volume_gb,days,status,created_at,expire_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (d["user_id"], d["panel_id"], d.get("plan_id", 0), d["protocol"], d["username"], d["password"],
-             d.get("psk", ""), d.get("inbound_id", 0), d.get("extra_inbound_id", 0), d.get("third_inbound_id", 0),
-             d.get("price", 0), d.get("volume_gb", 0), d.get("days", 0), "active",
-             int(time.time()), d.get("expire_at", 0)))
+        # ستون‌های password/psk/extra_inbound_id/third_inbound_id فقط برای نمایش سفارش‌های قدیمی نگه داشته شده‌اند
+        return self.x("""INSERT INTO orders (user_id,panel_id,plan_id,protocol,username,password,
+            inbound_id,price,volume_gb,days,status,created_at,expire_at,sub_url,app_code)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (d["user_id"], d["panel_id"], d.get("plan_id", 0), d["protocol"], d["username"], d.get("password", ""),
+             d.get("inbound_id", 0), d.get("price", 0), d.get("volume_gb", 0), d.get("days", 0), "active",
+             int(time.time()), d.get("expire_at", 0), d.get("sub_url", ""), d.get("app_code", "")))
 
     def get_order(self, oid):
         return self.one("SELECT * FROM orders WHERE id=?", (oid,))
@@ -901,29 +599,47 @@ log = logging.getLogger("vpn_bot")
 
 db = DB()
 
-PROTO_NAMES = {
-    "unified": "🛜 L2TP/PPTP/IKEv2",
-    "openvpn": "🏧 OpenVPN",
-    "l2tp": "L2TP", "pptp": "PPTP", "ikev2": "IKEv2",
-    "openvpn_udp": "OpenVPN UDP", "openvpn_tcp": "OpenVPN TCP", "other": "سایر",
-    "xray_group": "🌐 Xray group (PasarGuard)",
-    "xray": "🌐 VLESS/VMess/Trojan",
-    "tifusi_group": "📱 Tifusi group",
-    "tifusi": "📱 Tifusi VPN (IKEv2/L2TP)",
-}
+def service_name(key):
+    """نام نمایشی سرویس؛ کلیدهای نسخه‌های قبلی ربات با برچسب «سرویس قدیمی» نمایش داده می‌شوند."""
+    if key in SERVICES:
+        return SERVICES[key]
+    if key == "tifusi":
+        return "📱 Tifusi VPN"
+    return f"🗄 سرویس قدیمی ({key})"
 
 
-def proto_icon(protocol):
-    return {"unified": "🛜", "xray": "🌐", "tifusi": "📱"}.get(protocol, "🏧")
+def is_legacy_panel(panel):
+    """پنل‌هایی از دیتابیس نسخه‌ی قبلی که Tifusi Panel نیستند: نه در فروش، نه در چک سلامت — فقط نمایش."""
+    return (panel["type"] or "") != "tifusi"
 
 
-def tifusi_group_ids(panel):
-    """گروه‌های فعال پنل Tifusi؛ شناسه‌ی ۰ همان «سرورهای عمومی» است و به پنل فرستاده نمی‌شود."""
-    return [ib["inbound_id"] for ib in db.get_inbounds(panel["id"], enabled_only=True)
-            if ib["protocol"] == "tifusi_group" and ib["inbound_id"]]
-PROTO_CYCLE = ["l2tp", "pptp", "ikev2", "openvpn_udp", "openvpn_tcp", "other"]
-UNIFIED_NEED = ["l2tp", "pptp", "ikev2"]
-OVPN_NEED = ["openvpn_udp", "openvpn_tcp"]
+def order_is_legacy(o):
+    """سفارشی که با منطق Tifusi قابل مدیریت نیست: کلیدش سرویس فعلی نیست یا پنلش Tifusi Panel نیست.
+    نوع پنل هم چک می‌شود چون سفارش‌های پنل‌های قدیمی Xray هم کلید xray دارند."""
+    if o["protocol"] not in TIFUSI_ORDER_KEYS:
+        return True
+    panel = db.get_panel(o["panel_id"])
+    return bool(panel) and is_legacy_panel(panel)
+
+
+def order_name(o):
+    return f"🗄 سرویس قدیمی ({o['protocol']})" if order_is_legacy(o) else service_name(o["protocol"])
+
+
+LEGACY_ORDER_TEXT = ("⚠️ این سرویس مربوط به نسخه‌ی قبلی ربات است و دیگر از اینجا قابل تمدید یا حذف نیست.\n"
+                     "🔐 برای ادامه، لطفاً از «خرید اشتراک» یک سرویس جدید بخرید.")
+
+
+def app_code_text(order, panel):
+    """کد اپ به شکل CODE@دامنه‌ی پنل — با هر بیلد اپ کار می‌کند، حتی اگر پنل پیش‌فرض اپ پنل دیگری باشد."""
+    if not panel or not order["app_code"]:
+        return "-"
+    return f"{order['app_code']}@{urlparse(panel['url']).netloc}"
+
+
+def md(s):
+    """فرار از کاراکترهای Markdown قدیمی تلگرام برای متن آزاد (نام پنل، عنوان پلن و ...)."""
+    return re.sub(r"([_*`\[])", r"\\\1", str(s or ""))
 
 
 # ---------- ابزارها ----------
@@ -934,13 +650,6 @@ def now():
 def fmt(n):
     return f"{int(n):,}"
 
-
-def gen_password(n=8):
-    return "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(n))
-
-
-def gen_psk(n=12):
-    return "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(n))
 
 
 def get_admins():
@@ -963,12 +672,6 @@ def pbtn(text, data):
     """دکمه پهن — با فاصله نامرئی دو طرف متن تا ستون‌ها کل عرض صفحه را پر کنند."""
     return InlineKeyboardButton(f"⠀{text}⠀", callback_data=data)
 
-
-def panel_host(url):
-    try:
-        return urlparse(url).hostname or url
-    except Exception:
-        return url
 
 
 def remaining_text(expire_at):
@@ -1101,7 +804,7 @@ def main_menu_kb(uid):
 FAQ_DEFAULT = """💡 سوالات متداول ⁉️
 
 1️⃣ فیلترشکن شما از چه نوعیه؟
-✅ سرویس‌های ما L2TP / IKEv2 و OpenVPN هستند و روی ویندوز، اندروید و آیفون کار می‌کنند.
+✅ سرویس‌های ما روی Tifusi Panel هستند: Xray (VLESS/VMess/Trojan)، IKEv2 و L2TP — با اپ Tifusi VPN روی اندروید و ویندوز و با لینک اشتراک روی آیفون.
 
 2️⃣ اگر قبل از منقضی شدن اکانت تمدید کنم، روزهای باقی‌مانده می‌سوزد؟
 ✅ خیر، روزهای باقی‌مانده محاسبه و به تمدید اضافه می‌شود.
@@ -1187,11 +890,9 @@ async def show_wallet(query, uid):
 
 
 async def show_tutorial_menu(query):
-    kb = InlineKeyboardMarkup([
-        [pbtn("🛜 L2TP / PPTP / IKEv2", "tut:l2tp"), pbtn("🏧 OpenVPN", "tut:openvpn")],
-        [btn("🔙 بازگشت", "menu:back")],
-    ])
-    await safe_edit(query, f"📚 آموزش اتصال\n\nکدام پروتکل را می‌خواهید آموزش ببینید؟", reply_markup=kb)
+    rows = [[btn(t["title"], f"tut:{key}")] for key, t in TRAININGS.items()]
+    rows.append([btn("🔙 بازگشت", "menu:back")])
+    await safe_edit(query, "📚 آموزش اتصال\n\nکدام آموزش را می‌خواهید ببینید؟", reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def show_referral(query, context, uid):
@@ -1213,28 +914,18 @@ async def show_tariff(query):
 
 
 # ---------- ساخت سرویس ----------
-def pick_panel(protocol=None):
-    """Load Balancing: خلوت‌ترین پنل فعال با ظرفیت خالی که پروتکل خواسته‌شده را دارد."""
+def pick_panel(service, prefer_panel_id=None):
+    """Load Balancing: خلوت‌ترین پنل فعال Tifusi با ظرفیت خالی که برای این سرویس گروه انتخاب کرده.
+    اگر prefer_panel_id هنوز شرایط را دارد همان برمی‌گردد (یوزرنیم مشتری روی همان پنل چک شده بود)."""
     candidates = []
     for p in db.get_panels(active_only=True):
+        if is_legacy_panel(p) or service not in db.get_service_map(p["id"]):
+            continue
         cnt = db.count_panel_active_orders(p["id"])
         if cnt >= p["max_users"]:
             continue
-        if protocol:
-            protos = {i["protocol"] for i in db.get_inbounds(p["id"], enabled_only=True)}
-            if protocol == "xray":
-                if p["type"] != "pasarguard" or "xray_group" not in protos:
-                    continue
-            elif protocol == "tifusi":
-                if p["type"] != "tifusi" or "tifusi_group" not in protos:
-                    continue
-            elif p["type"] in ("pasarguard", "tifusi"):
-                continue
-            elif protocol == "unified":
-                if not all(n in protos for n in UNIFIED_NEED):
-                    continue
-            elif not any(pp in ("openvpn_udp", "openvpn_tcp") for pp in protos):
-                continue
+        if prefer_panel_id and p["id"] == prefer_panel_id:
+            return p
         candidates.append((cnt, p))
     if not candidates:
         return None
@@ -1242,362 +933,124 @@ def pick_panel(protocol=None):
     return candidates[0][1]
 
 
-def build_ovpn(panel, proto="udp"):
-    port = panel["ovpn_port_udp"] if proto == "udp" else panel["ovpn_port_tcp"]
-    if not port:
-        port = panel["ovpn_port_udp"] or panel["ovpn_port_tcp"]
-    # اگر متن خام فایل ovpn خود پنل ذخیره شده، همان را با پروتکل/پورت دلخواه می‌دهیم
-    # (فایل اصلی پنل تضمین‌شده سازگار است و خطای Missing external certificate نمی‌دهد)
-    try:
-        raw = (panel["ovpn_raw"] or "").strip()
-    except (IndexError, KeyError):
-        raw = ""
-    if raw:
-        out = re.sub(r"(?m)^\s*proto\s+\S+.*$", f"proto {proto}", raw)
-        out = re.sub(r"(?m)^\s*remote\s+\S+\s+\d+.*$", f"remote {panel['ovpn_server']} {port}", out)
-        return out if out.endswith("\n") else out + "\n"
-    tls = panel["ovpn_tls_crypt"]
-    tls_block = f"<tls-crypt>\n{tls}\n</tls-crypt>\nkey-direction 1\n" if tls else ""
-    return f"""client
-dev tun
-proto {proto}
-remote {panel['ovpn_server']} {port}
-resolv-retry infinite
-nobind
-persist-key
-persist-tun
-auth-user-pass
-remote-cert-tls server
-cipher AES-256-CBC
-verb 3
-<ca>
-{panel['ovpn_ca']}
-</ca>
-{tls_block}"""
+def available_services():
+    """سرویس‌هایی (به ترتیب SERVICES) که حداقل یک پنل فعال با ظرفیت خالی برایشان گروه دارد."""
+    return [s for s in SERVICES if pick_panel(s)]
 
 
-def order_inbounds(o):
-    """جفت‌های (پروتکل, inbound_id) یک سفارش."""
-    if o["protocol"] == "unified":
-        pairs = [("l2tp", o["inbound_id"]), ("pptp", o["extra_inbound_id"]), ("ikev2", o["third_inbound_id"])]
-    else:
-        pairs = [("openvpn_udp", o["inbound_id"]), ("openvpn_tcp", o["extra_inbound_id"])]
-    return [(p, i) for p, i in pairs if i]
+def panel_client(panel):
+    return TifusiPanelAPI(panel["url"], panel["username"], panel["password"])
 
 
-def create_xray_service_on_panel(user_id, plan, username):
-    """ساخت اکانت روی پنل PasarGuard (VLESS/VMess/Trojan/...) - معماری کاملاً جدا از vpn-ui:
-    یک کاربر با یک لینک subscription ساخته می‌شود که همه‌ی پروتکل‌های فعال گروه را شامل می‌شود،
-    نه یک username/password مشترک روی چند inbound مثل جریان L2TP/PPTP/IKEv2."""
-    panel = pick_panel("xray")
+def create_service_on_panel(user_id, plan, service, username, panel_id=None):
+    """ساخت کاربر روی Tifusi Panel با گروهِ انتخاب‌شده برای این سرویس. رمز را ربات نمی‌سازد؛
+    پنل لینک اشتراک و کد اپ صادر می‌کند و همان‌ها به مشتری تحویل داده می‌شوند."""
+    if service not in SERVICES:
+        # مثلاً رسید در انتظارِ یک خرید از نسخه‌ی قبلی ربات — خطا باعث بازگشت خودکار وجه می‌شود
+        raise PanelError("این سرویس دیگر فروخته نمی‌شود؛ لطفاً یک سرویس جدید بخرید")
+    panel = pick_panel(service, panel_id)
     if not panel:
-        raise PanelError("ظرفیت همه پنل‌های PasarGuard تکمیل است یا پنلی فعال نیست")
-    groups = [ib["inbound_id"] for ib in db.get_inbounds(panel["id"], enabled_only=True)
-              if ib["protocol"] == "xray_group"]
-    if not groups:
-        raise PanelError(f"پنل «{panel['name']}» هیچ گروه فعالی ندارد")
+        raise PanelError(f"ظرفیت پنل‌های سرویس «{SERVICES[service]}» تکمیل است یا پنلی فعال نیست")
+    gid = int(db.get_service_map(panel["id"])[service]["inbound_id"] or 0)
     expire_at = now() + plan["days"] * 86400
-    client = PasarGuardAPI(panel["url"], panel["username"], panel["password"])
+    client = panel_client(panel)
     client.login()
-    obj = client.add_user(groups, username, plan["volume_gb"], expire_at)
-    sub_url = (obj or {}).get("subscription_url", "")
+    # گروه ۰ همان «سرورهای عمومی» است و به پنل فرستاده نمی‌شود (group_ids خالی)
+    res = client.add_user([gid] if gid else [], username, plan["volume_gb"], expire_at)
     oid = db.create_order({
         "user_id": user_id, "panel_id": panel["id"], "plan_id": plan["id"],
-        "protocol": "xray", "username": username, "password": "", "psk": "",
-        "inbound_id": groups[0], "extra_inbound_id": 0, "third_inbound_id": 0,
+        "protocol": service, "username": username, "password": "", "inbound_id": gid,
         "price": plan["price"], "volume_gb": plan["volume_gb"], "days": plan["days"],
-        "expire_at": expire_at,
-    })
-    db.update_order(oid, sub_url=sub_url)
-    return db.get_order(oid), panel
-
-
-def create_tifusi_service_on_panel(user_id, plan, username):
-    """ساخت اکانت روی Tifusi Panel: یک کاربر با لینک اشتراک و شناسه‌ی اپ Tifusi VPN؛
-    گروه‌های فعال پنل تعیین می‌کنند به کدام سرورها دسترسی دارد."""
-    panel = pick_panel("tifusi")
-    if not panel:
-        raise PanelError("ظرفیت همه پنل‌های Tifusi تکمیل است یا پنلی فعال نیست")
-    groups = tifusi_group_ids(panel)
-    expire_at = now() + plan["days"] * 86400
-    client = TifusiPanelAPI(panel["url"], panel["username"], panel["password"])
-    client.login()
-    res = client.add_user(groups, username, plan["volume_gb"], expire_at)
-    oid = db.create_order({
-        "user_id": user_id, "panel_id": panel["id"], "plan_id": plan["id"],
-        "protocol": "tifusi", "username": username, "password": "", "psk": "",
-        "inbound_id": groups[0] if groups else 0, "extra_inbound_id": 0, "third_inbound_id": 0,
-        "price": plan["price"], "volume_gb": plan["volume_gb"], "days": plan["days"],
-        "expire_at": expire_at,
-    })
-    db.update_order(oid, sub_url=res["subscription_url"], app_code=res["app_code"])
-    return db.get_order(oid), panel
-
-
-def create_service_on_panel(user_id, plan, protocol, username, password=None):
-    """ساخت خودکار سرویس روی خلوت‌ترین پنل + Rollback در صورت خطا."""
-    if protocol == "xray":
-        return create_xray_service_on_panel(user_id, plan, username)
-    if protocol == "tifusi":
-        return create_tifusi_service_on_panel(user_id, plan, username)
-    panel = pick_panel(protocol)
-    if not panel:
-        raise PanelError("ظرفیت همه پنل‌ها تکمیل است یا پنلی با این پروتکل فعال نیست")
-    need = UNIFIED_NEED if protocol == "unified" else OVPN_NEED
-    inbounds = db.get_inbounds(panel["id"], enabled_only=True)
-    mapping = {}
-    for proto in need:
-        ib = next((i for i in inbounds if i["protocol"] == proto), None)
-        if not ib and protocol == "openvpn":
-            # بعضی پنل‌ها UDP و TCP را روی یک inbound ارائه می‌دهند
-            ib = next((i for i in inbounds if i["protocol"] in ("openvpn_udp", "openvpn_tcp")), None)
-        if not ib:
-            raise PanelError(f"پنل «{panel['name']}» inbound از نوع {PROTO_NAMES.get(proto, proto)} ندارد")
-        mapping[proto] = ib["inbound_id"]
-    password = password or gen_password()
-    try:
-        psk = (panel["psk"] or "").strip()
-    except (IndexError, KeyError):
-        psk = ""
-    if not psk:
-        # اگر ادمین برای پنل PSK وارد نکرده باشد، از PSK پیش‌فرض بالای فایل استفاده می‌شود
-        psk = DEFAULT_PSK
-    try:
-        user_limit = int(plan["user_limit"] or 0)
-    except (IndexError, KeyError, TypeError, ValueError):
-        user_limit = 0
-    expire_at = now() + plan["days"] * 86400
-    client = VpnUI(panel["url"], panel["username"], panel["password"])
-    client.login()
-    created = []
-    done_iids = set()
-    first_done = False
-    # لیست یکتای inboundها (ترتیب حفظ شود)
-    uniq_iids = []
-    for proto in need:
-        iid = mapping[proto]
-        if iid not in uniq_iids:
-            uniq_iids.append(iid)
-    multi_done = False
-    try:
-        if len(uniq_iids) > 1:
-            # روش درست در vpn-ui: یک اکانت با عضویت همزمان در همه inboundها
-            # (همان چک‌باکس‌های Inbounds در پنل) — تا روی هر سه پروتکل واقعاً ثبت شود
-            try:
-                client.add_client_multi(uniq_iids[0], username, plan["volume_gb"],
-                                        expire_at * 1000, password, member_ids=uniq_iids,
-                                        user_limit=user_limit)
-                created.append((uniq_iids[0], need[0]))
-                multi_done = True
-            except PanelError:
-                pass  # پنل این قابلیت را ندارد — با روش قدیمی تک‌تک ادامه می‌دهیم
-        if not multi_done:
-            for proto in need:
-                iid = mapping[proto]
-                if iid in done_iids:
-                    continue  # یک inbound برای UDP و TCP — فقط یک‌بار کلاینت بساز
-                try:
-                    client.add_client(iid, username, plan["volume_gb"], expire_at * 1000, password,
-                                      user_limit=user_limit)
-                    created.append((iid, proto))
-                except PanelError as e:
-                    # پنل vpn-ui برای L2TP/PPTP/IKEv2 یک دیتابیس کاربر مشترک دارد و email باید بین
-                    # همه inboundها یکتا باشد — یعنی همان یک کاربر روی هر سه پروتکل کار می‌کند.
-                    # پس خطای تکراری بودن روی inboundهای بعدی طبیعی است و نادیده گرفته می‌شود.
-                    if first_done and "uplicate" in str(e):
-                        pass
-                    else:
-                        raise
-                done_iids.add(iid)
-                first_done = True
-    except Exception:
-        for iid, proto in created:  # Rollback
-            client.del_client(iid, username)
-        raise
-    ids = [mapping[p] for p in need] + [0, 0, 0]
-    oid = db.create_order({
-        "user_id": user_id, "panel_id": panel["id"], "plan_id": plan["id"],
-        "protocol": protocol, "username": username, "password": password, "psk": psk,
-        "inbound_id": ids[0], "extra_inbound_id": ids[1], "third_inbound_id": ids[2],
-        "price": plan["price"], "volume_gb": plan["volume_gb"], "days": plan["days"],
-        "expire_at": expire_at,
+        "expire_at": expire_at, "sub_url": res["subscription_url"], "app_code": res["app_code"],
     })
     return db.get_order(oid), panel
+
+
+def qr_png(data):
+    """تصویر QR لینک اشتراک در حافظه (PNG). اگر کتابخانه‌ی qrcode نبود یا خطا داد None برمی‌گردد
+    تا تحویل متنی سرویس هیچ‌وقت به‌خاطر QR متوقف نشود."""
+    if not data:
+        return None
+    try:
+        import qrcode
+        buf = io.BytesIO()
+        qrcode.make(data).save(buf)
+        buf.seek(0)
+        buf.name = "qr.png"
+        return buf
+    except Exception as e:
+        log.warning("QR generation failed: %s", e)
+        return None
+
+
+async def send_order_qr(context, chat_id, order, panel):
+    """ارسال QR لینک اشتراک با کپشن نام سرویس، یوزرنیم و کد اپ؛ در صورت خطا فقط False."""
+    png = qr_png(order["sub_url"])
+    if not png:
+        return False
+    caption = (f"{service_name(order['protocol'])}\n"
+               f"👤 یوزرنیم: {order['username']}\n"
+               f"🔢 کد اپ: {app_code_text(order, panel)}")
+    try:
+        await context.bot.send_photo(chat_id, png, caption=caption)
+        return True
+    except Exception as e:
+        log.warning("send QR failed for %s: %s", chat_id, e)
+        return False
+
+
+def app_guide_text(service):
+    """لینک اپ‌ها و راهنمای کوتاه اتصال — برای همه‌ی سرویس‌ها یکسان، به‌جز نکته‌ی v2rayNG برای Xray."""
+    text = (f"📲 اپ Tifusi VPN:\n"
+            f"🤖 اندروید: {APP_ANDROID_URL}\n"
+            f"🪟 ویندوز: {APP_WINDOWS_URL}\n\n"
+            f"📌 در اپ Tifusi VPN (اندروید/ویندوز) کد اپ را در تب «سرورها» وارد کنید.\n"
+            f"🍎 آیفون: لینک اشتراک را در Safari باز کنید.")
+    if service == "xray":
+        text += "\n🌐 لینک اشتراک Xray در v2rayNG و Streisand هم کار می‌کند."
+    return text
 
 
 async def deliver_service(context, chat_id, order, panel):
-    """ارسال اطلاعات سرویس به کاربر."""
-    server = panel["ovpn_server"] or panel_host(panel["url"])
+    """ارسال اطلاعات سرویس به کاربر: متن (کد اپ + لینک اشتراک + لینک اپ‌ها) و بعد تصویر QR لینک اشتراک."""
     dt = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d %H:%M")
-    if order["protocol"] == "unified":
-        text = (
-            f"✅ سرویس شما ساخته شد!\n\n"
-            f"🛜 L2TP / PPTP / IKEv2 — #{order['id']}\n"
-            f"🖥 پنل: {panel['name']} {panel['location']}\n\n"
-            f"🌐 آدرس سرور: `{server}`\n"
-            f"👤 یوزرنیم: `{order['username']}`\n"
-            f"🔑 پسورد: `{order['password']}`\n"
-            f"🛡 PSK (کلید L2TP): `{order['psk']}`\n\n"
-            f"📦 حجم: {vol_text(order['volume_gb'])}\n"
-            f"⏳ اعتبار: {order['days']} روز — تا {dt}\n\n"
-            f"📚 آموزش اتصال را از منوی «📚 آموزش» ببینید.")
-        await context.bot.send_message(chat_id, text, parse_mode="Markdown")
-    elif order["protocol"] == "tifusi":
-        # CODE@دامنه با هر بیلد اپ کار می‌کند، حتی اگر پنل پیش‌فرض اپ پنل دیگری باشد
-        code = f"{order['app_code']}@{urlparse(panel['url']).netloc}" if order["app_code"] else "-"
-        text = (
-            f"✅ سرویس شما ساخته شد!\n\n"
-            f"📱 Tifusi VPN — #{order['id']}\n"
-            f"🖥 پنل: {panel['name']} {panel['location']}\n\n"
-            f"👤 یوزرنیم: `{order['username']}`\n"
-            f"🔢 شناسه‌ی اپ: `{code}`\n"
-            f"🔗 لینک اشتراک:\n`{order['sub_url'] or '-'}`\n\n"
-            f"📦 حجم: {vol_text(order['volume_gb'])}\n"
-            f"⏳ اعتبار: {order['days']} روز — تا {dt}\n\n"
-            f"📲 دانلود اپ Tifusi VPN (اندروید):\n{TifusiPanelAPI.APP_DOWNLOAD_URL}\n\n"
-            f"در اپ، تب «سرورها»، شناسه یا لینک اشتراک را وارد کنید و «دریافت سرورها» را بزنید.\n"
-            f"🍎 آیفون: لینک اشتراک را در Safari باز کنید و پروفایل IKEv2 را نصب کنید.")
-        await context.bot.send_message(chat_id, text, parse_mode="Markdown")
-    elif order["protocol"] == "xray":
-        sub_url = order["sub_url"] or ""
-        text = (
-            f"✅ سرویس شما ساخته شد!\n\n"
-            f"🌐 VLESS / VMess / Trojan — #{order['id']}\n"
-            f"🖥 پنل: {panel['name']} {panel['location']}\n\n"
-            f"👤 یوزرنیم: `{order['username']}`\n"
-            f"🔗 لینک اشتراک (Subscription):\n`{sub_url}`\n\n"
-            f"📦 حجم: {vol_text(order['volume_gb'])}\n"
-            f"⏳ اعتبار: {order['days']} روز — تا {dt}\n\n"
-            f"📱 این لینک را در اپ V2rayNG / Streisand / v2Box و مشابه وارد کنید (Import from URL / Subscription).")
-        await context.bot.send_message(chat_id, text, parse_mode="Markdown")
-    else:
-        text = (
-            f"✅ سرویس شما ساخته شد!\n\n"
-            f"🏧 OpenVPN — #{order['id']}\n"
-            f"🖥 پنل: {panel['name']} {panel['location']}\n\n"
-            f"👤 یوزرنیم: `{order['username']}`\n"
-            f"🔑 پسورد: `{order['password']}`\n\n"
-            f"📦 حجم: {vol_text(order['volume_gb'])}\n"
-            f"⏳ اعتبار: {order['days']} روز — تا {dt}\n\n"
-            f"📎 فایل‌های کانفیگ UDP و TCP در پیام بعدی می‌آیند.")
-        await context.bot.send_message(chat_id, text, parse_mode="Markdown")
-        if panel["ovpn_ca"] and panel["ovpn_server"]:
-            for proto in ("udp", "tcp"):
-                cfg = build_ovpn(panel, proto).encode()
-                import io
-                await context.bot.send_document(chat_id, io.BytesIO(cfg),
-                                                filename=f"openvpn_{proto}_{order['username']}.ovpn",
-                                                caption=f"🏧 کانفیگ OpenVPN {proto.upper()} — {panel['name']}")
+    text = (
+        f"✅ سرویس شما ساخته شد!\n\n"
+        f"{service_name(order['protocol'])} — #{order['id']}\n"
+        f"🖥 پنل: {md(panel['name'])} {md(panel['location'])}\n"
+        f"📦 حجم: {vol_text(order['volume_gb'])}\n"
+        f"⏳ اعتبار: {order['days']} روز — تا {dt}\n\n"
+        f"👤 یوزرنیم: `{order['username']}`\n"
+        f"🔢 کد اپ: `{app_code_text(order, panel)}`\n"
+        f"🔗 لینک اشتراک:\n`{order['sub_url'] or '-'}`\n\n"
+        f"{app_guide_text(order['protocol'])}\n\n"
+        f"📚 آموزش کامل در منوی «📚 آموزش».")
+    await context.bot.send_message(chat_id, text, parse_mode="Markdown")
+    await send_order_qr(context, chat_id, order, panel)
 
 
-def do_renew_xray(order, plan):
-    """تمدید سرویس PasarGuard - حذف و ساخت مجدد با همان یوزرنیم (لینک subscription ثابت می‌ماند)."""
+# ---------- تمدید ----------
+def do_renew(order, plan):
+    """تمدید روی همان پنل Tifusi — همان کاربر به‌روز می‌شود تا لینک اشتراک و کد اپ عوض نشوند؛
+    اگر کاربر روی پنل حذف شده بود، با همان یوزرنیم و گروه سرویس دوباره ساخته می‌شود."""
+    if order_is_legacy(order):
+        raise PanelError("سرویس قدیمی قابل تمدید نیست؛ لطفاً سرویس جدید بخرید")
     panel = db.get_panel(order["panel_id"])
     if not panel:
         raise PanelError("پنل این سرویس حذف شده است")
-    client = PasarGuardAPI(panel["url"], panel["username"], panel["password"])
-    client.login()
-    client.del_user(order["username"])
-    base = max(now(), order["expire_at"])
-    expire_at = base + plan["days"] * 86400
-    groups = [ib["inbound_id"] for ib in db.get_inbounds(panel["id"], enabled_only=True)
-              if ib["protocol"] == "xray_group"]
-    if not groups:
-        groups = [order["inbound_id"]] if order["inbound_id"] else []
-    try:
-        obj = client.add_user(groups, order["username"], plan["volume_gb"], expire_at)
-    except Exception:
-        raise PanelError("خطا در ساخت مجدد سرویس روی پنل")
-    sub_url = (obj or {}).get("subscription_url", "")
-    db.update_order(order["id"], expire_at=expire_at, volume_gb=plan["volume_gb"], days=plan["days"],
-                    price=plan["price"], plan_id=plan.get("id", order["plan_id"]) or order["plan_id"],
-                    status="active", sub_url=sub_url)
-    return db.get_order(order["id"]), panel
-
-
-def do_renew_tifusi(order, plan):
-    """تمدید سرویس Tifusi Panel - همان کاربر به‌روز می‌شود تا لینک اشتراک و شناسه‌ی اپ ثابت بمانند؛
-    اگر کاربر روی پنل حذف شده باشد، دوباره ساخته می‌شود."""
-    panel = db.get_panel(order["panel_id"])
-    if not panel:
-        raise PanelError("پنل این سرویس حذف شده است")
-    client = TifusiPanelAPI(panel["url"], panel["username"], panel["password"])
+    client = panel_client(panel)
     client.login()
     base = max(now(), order["expire_at"])
     expire_at = base + plan["days"] * 86400
     res = client.renew_user(order["username"], plan["volume_gb"], expire_at)
     if res is None:
-        res = client.add_user(tifusi_group_ids(panel), order["username"], plan["volume_gb"], expire_at)
+        # گروه فعلی سرویس روی پنل؛ اگر ادمین آن را برداشته، همان گروهی که سفارش با آن ساخته شده بود
+        grp = db.get_service_map(panel["id"]).get(order["protocol"])
+        gid = int((grp["inbound_id"] if grp else order["inbound_id"]) or 0)
+        res = client.add_user([gid] if gid else [], order["username"], plan["volume_gb"], expire_at)
     db.update_order(order["id"], expire_at=expire_at, volume_gb=plan["volume_gb"], days=plan["days"],
                     price=plan["price"], plan_id=plan.get("id", order["plan_id"]) or order["plan_id"],
                     status="active", sub_url=res["subscription_url"], app_code=res["app_code"])
-    return db.get_order(order["id"]), panel
-
-
-# ---------- تمدید ----------
-def do_renew(order, plan):
-    """حذف و ساخت مجدد روی همان پنل — یوزرنیم ثابت، پسورد جدید."""
-    if order["protocol"] == "xray":
-        return do_renew_xray(order, plan)
-    if order["protocol"] == "tifusi":
-        return do_renew_tifusi(order, plan)
-    panel = db.get_panel(order["panel_id"])
-    if not panel:
-        raise PanelError("پنل این سرویس حذف شده است")
-    client = VpnUI(panel["url"], panel["username"], panel["password"])
-    client.login()
-    pairs = order_inbounds(order)
-    seen = set()
-    for proto, iid in pairs:
-        if iid in seen:
-            continue
-        seen.add(iid)
-        client.del_client(iid, order["username"])
-    base = max(now(), order["expire_at"])
-    expire_at = base + plan["days"] * 86400
-    password = gen_password()
-    try:
-        user_limit = int(plan["user_limit"] or 0)
-    except (IndexError, KeyError, TypeError, ValueError):
-        user_limit = 0
-    try:
-        uniq = []
-        for proto, iid in pairs:
-            if iid not in uniq:
-                uniq.append(iid)
-        renewed_multi = False
-        if len(uniq) > 1:
-            # روش درست در vpn-ui: اکانت تمدیدشده دوباره عضو همه inboundها می‌شود
-            try:
-                client.add_client_multi(uniq[0], order["username"], plan["volume_gb"],
-                                        expire_at * 1000, password, member_ids=uniq,
-                                        user_limit=user_limit)
-                renewed_multi = True
-            except PanelError:
-                renewed_multi = False  # پنل قدیمی — روش تک‌تک
-        if not renewed_multi:
-            first_done = False
-            for iid in uniq:
-                try:
-                    client.add_client(iid, order["username"], plan["volume_gb"], expire_at * 1000, password,
-                                      user_limit=user_limit)
-                except PanelError as e:
-                    if first_done and "uplicate" in str(e):
-                        pass  # دیتابیس مشترک کاربران در vpn-ui — یک کاربر برای هر سه پروتکل کافی است
-                    else:
-                        raise
-                first_done = True
-    except Exception:
-        raise PanelError("خطا در ساخت مجدد سرویس روی پنل")
-    try:
-        new_psk = (panel["psk"] or "").strip()
-    except (IndexError, KeyError):
-        new_psk = ""
-    new_psk = new_psk or DEFAULT_PSK
-    db.update_order(order["id"], password=password, expire_at=expire_at,
-                    volume_gb=plan["volume_gb"], days=plan["days"], price=plan["price"],
-                    plan_id=plan.get("id", order["plan_id"]) or order["plan_id"], status="active",
-                    psk=new_psk)
     return db.get_order(order["id"]), panel
 
 
@@ -1610,9 +1063,10 @@ async def show_services(query, uid):
     text = f"🛍 سرویس‌های شما:\n\n"
     rows = []
     for o in orders:
-        icon = proto_icon(o["protocol"])
+        name = order_name(o)
+        icon = name.split()[0]
         status = "" if o["status"] == "active" else " ⏳(درخواست حذف)"
-        text += f"{icon} {o['username']} ← {PROTO_NAMES.get(o['protocol'], o['protocol'])}\n"
+        text += f"{icon} {o['username']} ← {name}\n"
         rows.append([btn(f"{icon} {o['username']}{status}", f"svc:{o['id']}")])
     rows.append([btn("🔙 بازگشت", "menu:back")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
@@ -1625,18 +1079,32 @@ async def show_service_detail(query, uid, oid):
         return
     panel = db.get_panel(o["panel_id"])
     pname = panel["name"] if panel else "حذف‌شده"
-    icon = proto_icon(o["protocol"])
     dt = datetime.datetime.fromtimestamp(o["expire_at"]).strftime("%Y-%m-%d — %H:%M")
+
+    if order_is_legacy(o):
+        # سفارش نسخه‌ی قبلی ربات: فقط نمایش — تمدید و حذف از اینجا ممکن نیست
+        creds = f"👤 یوزرنیم: `{o['username']}`"
+        if o["password"]:
+            creds += f"\n🔑 پسورد: `{o['password']}`"
+        if o["sub_url"]:
+            creds += f"\n🔗 لینک اشتراک: `{o['sub_url']}`"
+        text = (f"{md(order_name(o))} — #{o['id']}\n🖥 پنل: {md(pname)}\n\n{creds}\n"
+                f"📦 حجم: {vol_text(o['volume_gb'])}\n"
+                f"⏳ {remaining_text(o['expire_at'])} | 🕓 {dt}\n\n{LEGACY_ORDER_TEXT}")
+        rows = [[btn("🔐 خرید اشتراک جدید", "menu:buy")],
+                [btn("🏠 بازگشت به لیست سرویس‌ها", "menu:services")]]
+        await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows), parse_mode="Markdown")
+        return
 
     # مصرف از همان پنلی که سرویس روی آن ساخته شده
     usage_line = "📊 وضعیت مصرف: در دسترس نیست (پنل پاسخ نمی‌دهد)"
     if not o["volume_gb"]:
         usage_line = "📦 حجم: نامحدود ♾ (بدون محدودیت مصرف)"
-    if panel and o["volume_gb"] and o["protocol"] == "tifusi":
+    elif panel:
         try:
-            tclient = TifusiPanelAPI(panel["url"], panel["username"], panel["password"])
-            await asyncio.to_thread(tclient.login)
-            used_bytes = await asyncio.to_thread(tclient.usage, o["username"])
+            client = panel_client(panel)
+            await asyncio.to_thread(client.login)
+            used_bytes = await asyncio.to_thread(client.usage, o["username"])
             if used_bytes is not None:
                 used = gb(used_bytes)
                 total = o["volume_gb"]
@@ -1644,40 +1112,19 @@ async def show_service_detail(query, uid, oid):
                 usage_line = f"📊 وضعیت مصرف:\n📦 {total} گیگ | 🔻 {used} گیگ | ✅ {left} گیگ باقی"
         except Exception:
             pass
-    elif panel and o["volume_gb"]:
-        try:
-            client = VpnUI(panel["url"], panel["username"], panel["password"])
-            await asyncio.to_thread(client.login)
-            tr = await asyncio.to_thread(client.client_traffics, o["username"])
-            if tr:
-                used = gb(tr["up"] + tr["down"])
-                total = o["volume_gb"]
-                left = max(0, round(total - used, 2))
-                label = "L2TP" if o["protocol"] == "unified" else "OpenVPN"
-                usage_line = (f"📊 وضعیت مصرف:\n— {label} — 📦 {total} گیگ | "
-                              f"🔻 {used} گیگ | ✅ {left} گیگ باقی")
-        except Exception:
-            pass
 
-    if o["protocol"] == "unified":
-        creds = (f"🌐 سرور: `{(panel['ovpn_server'] or panel_host(panel['url'])) if panel else '-'}`\n"
-                 f"👤 یوزرنیم: `{o['username']}`\n🔑 پسورد: `{o['password']}`\n🛡 PSK: `{o['psk']}`")
-    elif o["protocol"] == "tifusi":
-        code = f"{o['app_code']}@{urlparse(panel['url']).netloc}" if (panel and o["app_code"]) else "-"
-        creds = (f"👤 یوزرنیم: `{o['username']}`\n🔢 شناسه‌ی اپ: `{code}`\n"
-                 f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`\n📲 اپ: {TifusiPanelAPI.APP_DOWNLOAD_URL}")
-    elif o["protocol"] == "xray":
-        creds = f"👤 یوزرنیم: `{o['username']}`\n🔗 لینک اشتراک: `{o['sub_url'] or '-'}`"
-    else:
-        creds = f"👤 یوزرنیم: `{o['username']}`\n🔑 پسورد: `{o['password']}`"
-    text = (f"{icon} سرویس {PROTO_NAMES.get(o['protocol'], o['protocol'])} — #{o['id']}\n"
-            f"🖥 پنل: {pname}\n\n{creds}\n\n{usage_line}\n"
+    creds = (f"👤 یوزرنیم: `{o['username']}`\n"
+             f"🔢 کد اپ: `{app_code_text(o, panel)}`\n"
+             f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`\n"
+             f"📲 اندروید: {APP_ANDROID_URL}\n🪟 ویندوز: {APP_WINDOWS_URL}")
+    text = (f"{service_name(o['protocol'])} — #{o['id']}\n"
+            f"🖥 پنل: {md(pname)}\n\n{creds}\n\n{usage_line}\n"
             f"⏳ {remaining_text(o['expire_at'])} | 🕓 {dt}")
     rows = []
     if o["status"] == "active":
         rows.append([btn("♻️ تمدید سرویس", f"renew:{o['id']}")])
-        if o["protocol"] == "openvpn" and panel and panel["ovpn_ca"]:
-            rows.append([btn("🔰 دریافت کانفیگ", f"ovpn:{o['id']}")])
+        if o["sub_url"]:
+            rows.append([btn("📷 QR code", f"qr:{o['id']}")])
         rows.append([btn("🔄 بروزرسانی اطلاعات", f"svc:{o['id']}")])
         rows.append([btn("❌ بازگشت وجه / حذف سرویس", f"delreq:{o['id']}")])
     rows.append([btn("🏠 بازگشت به لیست سرویس‌ها", "menu:services")])
@@ -1726,9 +1173,19 @@ def card_charge_text(amount):
 
 # ---------- اکانت تست ----------
 async def send_test_account(msg, context, uid):
-    """هر کاربر فقط یک بار — حجم و مدت از تنظیمات عمومی قابل تغییر است."""
+    """هر کاربر فقط یک بار — حجم و مدت از تنظیمات عمومی قابل تغییر است.
+    به‌طور پیش‌فرض خاموش است (تنظیم test_enabled) چون از اکانت تست سوءاستفاده می‌شود؛
+    وقتی خاموش است هیچ کاربری روی پنل ساخته و هیچ چیزی ثبت نمی‌شود.
+    اکانت روی اولین سرویس در دسترس به ترتیب TEST_SERVICE_ORDER ساخته می‌شود."""
+    if db.setting("test_enabled", "0") != "1":
+        await msg.reply_text("🔑 اکانت تست در حال حاضر فعال نیست.\n🔐 برای استفاده از سرویس، از «خرید اشتراک» اقدام کنید.")
+        return
     if db.one("SELECT id FROM orders WHERE user_id=? AND price=0", (uid,)):
         await msg.reply_text("❌ اکانت تست فقط یک‌بار به هر کاربر داده می‌شود.\n🛍 سرویس‌های قبلی‌ات را از «سرویس‌های من» ببین.")
+        return
+    service = next((s for s in TEST_SERVICE_ORDER if pick_panel(s)), None)
+    if not service:
+        await msg.reply_text("❌ فعلاً سرویسی برای ساخت اکانت تست در دسترس نیست. کمی بعد دوباره امتحان کنید.")
         return
     vol = int(db.setting("test_volume_gb", "1") or 1)
     days = int(db.setting("test_days", "1") or 1)
@@ -1736,21 +1193,26 @@ async def send_test_account(msg, context, uid):
     username = f"t{uid}"
     await msg.reply_text("⏳ در حال ساخت اکانت تست...")
     try:
-        order, panel = await asyncio.to_thread(create_service_on_panel, uid, plan, "unified", username)
+        order, panel = await asyncio.to_thread(create_service_on_panel, uid, plan, service, username)
     except Exception as e:
         await msg.reply_text(f"❌ خطا در ساخت اکانت تست: {e}")
         return
     await deliver_service(context, uid, order, panel)
-    await notify_admin(context.bot, f"🔑 اکانت تست ساخته شد\n👤 کاربر: {uid}\n🖥 پنل: {panel['name']}")
+    await notify_admin(context.bot, f"🔑 اکانت تست ساخته شد\n👤 کاربر: {uid}\n"
+                                    f"🧩 سرویس: {SERVICES[service]}\n🖥 پنل: {panel['name']}")
 
 
 # ---------- منوی تمدید ----------
 async def show_renew_menu(msg, uid):
     orders = [o for o in db.get_user_orders(uid) if o["status"] == "active"]
-    if not orders:
-        await msg.reply_text("❌ سرویس فعالی برای تمدید ندارید.\nاول از «🔐 خرید اشتراک» سرویس بخر.")
+    renewable = [o for o in orders if not order_is_legacy(o)]
+    if not renewable:
+        text = "❌ سرویس فعالی برای تمدید ندارید.\nاول از «🔐 خرید اشتراک» سرویس بخر."
+        if orders:
+            text += "\n\nℹ️ سرویس‌های نسخه‌ی قبلی ربات قابل تمدید نیستند؛ لطفاً سرویس جدید بخرید."
+        await msg.reply_text(text)
         return
-    rows = [[btn(f"♻️ {o['username']} — {vol_text(o['volume_gb'])}", f"renew:{o['id']}")] for o in orders]
+    rows = [[btn(f"♻️ {o['username']} — {vol_text(o['volume_gb'])}", f"renew:{o['id']}")] for o in renewable]
     await msg.reply_text(f"♻️ تمدید سرویس\n\nکدام سرویس را تمدید می‌کنی؟",
                          reply_markup=InlineKeyboardMarkup(rows))
 
@@ -1787,7 +1249,7 @@ async def finalize_wallet_purchase(query, context, uid, data):
     db.add_balance(uid, -plan["price"])
     try:
         order, panel = await asyncio.to_thread(
-            create_service_on_panel, uid, plan, data["protocol"], data["username"], data.get("password"))
+            create_service_on_panel, uid, plan, data["protocol"], data["username"], data.get("panel_id"))
     except Exception as e:
         db.add_balance(uid, plan["price"])  # بازگشت وجه
         await context.bot.send_message(uid, f"❌ خطا در ساخت سرویس: {e}\n💰 مبلغ به کیف پول برگشت.")
@@ -1805,10 +1267,18 @@ async def finalize_wallet_purchase(query, context, uid, data):
 
 
 # ---------- تمدید ----------
+def legacy_order_kb(oid):
+    return InlineKeyboardMarkup([[btn("🔐 خرید اشتراک جدید", "menu:buy")],
+                                 [btn("🔙 بازگشت", f"svc:{oid}")]])
+
+
 async def renew_menu(query, uid, oid):
     o = db.get_order(oid)
     if not o or o["user_id"] != uid or o["status"] != "active":
         await safe_edit(query, "❌ سرویس یافت نشد.", reply_markup=back_kb())
+        return
+    if order_is_legacy(o):
+        await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
         return
     plans = db.get_plans(active_only=True)
     text = (f"♻️ تمدید / ارتقای سرویس «{o['username']}»\n"
@@ -1829,6 +1299,9 @@ async def renew_pay_menu(query, uid, oid, pid):
     if not o or not plan or o["user_id"] != uid:
         await safe_edit(query, "❌ سرویس یافت نشد.", reply_markup=back_kb())
         return
+    if order_is_legacy(o):
+        await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
+        return
     kb = InlineKeyboardMarkup([
         [btn("🏦 پرداخت از کیف پول", f"rnw:w:{oid}:{pid}")],
         [btn("💳 کارت به کارت", f"rnw:c:{oid}:{pid}")],
@@ -1839,7 +1312,7 @@ async def renew_pay_menu(query, uid, oid, pid):
         f"━━━━━━━━━━━━━━━\n"
         f"📦 پلن جدید: {plan_label(plan)}\n"
         f"💰 مبلغ: {fmt(plan['price'])} تومان\n\n"
-        f"⚠️ یوزرنیم ثابت می‌ماند و پسورد جدید صادر می‌شود.\nروش پرداخت را انتخاب کن:",
+        f"✅ یوزرنیم، کد اپ و لینک اشتراک ثابت می‌مانند.\nروش پرداخت را انتخاب کن:",
         reply_markup=kb)
 
 
@@ -1855,8 +1328,10 @@ async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
     await context.bot.send_message(uid,
         f"✅ سرویس {new_o['username']} تمدید شد!\n\n"
         f"📦 پلن جدید: {vol_text(new_o['volume_gb'])} — {new_o['days']} روز\n"
-        f"👤 یوزرنیم: `{new_o['username']}`\n🔑 پسورد جدید: `{new_o['password']}`\n"
-        f"🛡 PSK: `{new_o['psk']}`\n⏳ اعتبار جدید: تا {dt}",
+        f"👤 یوزرنیم: `{new_o['username']}`\n"
+        f"🔢 کد اپ: `{app_code_text(new_o, panel)}`\n"
+        f"🔗 لینک اشتراک: `{new_o['sub_url'] or '-'}`\n"
+        f"⏳ اعتبار جدید: تا {dt}",
         parse_mode="Markdown")
 
 
@@ -1865,6 +1340,9 @@ async def delreq_confirm(query, uid, oid):
     o = db.get_order(oid)
     if not o or o["user_id"] != uid:
         await safe_edit(query, "❌ سرویس یافت نشد.", reply_markup=back_kb())
+        return
+    if order_is_legacy(o):
+        await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
         return
     kb = InlineKeyboardMarkup([
         [btn("✅ بله، حذف شود", f"delreq:yes:{oid}")],
@@ -1910,7 +1388,9 @@ async def admin_stats(query):
     rc_ok = db.one("SELECT COUNT(*) c FROM receipts WHERE status='approved'")["c"]
     rc_no = db.one("SELECT COUNT(*) c FROM receipts WHERE status='rejected'")["c"]
     tk_closed = db.one("SELECT COUNT(*) c FROM tickets WHERE status='closed'")["c"]
-    panels = db.get_panels()
+    all_panels = db.get_panels()
+    panels = [p for p in all_panels if not is_legacy_panel(p)]
+    p_old = len(all_panels) - len(panels)
     p_on = len([p for p in panels if p["status"] == "active"])
     p_off = len([p for p in panels if p["status"] == "offline"])
     p_ina = len([p for p in panels if p["status"] == "inactive"])
@@ -1930,7 +1410,8 @@ async def admin_stats(query):
             f"💰 درآمد کل: {fmt(t['revenue'])} تومان\n"
             f"━━━━━━━━━━━━━━━\n"
             f"🖥 پنل‌ها\n"
-            f"🟢 فعال: {p_on} | 🔴 آفلاین: {p_off} | ⚪ غیرفعال: {p_ina} | مجموع: {len(panels)}\n"
+            f"🟢 فعال: {p_on} | 🔴 آفلاین: {p_off} | ⚪ غیرفعال: {p_ina} | مجموع: {len(panels)}"
+            f"{f' | 🗄 قدیمی: {p_old}' if p_old else ''}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"💵 رسیدها\n"
             f"⏳ در انتظار: {t['pending_receipts']} | ✅ تاییدشده: {rc_ok} | ❌ ردشده: {rc_no}\n"
@@ -2007,7 +1488,7 @@ async def rc_approve(query, context, rid):
             return
         try:
             order, panel = await asyncio.to_thread(
-                create_service_on_panel, r["user_id"], plan, meta["protocol"], meta["username"], meta.get("password"))
+                create_service_on_panel, r["user_id"], plan, meta["protocol"], meta["username"], meta.get("panel_id"))
         except Exception as e:
             db.add_balance(r["user_id"], r["amount"])  # بازگشت خودکار وجه
             await context.bot.send_message(r["user_id"],
@@ -2100,13 +1581,19 @@ SETTING_KEYS = [
 
 
 async def admin_settings(query):
+    # اکانت تست پیش‌فرض خاموش است؛ کلید روشن/خاموش کنار حجم و مدت تست نمایش داده می‌شود
+    test_label = f"🔑 اکانت تست: {'فعال' if db.setting('test_enabled', '0') == '1' else 'غیرفعال'}"
     text = f"⚙️ تنظیمات عمومی\n"
+    rows = []
     for key, label in SETTING_KEYS:
+        if key == "test_volume_gb":
+            text += test_label + "\n"
+            rows.append([btn(test_label, "tgl:test_enabled")])
         val = db.setting(key, "—")
         if key == "faq_text" and val != "—":
             val = "✅ تنظیم شده"
         text += f"{label}: {val}\n"
-    rows = [[btn(f"✏️ {label}", f"set:{key}")] for key, label in SETTING_KEYS]
+        rows.append([btn(f"✏️ {label}", f"set:{key}")])
     rows.append([btn("🔙 بازگشت", "admin:menu")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
@@ -2224,22 +1711,66 @@ async def admin_plan_detail(query, pid):
 
 
 # ---------- مدیریت پنل‌ها ----------
+def panel_status_icon(p):
+    if is_legacy_panel(p):
+        return "🗄 قدیمی (غیرفعال)"
+    return {"offline": "🔴 Offline", "inactive": "⚪ غیرفعال"}.get(p["status"], "🟢")
+
+
+def service_map_text(panel_id):
+    """نمایش نگاشت سرویس ← گروه یک پنل."""
+    smap = db.get_service_map(panel_id)
+    lines = []
+    for key, name in SERVICES.items():
+        g = smap.get(key)
+        if g:
+            lines.append(f"  ✅ {name} ← گروه «{g['remark'] or '-'}» (#{g['inbound_id']})")
+        else:
+            lines.append(f"  ❌ {name} ← روی این پنل فروخته نمی‌شود")
+    return "\n".join(lines)
+
+
+def groups_for_state(groups):
+    """گروه‌های list_groups به شکل فشرده برای ذخیره در state (شناسه ۰ = سرورهای عمومی)."""
+    return [{"id": int(g["inbound_id"] or 0), "name": g["remark"] or f"#{g['inbound_id']}"} for g in groups]
+
+
+def map_step_view(sd):
+    """یک مرحله از انتخاب گروه: برای سرویس شماره‌ی step یک گروه یا «روی این پنل فروخته نشود».
+    هم در جادوی افزودن پنل (ap_map) و هم در انتخاب مجدد برای پنل موجود (pm_map) استفاده می‌شود."""
+    keys = list(SERVICES)
+    step = sd.get("step", 0)
+    key = keys[step]
+    text = (f"🧩 انتخاب گروه سرویس‌ها ({step + 1}/{len(keys)})\n\n"
+            f"گروه پنل تعیین می‌کند کاربر به کدام سرورها دسترسی دارد؛ سروری که در هیچ گروهی نیست برای همه است.\n\n")
+    for k in keys[:step]:
+        g = sd["map"].get(k)
+        text += f"{'✅' if g else '❌'} {SERVICES[k]} ← {('«' + g['name'] + '»') if g else 'فروخته نمی‌شود'}\n"
+    text += f"\n👉 سرویس «{SERVICES[key]}» روی کدام گروه فروخته شود؟"
+    cur = sd.get("current", {}).get(key)
+    if sd.get("panel_id"):
+        text += f"\n(انتخاب فعلی: {('«' + cur + '»') if cur else 'فروخته نمی‌شود'})"
+    rows = [[btn(f"👥 {g['name']}", f"apm:{key}:{g['id']}")] for g in sd["groups"]]
+    rows.append([btn("🚫 روی این پنل فروخته نشود", f"apm:{key}:x")])
+    rows.append([btn("🔙 انصراف", f"pb:{sd['panel_id']}" if sd.get("panel_id") else "admin:panels")])
+    return text, InlineKeyboardMarkup(rows)
+
+
 async def admin_panels(query):
     panels = db.get_panels()
     rows = [[btn("➕ افزودن پنل", "pb:add")]]
-    text = f"🖥 مدیریت پنل‌های vpn-ui:\n\n"
+    text = f"🖥 مدیریت پنل‌های Tifusi Panel:\n\n"
     for p in panels:
-        if p["status"] == "offline":
-            icon = "🔴 Offline"
-        elif p["status"] == "inactive":
-            icon = "⚪ غیرفعال"
-        else:
-            icon = "🟢"
         cnt = db.count_panel_active_orders(p["id"])
-        text += f"{icon} #{p['id']} {p['name']} — {p['location']} — {cnt}/{p['max_users']} کاربر\n"
-        rows.append([btn(f"#{p['id']} {p['name']} ({cnt}/{p['max_users']})", f"pb:{p['id']}")])
+        text += f"{panel_status_icon(p)} #{p['id']} {p['name']} — {p['location']} — {cnt}/{p['max_users']} کاربر\n"
+        suffix = "قدیمی" if is_legacy_panel(p) else f"{cnt}/{p['max_users']}"
+        rows.append([btn(f"#{p['id']} {p['name']} ({suffix})", f"pb:{p['id']}")])
+    if not panels:
+        text += "پنلی ثبت نشده.\n"
+    if any(is_legacy_panel(p) for p in panels):
+        text += "\nℹ️ پنل‌های «قدیمی» از نسخه‌ی قبلی ربات هستند و در فروش، تمدید و چک سلامت استفاده نمی‌شوند."
     rows.append([btn("🔙 بازگشت", "admin:menu")])
-    await safe_edit(query, text or "پنلی ثبت نشده.", reply_markup=InlineKeyboardMarkup(rows))
+    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def admin_panel_detail(query, pid):
@@ -2247,24 +1778,30 @@ async def admin_panel_detail(query, pid):
     if not p:
         await safe_edit(query, "❌ پنل یافت نشد.")
         return
-    icons = {"active": "🟢 فعال", "inactive": "⚪ غیرفعال", "offline": "🔴 Offline"}
     cnt = db.count_panel_active_orders(pid)
-    inbounds = db.get_inbounds(pid)
-    ib_text = ""
-    for ib in inbounds:
-        en = "✅" if ib["enabled"] else "❌"
-        ib_text += f"  {en} Inbound #{ib['inbound_id']} → {PROTO_NAMES.get(ib['protocol'], ib['protocol'])} (پورت {ib['port']})\n"
-    text = (f"🖥 پنل #{p['id']}: {p['name']}\n\n"
+    if is_legacy_panel(p):
+        text = (f"🗄 پنل #{p['id']}: {p['name']} — قدیمی (غیرفعال)\n\n"
+                f"🌐 آدرس: {p['url']}\n📍 موقعیت: {p['location'] or '—'}\n"
+                f"👥 سفارش‌های فعال ثبت‌شده: {cnt}\n\n"
+                f"⚠️ این پنل از نسخه‌ی قبلی ربات است و Tifusi Panel نیست؛ برای فروش، تمدید و چک سلامت "
+                f"استفاده نمی‌شود و سرویس‌های قبلی کاربرانش فقط نمایش داده می‌شوند.")
+        kb = InlineKeyboardMarkup([
+            [btn("🗑 حذف پنل", f"pb:del:{pid}")],
+            [btn("🔙 بازگشت", "admin:panels")],
+        ])
+        await safe_edit(query, text, reply_markup=kb)
+        return
+    icons = {"active": "🟢 فعال", "inactive": "⚪ غیرفعال", "offline": "🔴 Offline"}
+    text = (f"🖥 پنل #{p['id']}: {p['name']} (Tifusi Panel)\n\n"
             f"🌐 آدرس: {p['url']}\n👤 یوزر: {p['username']}\n"
             f"📍 موقعیت: {p['location'] or '—'}\n"
             f"📌 وضعیت: {icons.get(p['status'], p['status'])}\n"
-            f"👥 کاربران: {cnt}/{p['max_users']}\n"
-            f"🛡 PSK: {'✅ تنظیم شده' if p['psk'] else '⚠️ تنظیم نشده (L2TP وصل نمی‌شود!)'}\n"
-            f"🔐 ovpn: {'✅ دارد' if p['ovpn_ca'] else '❌ ندارد'}\n\n"
-            f"📡 Inbound ها:\n{ib_text or '  —'}")
+            f"👥 کاربران: {cnt}/{p['max_users']}\n\n"
+            f"🧩 سرویس‌ها و گروه‌ها:\n{service_map_text(pid)}")
     kb = InlineKeyboardMarkup([
         [btn("🔄 تست اتصال", f"pb:test:{pid}")],
         [btn("🔁 فعال / غیرفعال", f"pb:toggle:{pid}")],
+        [btn("🧩 انتخاب گروه سرویس‌ها", f"pbm:{pid}")],
         [btn("✏️ ویرایش پنل", f"pb:edit:{pid}")],
         [btn("🗑 حذف پنل", f"pb:del:{pid}")],
         [btn("🔙 بازگشت", "admin:panels")],
@@ -2276,15 +1813,16 @@ async def admin_panel_test(query, pid):
     p = db.get_panel(pid)
     if not p:
         return
+    back = InlineKeyboardMarkup([[btn("🔙 بازگشت", f"pb:{pid}")]])
+    if is_legacy_panel(p):
+        await safe_edit(query, f"🗄 پنل {p['name']} قدیمی است و تست نمی‌شود.", reply_markup=back)
+        return
     await safe_edit(query, f"🔄 در حال تست پنل {p['name']}...")
     try:
-        cls = panel_api_class(p["type"])
-        ms = await asyncio.to_thread(cls(p["url"], p["username"], p["password"]).ping)
-        await query.message.reply_text(f"✅ پنل {p['name']} — Online ({ms}ms)",
-            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", f"pb:{pid}")]]))
+        ms = await asyncio.to_thread(panel_client(p).ping)
+        await query.message.reply_text(f"✅ پنل {p['name']} — Online ({ms}ms)", reply_markup=back)
     except Exception as e:
-        await query.message.reply_text(f"❌ پنل {p['name']} — Offline\nخطا: {e}",
-            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", f"pb:{pid}")]]))
+        await query.message.reply_text(f"❌ پنل {p['name']} — Offline\nخطا: {e}", reply_markup=back)
 
 
 async def admin_panel_edit(query, pid):
@@ -2295,42 +1833,24 @@ async def admin_panel_edit(query, pid):
         [btn("✏️ پسورد", f"pbe:{pid}:password")],
         [btn("✏️ موقعیت", f"pbe:{pid}:location")],
         [btn("✏️ سقف کاربر", f"pbe:{pid}:max_users")],
-        [btn("🛡 PSK (کلید L2TP)", f"pbe:{pid}:psk")],
-        [btn("📤 آپلود مجدد ovpn", f"pbe:{pid}:ovpn")],
+        [btn("🧩 انتخاب گروه سرویس‌ها", f"pbm:{pid}")],
         [btn("🔙 بازگشت", f"pb:{pid}")],
     ])
     await safe_edit(query, "✏️ کدام مورد را ویرایش می‌کنید؟", reply_markup=kb)
 
 
-def inbound_sel_kb(inbounds):
-    rows = []
-    for i, ib in enumerate(inbounds):
-        en = "✅" if ib.get("enabled") else "❌"
-        proto = PROTO_NAMES.get(ib.get("protocol", "other"), "سایر")
-        rows.append([btn(f"{en} #{ib['inbound_id']} پورت {ib['port']} → {proto}", f"inb:t:{i}")])
-        rows.append([btn(f"🔁 تغییر نوع inbound #{ib['inbound_id']}", f"inb:p:{i}")])
-    rows.append([btn("✅ پایان و ادامه", "inb:done")])
-    return InlineKeyboardMarkup(rows)
-
-
-def inbound_sel_text(inbounds):
-    text = "📡 Inbound های کشف‌شده از پنل:\n(روی هر مورد بزنید تا فعال/غیرفعال شود، با «تغییر نوع» پروتکل را عوض کنید)\n\n"
-    for ib in inbounds:
-        en = "✅" if ib.get("enabled") else "❌"
-        text += f"{en} Inbound #{ib['inbound_id']} → {PROTO_NAMES.get(ib.get('protocol', 'other'))} (پورت {ib['port']})\n"
-    return text
-
-
 async def finish_panel_wizard(message, uid, draft):
+    draft["type"] = "tifusi"
     pid = db.add_panel(draft)
-    db.set_inbounds(pid, draft["inbounds"])
+    db.set_service_map(pid, draft.get("map", {}))
     db.set_state(uid, "none")
+    note = ("از این پس کاربران جدید به‌صورت خودکار روی خلوت‌ترین پنل ساخته می‌شوند." if draft.get("map") else
+            "⚠️ هیچ سرویسی برای این پنل انتخاب نشد؛ تا از «🧩 انتخاب گروه سرویس‌ها» گروهی انتخاب نکنید، "
+            "روی این پنل فروشی انجام نمی‌شود.")
     await message.reply_text(
         f"✅ پنل «{draft['name']}» با موفقیت ثبت شد!\n\n"
-        f"🌐 {draft['url']}\n📍 {draft['location']}\n👥 سقف: {draft['max_users']} کاربر\n"
-        f"📡 {sum(1 for i in draft['inbounds'] if i.get('enabled'))} inbound فعال\n"
-        f"🔐 ovpn: {'✅' if draft.get('ovpn_ca') else '❌'}\n\n"
-        f"از این پس کاربران جدید به‌صورت خودکار روی خلوت‌ترین پنل ساخته می‌شوند.",
+        f"🌐 {draft['url']}\n📍 {draft['location']}\n👥 سقف: {draft['max_users']} کاربر\n\n"
+        f"🧩 سرویس‌ها:\n{service_map_text(pid)}\n\n{note}",
         reply_markup=main_menu_kb(uid))
 
 
@@ -2341,12 +1861,16 @@ async def admin_panels_cap(query):
                         reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
         return
     text = f"🔧 قابلیت‌ها و ظرفیت پنل‌ها:\n\n"
+    icons = {"active": "🟢", "inactive": "⚪", "offline": "🔴"}
     for p in panels:
-        icons = {"active": "🟢", "inactive": "⚪", "offline": "🔴"}
+        if is_legacy_panel(p):
+            text += f"🗄 {p['name']} — قدیمی (غیرفعال)\n"
+            continue
         cnt = db.count_panel_active_orders(p["id"])
-        ibs = [PROTO_NAMES.get(i["protocol"], i["protocol"]) for i in db.get_inbounds(p["id"], enabled_only=True)]
+        smap = db.get_service_map(p["id"])
+        sold = [SERVICES[k] for k in SERVICES if k in smap]
         text += (f"{icons.get(p['status'], '⚪')} {p['name']} — {cnt}/{p['max_users']} کاربر\n"
-                 f"   📡 {', '.join(ibs) if ibs else '—'}\n")
+                 f"   🧩 {', '.join(sold) if sold else '—'}\n")
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
 
 
@@ -2384,26 +1908,25 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "plan":
             db.set_state(uid, "buy_proto", {"plan_id": int(parts[1])})
-            rows = []
-            if pick_panel("unified"):
-                rows.append([btn("🛜 L2TP / PPTP / IKEv2 (یکپارچه)", "proto:unified")])
-            if pick_panel("openvpn"):
-                rows.append([btn("🏧 OpenVPN (UDP+TCP)", "proto:openvpn")])
-            if pick_panel("xray"):
-                rows.append([btn("🌐 VLESS / VMess / Trojan (PasarGuard)", "proto:xray")])
-            if pick_panel("tifusi"):
-                rows.append([btn("📱 Tifusi VPN (IKEv2 / L2TP)", "proto:tifusi")])
+            # فقط سرویس‌هایی که حداقل یک پنل فعال با ظرفیت خالی برایشان گروه دارد
+            rows = [[btn(SERVICES[s], f"proto:{s}")] for s in available_services()]
             if not rows:
                 await safe_edit(query, "❌ فعلاً ظرفیت خالی برای ساخت سرویس وجود ندارد. کمی بعد تلاش کن.",
                                 reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "menu:buy")]]))
                 return
             rows.append([btn("🔙 بازگشت", "menu:buy")])
-            await safe_edit(query, "پروتکل مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(rows))
+            await safe_edit(query, "🧩 سرویس مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(rows))
             return
 
         if cmd == "proto":
             state, sd = db.get_state(uid)
-            sd["protocol"] = parts[1]
+            service = parts[1] if len(parts) > 1 else ""
+            if service not in SERVICES or not sd.get("plan_id") or not pick_panel(service):
+                # دکمه‌ی قدیمی یا سرویسی که الان ظرفیت ندارد
+                await safe_edit(query, "❌ این سرویس الان در دسترس نیست. دوباره از «خرید اشتراک» شروع کنید.",
+                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "menu:buy")]]))
+                return
+            sd["protocol"] = service
             db.set_state(uid, "buy_username", sd)
             await safe_edit(query,
                 f"👤 انتخاب نام کاربری\n\nیک نام کاربری دلخواه ارسال کنید\n\n"
@@ -2414,27 +1937,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup([[btn("🏠 بازگشت به منوی قبل", "menu:buy")]]))
             return
 
-        if cmd == "randpass":
-            state, sd = db.get_state(uid)
-            if state != "buy_password" or not sd.get("username"):
-                return
-            sd["password"] = gen_password()
-            db.set_state(uid, "buy_pay", sd)
-            plan = db.get_plan(sd["plan_id"])
-            await safe_edit(query,
-                f"🧾 پیش‌فاکتور\n"
-                f"📦 {plan_label(plan)}\n"
-                f"🔌 پروتکل: {PROTO_NAMES.get(sd['protocol'])}\n👤 یوزرنیم: `{sd['username']}`\n"
-                f"🔑 پسورد: `{sd['password']}`\n"
-                f"💰 مبلغ: {fmt(plan['price'])} تومان\n\n"
-                f"⚠️ سرویس فقط بعد از پرداخت و تایید، ساخته و فعال می‌شود.\n\nروش پرداخت:",
-                reply_markup=pay_kb(), parse_mode="Markdown")
-            return
-
         if cmd == "pay":
             state, sd = db.get_state(uid)
             plan = db.get_plan(sd.get("plan_id"))
-            if not plan or not sd.get("username"):
+            if not plan or not sd.get("username") or sd.get("protocol") not in SERVICES:
                 await safe_edit(query, "❌ جلسه خرید منقضی شده. دوباره شروع کنید.", reply_markup=back_kb())
                 db.set_state(uid, "none")
                 return
@@ -2450,17 +1956,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_service_detail(query, uid, int(parts[1]))
             return
 
-        if cmd == "ovpn":
+        if cmd == "qr":
             o = db.get_order(int(parts[1]))
-            if o and o["user_id"] == uid:
-                panel = db.get_panel(o["panel_id"])
-                if panel and panel["ovpn_ca"]:
-                    import io
-                    for proto in ("udp", "tcp"):
-                        cfg = build_ovpn(panel, proto).encode()
-                        await context.bot.send_document(uid, io.BytesIO(cfg),
-                            filename=f"openvpn_{proto}_{o['username']}.ovpn",
-                            caption=f"🏧 کانفیگ OpenVPN {proto.upper()}")
+            if o and o["user_id"] == uid and o["status"] == "active" and not order_is_legacy(o):
+                if not await send_order_qr(context, uid, o, db.get_panel(o["panel_id"])):
+                    await query.message.reply_text("❌ ساخت QR code ممکن نشد؛ لینک اشتراک را از متن سرویس کپی کنید.")
             return
 
         if cmd == "renew":
@@ -2476,6 +1976,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pid = int(parts[3]) if len(parts) > 3 else None
             o = db.get_order(oid)
             if not o or o["user_id"] != uid:
+                return
+            if order_is_legacy(o):
+                await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
                 return
             p = db.get_plan(pid) if pid else db.get_plan(o["plan_id"])
             price = p["price"] if p else o["price"]
@@ -2510,7 +2013,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             oid = int(parts[-1])
             if parts[1] == "yes":
                 o = db.get_order(oid)
-                if o and o["user_id"] == uid and o["status"] == "active":
+                if o and o["user_id"] == uid and o["status"] == "active" and order_is_legacy(o):
+                    await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
+                elif o and o["user_id"] == uid and o["status"] == "active":
                     db.update_order(oid, status="delreq_pending")
                     await safe_edit(query, "✅ درخواست حذف ثبت شد و برای ادمین ارسال شد.", reply_markup=back_kb())
                     await notify_admin(context.bot,
@@ -2554,17 +2059,22 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if cmd == "tut":
-            proto = parts[1]
-            if len(parts) == 2:
-                kb = InlineKeyboardMarkup([
-                    [pbtn("🪟 ویندوز", f"tut:{proto}:windows"), pbtn("🤖 اندروید", f"tut:{proto}:android")],
-                    [pbtn("🍎 آیفون", f"tut:{proto}:ios"), pbtn("🔙 بازگشت", "menu:back")],
-                ])
-                await safe_edit(query, f"{TRAININGS[proto]['title']}\n\nسیستم‌عامل را انتخاب کنید:",
-                                reply_markup=kb)
+            key = parts[1] if len(parts) > 1 else ""
+            if key not in TRAININGS:
+                # «tut:menu» یا دکمه‌ی آموزشی از نسخه‌ی قبلی ربات
+                await show_tutorial_menu(query)
+                return
+            t = TRAININGS[key]
+            oses = [(k, label) for k, label in TUT_OS if k in t]
+            if len(parts) == 2 and len(oses) > 1:
+                buttons = [pbtn(label, f"tut:{key}:{k}") for k, label in oses] + [pbtn("🔙 بازگشت", "tut:menu")]
+                await safe_edit(query, f"{t['title']}\n\nسیستم‌عامل را انتخاب کنید:",
+                                reply_markup=InlineKeyboardMarkup([buttons[i:i + 2] for i in range(0, len(buttons), 2)]))
             else:
-                await safe_edit(query, TRAININGS[proto]["title"] + "\n\n" + TRAININGS[proto][parts[2]],
-                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", f"tut:{proto}")]]))
+                os_key = parts[2] if len(parts) > 2 and parts[2] in dict(oses) else oses[0][0]
+                back = f"tut:{key}" if len(oses) > 1 else "tut:menu"
+                await safe_edit(query, t["title"] + "\n\n" + t[os_key],
+                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", back)]]))
             return
 
         # ---------- ادمین ----------
@@ -2670,7 +2180,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 services = db.get_user_orders(int(parts[2]), active_only=False)
                 text = f"🛍 سرویس‌های کاربر {parts[2]}:\n\n"
                 for o in services:
-                    text += (f"#{o['id']} — {o['username']} — {PROTO_NAMES.get(o['protocol'])} — "
+                    text += (f"#{o['id']} — {o['username']} — {order_name(o)} — "
                              f"{'✅' if o['status'] == 'active' else o['status']}\n")
                 await safe_edit(query, text or "سرویسی ندارد.",
                                 reply_markup=InlineKeyboardMarkup([[btn("🔙", "admin:menu")]]))
@@ -2694,6 +2204,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await admin_ticket_detail(query, int(parts[1]))
             return
 
+        if cmd == "tgl" and parts[1] == "test_enabled":
+            db.set_setting("test_enabled", "0" if db.setting("test_enabled", "0") == "1" else "1")
+            await admin_settings(query)
+            return
+
         if cmd == "dq":
             oid = int(parts[2])
             o = db.get_order(oid)
@@ -2702,30 +2217,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if parts[1] == "ok":
                 panel = db.get_panel(o["panel_id"])
                 err = ""
-                if panel and o["protocol"] == "tifusi":
-                    try:
-                        tclient = TifusiPanelAPI(panel["url"], panel["username"], panel["password"])
-                        await asyncio.to_thread(tclient.login)
-                        await asyncio.to_thread(tclient.del_user, o["username"])
-                    except Exception as e:
-                        err = str(e)
-                elif panel and o["protocol"] == "xray":
-                    try:
-                        xclient = PasarGuardAPI(panel["url"], panel["username"], panel["password"])
-                        await asyncio.to_thread(xclient.login)
-                        await asyncio.to_thread(xclient.del_user, o["username"])
-                    except Exception as e:
-                        err = str(e)
+                if order_is_legacy(o):
+                    # درخواست حذفی که قبل از به‌روزرسانی ثبت شده؛ پنل قدیمی از ربات مدیریت نمی‌شود
+                    err = "سرویس قدیمی است؛ در صورت نیاز کاربر را دستی از پنل قبلی حذف کنید"
                 elif panel:
                     try:
-                        client = VpnUI(panel["url"], panel["username"], panel["password"])
+                        client = panel_client(panel)
                         await asyncio.to_thread(client.login)
-                        seen_del = set()
-                        for proto, iid in order_inbounds(o):
-                            if iid in seen_del:
-                                continue
-                            seen_del.add(iid)
-                            await asyncio.to_thread(client.del_client, iid, o["username"])
+                        await asyncio.to_thread(client.del_user, o["username"])
                     except Exception as e:
                         err = str(e)
                 # بازگشت وجه متناسب با روزهای باقی‌مانده
@@ -2771,22 +2270,12 @@ async def on_callback_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     try:
-        if cmd == "pbtype":
-            ptype = parts[1]
-            db.set_state(uid, "ap_name", {"type": ptype})
-            label = {"vpnui": "vpn-ui", "pasarguard": "PasarGuard", "tifusi": "Tifusi Panel"}.get(ptype, ptype)
-            await safe_edit(query, f"➕ افزودن پنل {label}\n\n۱) نام پنل را وارد کنید (مثلاً «سرور آلمان ۱»):",
-                            reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:panels")]]))
-            return
         if cmd == "pb":
             if parts[1] == "add":
-                kb = InlineKeyboardMarkup([
-                    [btn("🛜 vpn-ui (L2TP/PPTP/IKEv2/OpenVPN)", "pbtype:vpnui")],
-                    [btn("🌐 PasarGuard (VLESS/VMess/Trojan/...)", "pbtype:pasarguard")],
-                    [btn("📱 Tifusi Panel (IKEv2/L2TP + اپ Tifusi VPN)", "pbtype:tifusi")],
-                    [btn("🔙 انصراف", "admin:panels")],
-                ])
-                await safe_edit(query, "➕ افزودن پنل\n\nنوع پنل را انتخاب کنید:", reply_markup=kb)
+                # فقط Tifusi Panel پشتیبانی می‌شود؛ انتخاب نوع پنل لازم نیست
+                db.set_state(uid, "ap_name", {})
+                await safe_edit(query, "➕ افزودن Tifusi Panel\n\n۱) نام پنل را وارد کنید (مثلاً «سرور آلمان ۱»):",
+                                reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:panels")]]))
             elif parts[1] == "test":
                 await admin_panel_test(query, int(parts[2]))
             elif parts[1] == "toggle":
@@ -2813,43 +2302,57 @@ async def on_callback_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "pbe":
             pid, field = int(parts[1]), parts[2]
-            if field == "ovpn":
-                state, sd = db.get_state(uid)
-                db.set_state(uid, "ap_wait_ovpn_edit", {"panel_id": pid})
-                await safe_edit(query, "📤 فایل .ovpn جدید را آپلود کنید:")
-            else:
-                db.set_state(uid, "ae_value", {"panel_id": pid, "field": field})
-                await safe_edit(query, f"✏️ مقدار جدید «{field}» را ارسال کنید:")
+            db.set_state(uid, "ae_value", {"panel_id": pid, "field": field})
+            await safe_edit(query, f"✏️ مقدار جدید «{field}» را ارسال کنید:")
             return
 
-        if cmd == "inb":
-            state, sd = db.get_state(uid)
-            inbounds = sd.get("inbounds", [])
-            if parts[1] == "done":
-                db.set_state(uid, "ap_wait_ovpn", sd)
-                await safe_edit(query,
-                    "📤 فایل .ovpn را که از پنل export کرده‌اید آپلود کنید.\n"
-                    "ربات به‌صورت خودکار آدرس سرور، پورت، CA و tls-crypt را استخراج می‌کند.",
-                    reply_markup=InlineKeyboardMarkup([[btn("⏭ رد کردن (بدون ovpn)", "ap:skipovpn")]]))
+        if cmd == "pbm":
+            # انتخاب مجدد گروه سرویس‌ها برای پنل موجود — گروه‌ها تازه از خود پنل خوانده می‌شوند
+            pid = int(parts[1])
+            p = db.get_panel(pid)
+            if not p or is_legacy_panel(p):
+                await safe_edit(query, "❌ این پنل Tifusi Panel نیست یا حذف شده است.",
+                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:panels")]]))
                 return
-            idx = int(parts[2])
-            if 0 <= idx < len(inbounds):
-                if parts[1] == "t":
-                    inbounds[idx]["enabled"] = not inbounds[idx].get("enabled", True)
-                elif parts[1] == "p":
-                    cur = inbounds[idx].get("protocol", "other")
-                    inbounds[idx]["protocol"] = PROTO_CYCLE[(PROTO_CYCLE.index(cur) + 1) % len(PROTO_CYCLE)] \
-                        if cur in PROTO_CYCLE else PROTO_CYCLE[0]
-                sd["inbounds"] = inbounds
-                db.set_state(uid, state, sd)
-                await safe_edit(query, inbound_sel_text(inbounds), reply_markup=inbound_sel_kb(inbounds))
+            await safe_edit(query, f"🔄 در حال دریافت گروه‌های پنل {p['name']}...")
+            try:
+                client = panel_client(p)
+                await asyncio.to_thread(client.login)
+                groups = await asyncio.to_thread(client.list_groups)
+            except Exception as e:
+                await safe_edit(query, f"❌ اتصال ناموفق: {e}",
+                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", f"pb:{pid}")]]))
+                return
+            current = {k: (r["remark"] or f"#{r['inbound_id']}") for k, r in db.get_service_map(pid).items()}
+            sd = {"panel_id": pid, "groups": groups_for_state(groups), "map": {}, "step": 0, "current": current}
+            db.set_state(uid, "pm_map", sd)
+            text, kb = map_step_view(sd)
+            await safe_edit(query, text, reply_markup=kb)
             return
 
-        if cmd == "ap" and parts[1] == "skipovpn":
+        if cmd == "apm":
             state, sd = db.get_state(uid)
-            sd.update({"ovpn_server": "", "ovpn_port_udp": 0, "ovpn_port_tcp": 0, "ovpn_ca": "", "ovpn_tls_crypt": ""})
-            db.set_state(uid, "ap_location", sd)
-            await safe_edit(query, "📍 موقعیت پنل را وارد کنید (مثلاً 🇩🇪 آلمان):")
+            keys = list(SERVICES)
+            step = sd.get("step", 0)
+            if state not in ("ap_map", "pm_map") or step >= len(keys) or len(parts) < 3 or parts[1] != keys[step]:
+                return  # دکمه‌ی قدیمی یا دوبار زده‌شده
+            if parts[2] != "x":
+                g = next((g for g in sd["groups"] if str(g["id"]) == parts[2]), None)
+                if not g:
+                    return
+                sd["map"][parts[1]] = g
+            sd["step"] = step + 1
+            if sd["step"] < len(keys):
+                db.set_state(uid, state, sd)
+                text, kb = map_step_view(sd)
+                await safe_edit(query, text, reply_markup=kb)
+            elif state == "ap_map":
+                db.set_state(uid, "ap_location", sd)
+                await safe_edit(query, "✅ گروه سرویس‌ها انتخاب شد.\n\n📍 موقعیت پنل را وارد کنید (مثلاً 🇩🇪 آلمان):")
+            else:
+                db.set_service_map(sd["panel_id"], sd["map"])
+                db.set_state(uid, "none")
+                await admin_panel_detail(query, sd["panel_id"])
             return
 
         if cmd == "pl":
@@ -2893,61 +2396,33 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{2,19}", text):
             await msg.reply_text("❌ نام کاربری نامعتبر است.\nباید با حرف انگلیسی شروع شود، ۳ تا ۲۰ کاراکتر، بدون @ و فاصله و خط تیره:")
             return True
-        # چک تکراری نبودن یوزرنیم روی پنل مقصد
-        panel = pick_panel(sd.get("protocol"))
-        if panel and panel["type"] == "tifusi":
-            try:
-                tcl = TifusiPanelAPI(panel["url"], panel["username"], panel["password"])
-                await asyncio.to_thread(tcl.login)
-                if await asyncio.to_thread(tcl.get_user, text):
-                    await msg.reply_text("❌ این یوزرنیم قبلاً روی سرور استفاده شده. لطفاً یوزرنیم دیگری انتخاب کنید:")
-                    return True
-            except Exception:
-                pass
-        elif panel and panel["type"] == "pasarguard":
-            try:
-                cl = PasarGuardAPI(panel["url"], panel["username"], panel["password"])
-                await asyncio.to_thread(cl.login)
-                if await asyncio.to_thread(cl.get_user, text):
-                    await msg.reply_text("❌ این یوزرنیم قبلاً روی سرور استفاده شده. لطفاً یوزرنیم دیگری انتخاب کنید:")
-                    return True
-            except Exception:
-                pass
-        elif panel:
-            try:
-                cl = VpnUI(panel["url"], panel["username"], panel["password"])
-                await asyncio.to_thread(cl.login)
-                iids = [ib["inbound_id"] for ib in db.get_inbounds(panel["id"], enabled_only=True)]
-                if await asyncio.to_thread(cl.email_exists, iids, text):
-                    await msg.reply_text("❌ این یوزرنیم قبلاً روی سرور استفاده شده. لطفاً یوزرنیم دیگری انتخاب کنید:")
-                    return True
-            except Exception:
-                pass
-        sd["username"] = text
-        db.set_state(uid, "buy_password", sd)
-        await msg.reply_text(
-            "🔑 حالا یک رمز عبور دلخواه برای سرویس وارد کنید\n\n"
-            "⚠️ رمز باید انگلیسی باشد (حروف و عدد)، ۴ تا ۳۲ کاراکتر، بدون فاصله\n\n"
-            "🎲 یا روی «رمز تصادفی خودکار» بزنید تا ربات خودش بسازد.",
-            reply_markup=InlineKeyboardMarkup([
-                [btn("🎲 رمز تصادفی خودکار", "randpass")],
-                [btn("🔙 انصراف", "menu:buy")],
-            ]))
-        return True
-
-    if state == "buy_password":
-        if not re.fullmatch(r"[A-Za-z0-9]{4,32}", text):
-            await msg.reply_text("❌ رمز نامعتبر است.\nفقط حروف و اعداد انگلیسی، ۴ تا ۳۲ کاراکتر، بدون فاصله:")
+        plan = db.get_plan(sd.get("plan_id"))
+        service = sd.get("protocol")
+        panel = pick_panel(service) if plan and service in SERVICES else None
+        if not panel:
+            db.set_state(uid, "none")
+            await msg.reply_text("❌ این سرویس الان ظرفیت ندارد یا جلسه خرید منقضی شده. دوباره از «🔐 خرید اشتراک» شروع کنید.",
+                                 reply_markup=main_menu_kb(uid))
             return True
-        sd["password"] = text
+        # چک تکراری نبودن یوزرنیم روی همان پنلی که سرویس روی آن ساخته می‌شود
+        try:
+            client = panel_client(panel)
+            await asyncio.to_thread(client.login)
+            if await asyncio.to_thread(client.get_user, text):
+                await msg.reply_text("❌ این یوزرنیم قبلاً روی سرور استفاده شده. لطفاً یوزرنیم دیگری انتخاب کنید:")
+                return True
+        except Exception:
+            pass
+        # مرحله‌ی رمز حذف شده: پنل خودش لینک اشتراک و کد اپ صادر می‌کند
+        sd["username"] = text
+        sd["panel_id"] = panel["id"]
         db.set_state(uid, "buy_pay", sd)
-        plan = db.get_plan(sd["plan_id"])
         await msg.reply_text(
             f"🧾 پیش‌فاکتور\n"
-            f"📦 {plan_label(plan)}\n"
-            f"🔌 پروتکل: {PROTO_NAMES.get(sd['protocol'])}\n👤 یوزرنیم: `{sd['username']}`\n"
-            f"🔑 پسورد: `{text}`\n"
+            f"📦 {md(plan_label(plan))}\n"
+            f"🧩 سرویس: {SERVICES[service]}\n👤 یوزرنیم: `{text}`\n"
             f"💰 مبلغ: {fmt(plan['price'])} تومان\n\n"
+            f"🔑 رمز لازم نیست؛ بعد از ساخت سرویس، کد اپ و لینک اشتراک برایتان ارسال می‌شود.\n"
             f"⚠️ سرویس فقط بعد از پرداخت و تایید، ساخته و فعال می‌شود.\n\nروش پرداخت:",
             reply_markup=pay_kb(), parse_mode="Markdown")
         return True
@@ -3126,33 +2601,20 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
 
     if state == "ap_pass" and is_admin(uid):
         sd["password"] = text
-        # PasarGuard و Tifusi Panel هر دو به‌جای inbound گروه دارند
-        is_pasarguard = sd.get("type") in ("pasarguard", "tifusi")
-        wait = await msg.reply_text("🔄 در حال تست اتصال و کشف " +
-                                    ("گروه‌ها" if is_pasarguard else "Inbound") + " ها...")
+        wait = await msg.reply_text("🔄 در حال تست اتصال و دریافت گروه‌های پنل...")
         try:
-            if is_pasarguard:
-                client = panel_api_class(sd.get("type"))(sd["url"], sd["username"], sd["password"])
-                await asyncio.to_thread(client.login)
-                inbounds = await asyncio.to_thread(client.list_groups)
-            else:
-                client = VpnUI(sd["url"], sd["username"], sd["password"])
-                await asyncio.to_thread(client.login)
-                inbounds = await asyncio.to_thread(client.list_inbounds)
+            client = TifusiPanelAPI(sd["url"], sd["username"], sd["password"])
+            await asyncio.to_thread(client.login)
+            # پنلی که گروه ندارد یک ردیف «سرورهای عمومی» با شناسه‌ی ۰ برمی‌گرداند
+            groups = await asyncio.to_thread(client.list_groups)
         except Exception as e:
             await wait.edit_text(f"❌ اتصال ناموفق: {e}\n\nاز اول شروع کنید: 🖥 مدیریت پنل‌ها ← ➕ افزودن پنل")
             db.set_state(uid, "none")
             return True
-        if not inbounds:
-            await wait.edit_text("❌ هیچ " + ("گروهی" if is_pasarguard else "inbound ای") + " روی پنل پیدا نشد.")
-            db.set_state(uid, "none")
-            return True
-        for ib in inbounds:
-            ib["enabled"] = True
-        sd["inbounds"] = inbounds
-        db.set_state(uid, "ap_inbounds", sd)
-        await wait.edit_text("✅ اتصال موفق!\n\n" + inbound_sel_text(inbounds),
-                             reply_markup=inbound_sel_kb(inbounds))
+        sd.update({"groups": groups_for_state(groups), "map": {}, "step": 0})
+        db.set_state(uid, "ap_map", sd)
+        view_text, kb = map_step_view(sd)
+        await wait.edit_text("✅ اتصال موفق!\n\n" + view_text, reply_markup=kb)
         return True
 
     if state == "ap_location" and is_admin(uid):
@@ -3174,20 +2636,6 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             await msg.reply_text("❌ عدد وارد کنید (یا - برای پیش‌فرض):")
             return True
         sd["status"] = "active"
-        if sd.get("type") in ("pasarguard", "tifusi"):
-            sd["psk"] = ""
-            await finish_panel_wizard(msg, uid, sd)
-            return True
-        db.set_state(uid, "ap_psk", sd)
-        await msg.reply_text(
-            "🛡 PSK (کلید L2TP/IPsec) این سرور را وارد کنید.\n\n"
-            "این همان Secret است که در پنل/سرور برای L2TP تنظیم شده و برای همه کاربران یکسان است.\n"
-            "⚠️ بدون PSK درست، کاربران L2TP وصل نمی‌شوند!\n\n"
-            "اگر نمی‌دانید، بنویسید: -")
-        return True
-
-    if state == "ap_psk" and is_admin(uid):
-        sd["psk"] = "" if text.strip() in ("-", "ندارم", "skip") else text.strip()
         await finish_panel_wizard(msg, uid, sd)
         return True
 
@@ -3211,6 +2659,10 @@ MENU_ACTIONS = {
     "👥 زیرمجموعه گیری": "referral", "👥 زیرمجموعه‌گیری": "referral",
     "📚 آموزش": "tutorial", "☎️ پشتیبانی": "support", "🧑‍💼 پنل مدیریت": "admin",
 }
+
+
+# مرحله‌هایی که ورودی متنی ندارند و منتظر دکمه‌اند
+BUTTON_WAIT_STATES = ("buy_proto", "buy_pay", "charge_confirm", "ap_map", "pm_map")
 
 
 class FakeQuery:
@@ -3244,6 +2696,11 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                          "renew_card_wait_receipt"):
         if await handle_state(update, context, state, sd):
             return
+        # مرحله‌ای که دیگر وجود ندارد (مثلاً از نسخه‌ی قبلی ربات) — ریست تا کاربر گیر نکند؛
+        # مرحله‌هایی که منتظر زدن دکمه‌اند دست نمی‌خورند تا جلسه‌ی خرید/افزودن پنل از بین نرود
+        if state not in BUTTON_WAIT_STATES:
+            db.set_state(uid, "none")
+            state, sd = "none", {}
 
     action = MENU_ACTIONS.get((msg.text or "").strip())
     if not action:
@@ -3258,7 +2715,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "renew_menu":
         await show_renew_menu(msg, uid)
     elif action == "test":
-        await msg.reply_text("🔑 اکانت تست به‌زودی فعال می‌شود! 🎁\n⏳ در حال آماده‌سازی هدیه خوش‌آمدگویی هستیم...")
+        await send_test_account(msg, context, uid)
     elif action == "wheel":
         await msg.reply_text("🎲 گردونه شانس به‌زودی فعال می‌شود! 🎁\nجوایز و تخفیف‌های هیجانی در راه است...")
     elif action == "services":
@@ -3313,19 +2770,21 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == "buy_card_wait_receipt":
         plan = db.get_plan(sd.get("plan_id"))
-        if not plan:
+        # جلسه‌ی خریدِ ناقص یا از نسخه‌ی قبلی ربات (سرویسی که دیگر فروخته نمی‌شود) رسید نمی‌سازد
+        if not plan or sd.get("protocol") not in SERVICES or not sd.get("username"):
             db.set_state(uid, "none")
-            await msg.reply_text("❌ پلن یافت نشد. دوباره تلاش کنید.")
+            await msg.reply_text("❌ جلسه خرید منقضی شده یا پلن یافت نشد. دوباره از «🔐 خرید اشتراک» شروع کنید.",
+                                 reply_markup=main_menu_kb(uid))
             return
         rid = db.create_receipt(uid, plan["price"], "purchase", photo_id, meta={
             "kind": "purchase", "plan_id": plan["id"], "protocol": sd["protocol"],
-            "username": sd["username"], "password": sd.get("password")})
+            "username": sd["username"], "panel_id": sd.get("panel_id")})
         db.set_state(uid, "none")
         await msg.reply_text("✅ رسید شما ثبت شد.\n⏳ بعد از تایید ادمین، سرویس به‌صورت خودکار ساخته و ارسال می‌شود.",
                              reply_markup=main_menu_kb(uid))
         r = db.get_receipt(rid)
         await send_receipt_to_admins(context.bot, rid, photo_id,
-            receipt_caption(r, f"رسید خرید سرویس — {plan['volume_gb']} گیگ / {plan['days']} روز / {PROTO_NAMES.get(sd['protocol'])} / 👤 {sd['username']}"))
+            receipt_caption(r, f"رسید خرید سرویس — {plan['volume_gb']} گیگ / {plan['days']} روز / {SERVICES[sd['protocol']]} / 👤 {sd['username']}"))
         return
 
     if state == "renew_card_wait_receipt":
@@ -3341,62 +2800,14 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-# ---------- آپلود ovpn (سند) ----------
-async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    uid = update.effective_user.id
-    if not is_admin(uid):
-        return
-    state, sd = db.get_state(uid)
-    if state not in ("ap_wait_ovpn", "ap_wait_ovpn_edit"):
-        return
-    doc = msg.document
-    if not doc.file_name or not doc.file_name.endswith(".ovpn"):
-        await msg.reply_text("❌ فایل باید پسوند .ovpn داشته باشد:")
-        return
-    f = await doc.get_file()
-    raw = await f.download_as_bytearray()
-    raw_text = raw.decode("utf-8", errors="ignore")
-    info = parse_ovpn(raw_text)
-    if not info["server"] or not info["ca"]:
-        await msg.reply_text("❌ نتوانستم سرور/گواهی CA را از فایل استخراج کنم. فایل دیگری بفرستید یا رد کنید.")
-        return
-
-    if state == "ap_wait_ovpn_edit":
-        db.update_panel(sd["panel_id"], ovpn_server=info["server"],
-                        ovpn_ca=info["ca"], ovpn_tls_crypt=info["tls_crypt"], ovpn_raw=raw_text)
-        db.set_state(uid, "none")
-        await msg.reply_text(f"✅ ovpn پنل به‌روزرسانی شد.\n🔍 سرور: {info['server']} | پورت: {info['port']} ({info['proto']})")
-        return
-
-    # جادوی افزودن پنل: استخراج خودکار
-    inbounds = sd.get("inbounds", [])
-    port_udp = next((i["port"] for i in inbounds if i["protocol"] == "openvpn_udp" and i.get("enabled")), 0)
-    port_tcp = next((i["port"] for i in inbounds if i["protocol"] == "openvpn_tcp" and i.get("enabled")), 0)
-    if info["proto"].startswith("udp"):
-        port_udp = port_udp or info["port"]
-    else:
-        port_tcp = port_tcp or info["port"]
-    sd.update({"ovpn_server": info["server"], "ovpn_port_udp": port_udp or info["port"],
-               "ovpn_port_tcp": port_tcp or info["port"],
-               "ovpn_ca": info["ca"], "ovpn_tls_crypt": info["tls_crypt"], "ovpn_raw": raw_text})
-    db.set_state(uid, "ap_location", sd)
-    await msg.reply_text(
-        f"🔍 استخراج خودکار انجام شد:\n"
-        f"🌐 سرور: {info['server']}\n🔌 پورت UDP: {sd['ovpn_port_udp']} | TCP: {sd['ovpn_port_tcp']}\n"
-        f"🔐 CA: ✅ | tls-crypt: {'✅' if info['tls_crypt'] else '—'}\n\n"
-        f"📍 حالا موقعیت پنل را وارد کنید (مثلاً 🇩🇪 آلمان):")
-
-
 # =================== جاب‌ها ===================
 async def health_job(context: ContextTypes.DEFAULT_TYPE):
-    """چک سلامت پنل‌ها هر ۵ دقیقه."""
+    """چک سلامت پنل‌ها هر ۵ دقیقه (فقط Tifusi Panel؛ پنل‌های قدیمی نادیده گرفته می‌شوند)."""
     for p in db.get_panels():
-        if p["status"] == "inactive":
-            continue  # غیرفعال دستی — از چرخه خارج است
+        if p["status"] == "inactive" or is_legacy_panel(p):
+            continue  # غیرفعال دستی یا پنل قدیمی — از چرخه خارج است
         try:
-            cls = panel_api_class(p["type"])
-            await asyncio.to_thread(cls(p["url"], p["username"], p["password"]).login)
+            await asyncio.to_thread(panel_client(p).login)
             ok = True
         except Exception:
             ok = False
@@ -3430,10 +2841,9 @@ def main():
         raise SystemExit("❌ ابتدا BOT_TOKEN و ADMIN_ID را در بالای همین فایل (bot.py) پر کنید.")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(on_callback_admin, pattern=r"^(pb|pbe|pl|ple|inb|ap):"))
+    app.add_handler(CallbackQueryHandler(on_callback_admin, pattern=r"^(pb|pbe|pbm|apm|pl|ple):"))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, on_photo))
-    app.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, on_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     app.add_error_handler(on_error)
     if app.job_queue:
