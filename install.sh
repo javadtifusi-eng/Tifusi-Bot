@@ -1,8 +1,8 @@
 #!/bin/bash
 # ============================================================
 #   Tifusi Bot — One-Line Installer (v4.0)
-#   Telegram VPN Shop Bot for vpn-ui panels
-#   Protocols: L2TP / PPTP / IKEv2 / OpenVPN
+#   Telegram VPN Shop Bot for Tifusi Panel
+#   Services: Xray / WireGuard / IKEv2 / L2TP
 # ============================================================
 REPO_URL="https://raw.githubusercontent.com/javadtifusi-eng/Tifusi-Bot/main"
 
@@ -37,7 +37,7 @@ banner() {
 EOF
     echo -e "${NC}"
     echo -e "${CYAN}  Tifusi Bot — Telegram VPN Shop Bot | v4.0${NC}"
-    echo -e "${YELLOW}  Protocols: L2TP / PPTP / IKEv2 / OpenVPN${NC}"
+    echo -e "${YELLOW}  Tifusi Panel | Services: Xray / WireGuard / IKEv2 / L2TP${NC}"
     echo -e "${GREEN}  --------------------------------------------${NC}"
     echo ""
 }
@@ -152,13 +152,6 @@ install_bot() {
     sed -i "s|^DEFAULT_PANEL_MAX_USERS = .*|DEFAULT_PANEL_MAX_USERS = $MAXU|" "$BOT_FILE"
     ok "Default panel capacity: $MAXU"
 
-    # PSK
-    ask "Panel PSK key (Enter = 123456 — must match the panel Secret):"
-    read -r PSK < /dev/tty
-    PSK=${PSK:-123456}
-    sed -i "s|^DEFAULT_PSK = .*|DEFAULT_PSK = \"$PSK\"|" "$BOT_FILE"
-    ok "PSK saved"
-
     make_service
     make_shortcut
 
@@ -208,13 +201,11 @@ update_bot() {
     OLD_TOKEN=$(grep -m1 "^BOT_TOKEN" "$BOT_FILE" | sed -E 's/.*"(.*)".*/\1/')
     OLD_ADMIN=$(grep -m1 "^ADMIN_ID" "$BOT_FILE" | grep -oE "[0-9]+" | head -1)
     OLD_MAXU=$(grep -m1 "^DEFAULT_PANEL_MAX_USERS" "$BOT_FILE" | grep -oE "[0-9]+" | head -1)
-    OLD_PSK=$(grep -m1 "^DEFAULT_PSK" "$BOT_FILE" | sed -E 's/.*"(.*)".*/\1/')
     cp "$BOT_FILE" /root/bot.py.bak
     download_bot
     sed -i "s|^BOT_TOKEN = .*|BOT_TOKEN = \"$OLD_TOKEN\"|" "$BOT_FILE"
     sed -i "s|^ADMIN_ID = .*|ADMIN_ID = $OLD_ADMIN        # admin numeric id|" "$BOT_FILE"
     [ -n "$OLD_MAXU" ] && sed -i "s|^DEFAULT_PANEL_MAX_USERS = .*|DEFAULT_PANEL_MAX_USERS = $OLD_MAXU|" "$BOT_FILE"
-    [ -n "$OLD_PSK" ] && sed -i "s|^DEFAULT_PSK = .*|DEFAULT_PSK = \"$OLD_PSK\"|" "$BOT_FILE"
     systemctl restart $SERVICE
     sleep 2
     if systemctl is-active --quiet $SERVICE; then
