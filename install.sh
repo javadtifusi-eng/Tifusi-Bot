@@ -100,12 +100,93 @@ EOF
     ok "systemd service created and enabled"
 }
 
-# ---------- Shortcut command: tifusi ----------
+# ---------- Commands: tifusi-bot and the shared tifusi launcher ----------
+# Copy then rename, so a tifusi-bot that is currently running is never overwritten mid-read.
+place_command() {
+    cp "$1" "$2.tmp.$$" && chmod 755 "$2.tmp.$$" && mv -f "$2.tmp.$$" "$2"
+}
+
 make_shortcut() {
-    cp "$0" /usr/local/bin/tifusi 2>/dev/null || curl -Ls "$REPO_URL/install.sh" -o /usr/local/bin/tifusi
-    chmod +x /usr/local/bin/tifusi
-    ln -sf /usr/local/bin/tifusi /usr/local/bin/qashang 2>/dev/null
-    ok "Shortcut ready! Type 'tifusi' anytime to open this menu"
+    local bin=/usr/local/bin tmp
+    # Before the launcher, Tifusi Panel kept its menu at `tifusi`; move it so `tifusi panel` still finds it.
+    if [ -f "$bin/tifusi" ] && [ ! -e "$bin/tifusi-panel" ] && grep -q "Tifusi Panel management CLI" "$bin/tifusi"; then
+        mv "$bin/tifusi" "$bin/tifusi-panel"
+    fi
+    tmp=$(mktemp)
+    if curl -fsSL "$REPO_URL/install.sh" -o "$tmp" && [ -s "$tmp" ]; then
+        place_command "$tmp" "$bin/tifusi-bot"
+    elif [ -f "$0" ]; then
+        place_command "$0" "$bin/tifusi-bot"
+    fi
+    # Identical to scripts/tifusi in the Tifusi Panel repository.
+    cat > "$tmp" << 'TIFUSI_LAUNCHER'
+#!/usr/bin/env bash
+# Tifusi launcher, written identically by the Tifusi Panel and Tifusi Bot installers.
+#   tifusi panel [action]   Tifusi Panel operations menu (/usr/local/bin/tifusi-panel)
+#   tifusi bot              Tifusi Bot installer menu (/usr/local/bin/tifusi-bot)
+#   tifusi app              Latest Tifusi VPN Android release
+# Without one of these, the only installed component opens directly, so `tifusi update` keeps working.
+
+BIN=/usr/local/bin
+APP_REPO="javadtifusi-eng/Tifusi-VPN"
+# tifusi.versionBase in the app's gradle.properties: release vN is shown in the app as 1.(N - base).
+APP_VERSION_BASE=20
+
+app_info() {
+  local tag
+  tag=$(curl -fsSL "https://api.github.com/repos/$APP_REPO/releases/latest" 2>/dev/null | grep -m1 '"tag_name"' | cut -d'"' -f4)
+  if [[ ! "$tag" =~ ^v[0-9]+$ ]]; then
+    echo "Could not read the latest Tifusi VPN release from GitHub."
+    return 1
+  fi
+  echo "Tifusi VPN for Android, latest version: 1.$(( ${tag#v} - APP_VERSION_BASE ))"
+  echo "Download: https://github.com/$APP_REPO/releases/latest/download/tifusi-vpn.apk"
+}
+
+open_component() {
+  local name=$1
+  shift
+  if [ -x "$BIN/tifusi-$name" ]; then
+    exec "$BIN/tifusi-$name" "$@"
+  fi
+  echo "Tifusi ${name^} is not installed on this server."
+  exit 1
+}
+
+case "${1:-}" in
+  panel|bot) open_component "$@" ;;
+  app) app_info; exit $? ;;
+esac
+
+installed=()
+for name in panel bot; do
+  [ -x "$BIN/tifusi-$name" ] && installed+=("$name")
+done
+
+if [ ${#installed[@]} -eq 1 ]; then
+  open_component "${installed[0]}" "$@"
+fi
+
+if [ -n "${1:-}" ]; then
+  echo "Unknown command: $1"
+  echo "Usage: tifusi panel [action] | tifusi bot | tifusi app"
+  exit 1
+fi
+
+echo "1) Tifusi Panel"
+echo "2) Tifusi Bot"
+echo "3) Tifusi VPN app"
+read -r -p "Choose: " choice < /dev/tty
+case "$choice" in
+  1) open_component panel ;;
+  2) open_component bot ;;
+  3) app_info ;;
+  *) echo "Invalid choice."; exit 1 ;;
+esac
+TIFUSI_LAUNCHER
+    place_command "$tmp" "$bin/tifusi"
+    rm -f "$tmp" "$bin/qashang"
+    ok "Commands ready: 'tifusi bot' opens this menu, 'tifusi app' shows the latest Tifusi VPN app"
 }
 
 # ---------- Full install ----------
@@ -206,6 +287,7 @@ update_bot() {
     sed -i "s|^BOT_TOKEN = .*|BOT_TOKEN = \"$OLD_TOKEN\"|" "$BOT_FILE"
     sed -i "s|^ADMIN_ID = .*|ADMIN_ID = $OLD_ADMIN        # admin numeric id|" "$BOT_FILE"
     [ -n "$OLD_MAXU" ] && sed -i "s|^DEFAULT_PANEL_MAX_USERS = .*|DEFAULT_PANEL_MAX_USERS = $OLD_MAXU|" "$BOT_FILE"
+    make_shortcut
     systemctl restart $SERVICE
     sleep 2
     if systemctl is-active --quiet $SERVICE; then
@@ -226,6 +308,9 @@ uninstall_bot() {
         systemctl stop $SERVICE 2>/dev/null
         systemctl disable $SERVICE 2>/dev/null
         rm -f /etc/systemd/system/bot.service "$BOT_FILE" /root/bot.py.bak
+        rm -f /usr/local/bin/tifusi-bot /usr/local/bin/qashang
+        # The launcher is shared with Tifusi Panel, so it stays while the panel is installed.
+        [ -e /usr/local/bin/tifusi-panel ] || rm -f /usr/local/bin/tifusi
         systemctl daemon-reload
         ok "Bot completely removed"
     else
