@@ -1006,14 +1006,15 @@ def back_kb():
 
 def admin_menu_kb():
     return InlineKeyboardMarkup([
-        [pbtn("📊 آمار ربات", "admin:stats"), pbtn("💵 رسیدهای تایید نشده", "admin:receipts")],
-        [pbtn("👤 مدیریت کاربر", "admin:users"), pbtn("💸 قیمت سرویس", "admin:plans_view")],
-        [pbtn("⚙️ تنظیمات عمومی", "admin:settings"), pbtn("🎫 لیست تیکت‌ها", "admin:tickets")],
-        [pbtn("🔧 قابلیت‌های پنل", "admin:panels_cap"), pbtn("🆕 نسخه و آپدیت", "admin:update")],
+        [btn("📊 آمار ربات", "admin:stats")],
+        [pbtn("💵 رسیدهای تایید نشده", "admin:receipts"), pbtn("🎫 لیست تیکت‌ها", "admin:tickets")],
+        [btn("🖥 مدیریت پنل‌ها", "admin:panels")],
+        [pbtn("📦 مدیریت پلن‌ها", "admin:plans"), pbtn("💸 قیمت سرویس", "admin:plans_view")],
+        [pbtn("👤 مدیریت کاربر", "admin:users"), pbtn("👑 مدیریت ادمین‌ها", "admin:admins")],
+        [btn("⚙️ تنظیمات عمومی", "admin:settings")],
         [pbtn("📢 کانال/گروه گزارش", "admin:channel"), pbtn("📈 گزارش", "admin:report")],
-        [pbtn("🖥 مدیریت پنل‌ها", "admin:panels"), pbtn("📦 مدیریت پلن‌ها", "admin:plans")],
         [pbtn("📣 پیام همگانی", "admin:broadcast"), pbtn("💾 بکاپ", "admin:backup")],
-        [pbtn("👑 مدیریت ادمین‌ها", "admin:admins")],
+        [pbtn("🔧 قابلیت‌های پنل", "admin:panels_cap"), pbtn("🆕 نسخه و آپدیت", "admin:update")],
     ])
 
 
@@ -1074,8 +1075,7 @@ async def show_wallet(query, uid):
     bal = db.get_balance(uid)
     kb = InlineKeyboardMarkup([
         [btn("💰 افزایش موجودی (کارت به کارت)", "wallet:charge")],
-        [btn("👤 حساب کاربری", "acc:show")],
-        [btn("🏠 بازگشت به منوی اصلی", "menu:back")],
+        [btn("👤 حساب کاربری", "acc:show"), btn("🏠 بازگشت به منوی اصلی", "menu:back")],
     ])
     await safe_edit(query, f"🏦 کیف پول شما\n💰 موجودی: {fmt(bal)} تومان", reply_markup=kb)
 
@@ -1353,9 +1353,8 @@ async def show_service_detail(query, uid, oid):
     rows = []
     if o["status"] == "active":
         rows.append([btn("♻️ تمدید سرویس", f"renew:{o['id']}")])
-        if o["sub_url"]:
-            rows.append([btn("📷 QR code", f"qr:{o['id']}")])
-        rows.append([btn("🔄 بروزرسانی اطلاعات", f"svc:{o['id']}")])
+        refresh = btn("🔄 بروزرسانی اطلاعات", f"svc:{o['id']}")
+        rows.append([btn("📷 QR code", f"qr:{o['id']}"), refresh] if o["sub_url"] else [refresh])
         rows.append([btn("❌ بازگشت وجه / حذف سرویس", f"delreq:{o['id']}")])
     rows.append([btn("🏠 بازگشت به لیست سرویس‌ها", "menu:services")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows), parse_mode="Markdown")
@@ -1380,8 +1379,8 @@ def account_text(uid):
 
 
 async def show_account_msg(msg, uid):
-    kb = InlineKeyboardMarkup([[btn("💰 افزایش موجودی", "wallet:charge")],
-                               [btn("🏠 بازگشت به منوی اصلی", "menu:back")]])
+    kb = InlineKeyboardMarkup([[btn("💰 افزایش موجودی", "wallet:charge"),
+                                btn("🏠 بازگشت به منوی اصلی", "menu:back")]])
     await msg.reply_text(account_text(uid), reply_markup=kb)
 
 
@@ -1447,8 +1446,7 @@ async def show_renew_menu(msg, uid):
 def pay_kb():
     return InlineKeyboardMarkup([
         [btn("🏦 پرداخت از کیف پول", "pay:wallet")],
-        [btn("💳 کارت به کارت", "pay:card")],
-        [btn("❌ بستن لیست", "menu:buy")],
+        [btn("💳 کارت به کارت", "pay:card"), btn("❌ بستن لیست", "menu:buy")],
     ])
 
 
@@ -1519,8 +1517,7 @@ async def renew_pay_menu(query, uid, oid, pid):
         return
     kb = InlineKeyboardMarkup([
         [btn("🏦 پرداخت از کیف پول", f"rnw:w:{oid}:{pid}")],
-        [btn("💳 کارت به کارت", f"rnw:c:{oid}:{pid}")],
-        [btn("🔙 بازگشت", f"renew:{oid}")],
+        [btn("💳 کارت به کارت", f"rnw:c:{oid}:{pid}"), btn("🔙 بازگشت", f"renew:{oid}")],
     ])
     await safe_edit(query,
         f"♻️ تمدید سرویس «{o['username']}»\n"
@@ -1574,9 +1571,8 @@ async def delreq_confirm(query, uid, oid):
 def receipt_admin_kb(rid):
     return InlineKeyboardMarkup([
         [btn("✅ تایید پرداخت", f"rc:ok:{rid}")],
-        [btn("❌ رد پرداخت", f"rc:no:{rid}")],
+        [btn("❌ رد پرداخت", f"rc:no:{rid}"), btn("⭕️ شارژ دستی", f"rc:manual:{rid}")],
         [btn("⭕️ بلاک کردن کاربر", f"rc:block:{rid}")],
-        [btn("⭕️ شارژ دستی", f"rc:manual:{rid}")],
     ])
 
 
@@ -1783,8 +1779,7 @@ async def admin_user_panel(query, uid_target):
             f"👥 زیرمجموعه: {db.referral_count(u['id'])} نفر")
     kb = InlineKeyboardMarkup([
         [btn("➕ شارژ دستی کیف پول", f"au:charge:{u['id']}")],
-        [btn("🛍 مشاهده سرویس‌ها", f"au:svcs:{u['id']}")],
-        [btn("🔙 بازگشت", "admin:menu")],
+        [btn("🛍 مشاهده سرویس‌ها", f"au:svcs:{u['id']}"), btn("🔙 بازگشت", "admin:menu")],
     ])
     await safe_edit(query, text, reply_markup=kb)
 
@@ -1799,22 +1794,30 @@ SETTING_KEYS = [
     ("test_days", "🔑 مدت تست"),
     ("faq_text", "❓ سوالات متداول"),
 ]
+# چیدمان دکمه‌ها در صفحه تنظیمات (یک ردیف کامل یا دو دکمه کنار هم)
+SETTING_LAYOUT = [
+    ("test_volume_gb", "test_days"),
+    ("card_number", "card_name"),
+    ("support_id", "faq_text"),
+    ("backup_chat_id",),
+]
 
 
 async def admin_settings(query):
     # اکانت تست پیش‌فرض خاموش است؛ کلید روشن/خاموش کنار حجم و مدت تست نمایش داده می‌شود
     test_label = f"🔑 اکانت تست: {'فعال' if db.setting('test_enabled', '0') == '1' else 'غیرفعال'}"
     text = f"⚙️ تنظیمات عمومی\n"
-    rows = []
+    labels = dict(SETTING_KEYS)
     for key, label in SETTING_KEYS:
         if key == "test_volume_gb":
             text += test_label + "\n"
-            rows.append([btn(test_label, "tgl:test_enabled")])
         val = db.setting(key, "—")
         if key == "faq_text" and val != "—":
             val = "✅ تنظیم شده"
         text += f"{label}: {val}\n"
-        rows.append([btn(f"✏️ {label}", f"set:{key}")])
+    rows = [[btn(test_label, "tgl:test_enabled")]]
+    for line in SETTING_LAYOUT:
+        rows.append([btn(f"✏️ {labels[k]}", f"set:{k}") for k in line])
     rows.append([btn("🔙 بازگشت", "admin:menu")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
@@ -1824,8 +1827,7 @@ async def admin_channel(query):
             f"کانال: {db.setting('channel_id', '—')}\nگروه: {db.setting('group_id', '—')}\n\n"
             f"آیدی را با @ یا عدد -100 وارد کنید. ربات باید در کانال/گروه ادمین باشد.")
     kb = InlineKeyboardMarkup([
-        [btn("✏️ آیدی کانال", "set:channel_id")],
-        [btn("✏️ آیدی گروه", "set:group_id")],
+        [btn("✏️ آیدی کانال", "set:channel_id"), btn("✏️ آیدی گروه", "set:group_id")],
         [btn("🔙 بازگشت", "admin:menu")],
     ])
     await safe_edit(query, text, reply_markup=kb)
@@ -1887,8 +1889,7 @@ def report_text(title, ts):
 async def admin_report_menu(query):
     kb = InlineKeyboardMarkup([
         [btn("📅 امروز", "report:day")],
-        [btn("📅 هفتگی", "report:week")],
-        [btn("📅 ماهانه", "report:month")],
+        [btn("📅 هفتگی", "report:week"), btn("📅 ماهانه", "report:month")],
         [btn("🔙 بازگشت", "admin:menu")],
     ])
     await safe_edit(query, f"📈 گزارش\n\nبازه گزارش را انتخاب کنید:", reply_markup=kb)
@@ -1920,12 +1921,9 @@ async def admin_plan_detail(query, pid):
     text = f"📦 پلن #{p['id']}\n🛍️ {plan_label(p)}\n👥 لیمت دستگاه همزمان: {ul_text}\n📌 وضعیت: {st}"
     kb = InlineKeyboardMarkup([
         [btn("✏️ عنوان", f"ple:{pid}:title")],
-        [btn("✏️ حجم (گیگ)", f"ple:{pid}:volume_gb")],
-        [btn("✏️ مدت (روز)", f"ple:{pid}:days")],
-        [btn("✏️ قیمت (تومان)", f"ple:{pid}:price")],
-        [btn("👥 تعداد کاربر (0 تا 5)", f"ple:{pid}:user_limit")],
-        [btn("🔁 فعال / غیرفعال", f"pl:toggle:{pid}")],
-        [btn("🗑 حذف پلن", f"pl:del:{pid}")],
+        [btn("✏️ حجم (گیگ)", f"ple:{pid}:volume_gb"), btn("✏️ مدت (روز)", f"ple:{pid}:days")],
+        [btn("✏️ قیمت (تومان)", f"ple:{pid}:price"), btn("👥 تعداد کاربر (0 تا 5)", f"ple:{pid}:user_limit")],
+        [btn("🔁 فعال / غیرفعال", f"pl:toggle:{pid}"), btn("🗑 حذف پلن", f"pl:del:{pid}")],
         [btn("🔙 بازگشت", "admin:plans")],
     ])
     await safe_edit(query, text, reply_markup=kb)
@@ -1976,7 +1974,8 @@ def map_step_view(sd):
     cur = sd.get("current", {}).get(key)
     if sd.get("panel_id") and cur:
         text += f"\n(انتخاب فعلی: {cur})"
-    rows = [[btn(f"👥 {g['name']}", f"apm:{key}:{g['id']}")] for g in sd["groups"]]
+    gbtns = [btn(f"👥 {g['name']}", f"apm:{key}:{g['id']}") for g in sd["groups"]]
+    rows = [gbtns[i:i + 2] for i in range(0, len(gbtns), 2)]
     rows.append([btn("🚫 روی این پنل فروخته نشود", f"apm:{key}:x")])
     rows.append([btn("🔙 انصراف", f"pb:{sd['panel_id']}" if sd.get("panel_id") else "admin:panels")])
     return text, InlineKeyboardMarkup(rows)
@@ -1988,14 +1987,15 @@ def mappable_services(protocols):
 
 async def admin_panels(query):
     panels = db.get_panels()
-    rows = [[btn("➕ افزودن پنل", "pb:add")]]
+    pbtns = []
     text = "🖥 مدیریت پنل‌های Tifusi Panel:\n\n"
     for p in panels:
         cnt = db.count_panel_active_orders(p["id"])
         sold = [SERVICES[k].split()[0] for k in db.get_service_map(p["id"]) if service_protocols_on(p, k)]
         text += (f"{panel_status_icon(p)} #{p['id']} {p['name']} — {p['location']} — {cnt}/{p['max_users']} کاربر "
                  f"{' '.join(sold)}\n")
-        rows.append([btn(f"#{p['id']} {p['name']} ({cnt}/{p['max_users']})", f"pb:{p['id']}")])
+        pbtns.append(btn(f"#{p['id']} {p['name']} ({cnt}/{p['max_users']})", f"pb:{p['id']}"))
+    rows = [[btn("➕ افزودن پنل", "pb:add")]] + [pbtns[i:i + 2] for i in range(0, len(pbtns), 2)]
     if not panels:
         text += "پنلی ثبت نشده.\n"
     rows.append([btn("🔙 بازگشت", "admin:menu")])
@@ -2021,11 +2021,9 @@ async def admin_panel_detail(query, pid):
             f"🧩 سرویس‌ها:\n{service_map_text(p)}")
     kb = InlineKeyboardMarkup([
         [btn("🔄 بررسی اتصال و به‌روزرسانی پروتکل‌ها", f"pb:test:{pid}")],
-        [btn("🔁 فعال / غیرفعال", f"pb:toggle:{pid}")],
+        [btn("🔁 فعال / غیرفعال", f"pb:toggle:{pid}"), btn("✏️ ویرایش پنل", f"pb:edit:{pid}")],
         [btn("🧩 انتخاب گروه سرویس‌ها", f"pbm:{pid}")],
-        [btn("✏️ ویرایش پنل", f"pb:edit:{pid}")],
-        [btn("🗑 حذف پنل", f"pb:del:{pid}")],
-        [btn("🔙 بازگشت", "admin:panels")],
+        [btn("🗑 حذف پنل", f"pb:del:{pid}"), btn("🔙 بازگشت", "admin:panels")],
     ])
     await safe_edit(query, text, reply_markup=kb)
 
@@ -2061,12 +2059,9 @@ async def admin_panel_test(query, pid):
 
 async def admin_panel_edit(query, pid):
     kb = InlineKeyboardMarkup([
-        [btn("✏️ نام", f"pbe:{pid}:name")],
-        [btn("✏️ آدرس", f"pbe:{pid}:url")],
-        [btn("✏️ یوزرنیم", f"pbe:{pid}:username")],
-        [btn("✏️ پسورد", f"pbe:{pid}:password")],
-        [btn("✏️ موقعیت", f"pbe:{pid}:location")],
-        [btn("✏️ سقف کاربر", f"pbe:{pid}:max_users")],
+        [btn("✏️ نام", f"pbe:{pid}:name"), btn("✏️ آدرس", f"pbe:{pid}:url")],
+        [btn("✏️ یوزرنیم", f"pbe:{pid}:username"), btn("✏️ پسورد", f"pbe:{pid}:password")],
+        [btn("✏️ موقعیت", f"pbe:{pid}:location"), btn("✏️ سقف کاربر", f"pbe:{pid}:max_users")],
         [btn("🧩 انتخاب گروه سرویس‌ها", f"pbm:{pid}")],
         [btn("🔙 بازگشت", f"pb:{pid}")],
     ])
@@ -2136,8 +2131,7 @@ async def admin_backup_menu(query):
         "📢 اگر «آیدی کانال بکاپ» را در تنظیمات عمومی وارد کنید، بکاپ روزانه آنجا هم فرستاده می‌شود.",
         reply_markup=InlineKeyboardMarkup([
             [btn("📥 دریافت بکاپ الان", "bk:now")],
-            [btn("♻️ بازگردانی از فایل بکاپ", "bk:restore")],
-            [btn("🔁 بکاپ خودکار: روشن/خاموش", "bk:auto")],
+            [btn("♻️ بازگردانی از فایل بکاپ", "bk:restore"), btn("🔁 بکاپ خودکار: روشن/خاموش", "bk:auto")],
             [btn("🔙 بازگشت", "admin:menu")],
         ]))
 
@@ -2331,8 +2325,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "acc":
             await safe_edit(query, account_text(uid), reply_markup=InlineKeyboardMarkup([
-                [btn("💰 افزایش موجودی", "wallet:charge")],
-                [btn("🔙 بازگشت", "menu:back")],
+                [btn("💰 افزایش موجودی", "wallet:charge"), btn("🔙 بازگشت", "menu:back")],
             ]))
             return
 
@@ -2846,7 +2839,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         services = db.get_user_orders(u["id"], active_only=False)
         kb = InlineKeyboardMarkup([
             [btn("➕ شارژ دستی کیف پول", f"au:charge:{u['id']}")],
-            [btn("🛍 مشاهده سرویس‌ها", f"au:svcs:{u['id']}")]])
+            [btn("🛍 مشاهده سرویس‌ها", f"au:svcs:{u['id']}"), btn("🔙 بازگشت", "admin:menu")]])
         await msg.reply_text(
             f"👤 {u['full_name']} (@{u['username'] or '-'})\n🆔 {u['id']}\n"
             f"💰 موجودی: {fmt(u['balance'])} تومان\n🛍 سرویس‌ها: {len(services)}",
