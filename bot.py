@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""ربات فروش اشتراک VPN v4.0 — تک‌فایلی (همه‌چیز در همین یک فایل) — فقط Tifusi Panel (Xray / WireGuard / IKEv2 / L2TP) | چندپنلی.
+"""ربات فروش اشتراک VPN — تک‌فایلی (همه‌چیز در همین یک فایل) — فقط Tifusi Panel | چندپنلی.
+پروتکل‌هایی که فروخته می‌شوند از خود پنل خوانده می‌شوند.
 فقط BOT_TOKEN و ADMIN_ID را در بالای فایل پر کنید و اجرا کنید: python bot.py"""
 import re
 import json
@@ -8,9 +9,14 @@ import io
 import asyncio
 import logging
 import datetime
+import os
+import shutil
+import tempfile
+import weakref
 from urllib.parse import urlparse
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.error import RetryAfter, Forbidden, BadRequest
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler,
                           CallbackQueryHandler, ContextTypes, filters)
 
@@ -21,9 +27,14 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+logging.basicConfig(format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", level=logging.INFO)
+log = logging.getLogger("vpn_bot")
+
 # ══════════════════════ تنظیمات — فقط همین دو مقدار را پر کنید ══════════════════════
 BOT_TOKEN = ""      # توکن ربات از @BotFather
 ADMIN_ID = 0        # آیدی عددی ادمین از @userinfobot
+BOT_VERSION = "4.1"
+BOT_VERSION_DATE = "2026-09-16"
 DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل — وقتی پنل به این عدد برسد، خریدهای جدید می‌روند پنل بعدی (تمدیدها همیشه روی همان پنل انجام می‌شوند)
 # ════════════════════════════════════════════════════════════════════════════════════
 
@@ -31,20 +42,29 @@ DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل 
 
 # ══════════════════════ سرویس‌ها (services) ══════════════════════
 
-# ربات فقط از طریق Tifusi Panel می‌فروشد. هر سرویس روی هر پنل به یک «گروه» پنل وصل می‌شود؛
-# گروه تعیین می‌کند کاربر به کدام سرورها دسترسی دارد (سروری که در هیچ گروهی نیست برای همه است).
-# ترتیب همین دیکشنری ترتیب دکمه‌های خرید است. سرویسی که هیچ پنلی برایش گروه انتخاب نکرده به مشتری
-# نشان داده نمی‌شود — مثلاً WireGuard تا وقتی به پنل اضافه نشده و ادمین گروهی برایش انتخاب نکرده.
+# همه‌ی سرویس‌هایی که ربات می‌شناسد، به ترتیب دکمه‌های خرید. اینکه کدام‌شان واقعاً فروخته شود از خود پنل
+# خوانده می‌شود: سرویسی نشان داده می‌شود که حداقل یک پنل فعال برای یکی از پروتکل‌هایش هاست داشته باشد.
+# پس اگر فردا روی پنل مثلاً Hysteria2 یا WireGuard اضافه شد، کافی است ادمین «بررسی اتصال» را بزند
+# (یا چک خودکار ۵ دقیقه‌ای برسد) تا در ربات ظاهر شود؛ پروتکلی که هاستش حذف شد هم از فروش خارج می‌شود.
 SERVICES = {
-    "xray": "🌐 Xray (VLESS / VMess / Trojan)",
-    "wireguard": "🔒 WireGuard",
+    "xray": "🌐 Xray (VLESS / VMess / Trojan / Shadowsocks)",
+    "hysteria2": "⚡ Hysteria2",
     "ikev2": "🛡 IKEv2",
     "l2tp": "🔗 L2TP",
+    "wireguard": "🔒 WireGuard",
+}
+# پروتکل‌های پنل برای هر سرویس — کاربر ساخته‌شده فقط به همین پروتکل‌ها دسترسی می‌گیرد
+SERVICE_PROTOCOLS = {
+    "xray": ["vless", "vmess", "trojan", "shadowsocks"],
+    "hysteria2": ["hysteria2"],
+    "ikev2": ["ikev2"],
+    "l2tp": ["l2tp"],
+    "wireguard": ["wireguard"],
 }
 # اکانت تست روی اولین سرویسِ در دسترس به همین ترتیب ساخته می‌شود
-TEST_SERVICE_ORDER = ["ikev2", "xray", "l2tp", "wireguard"]
-# سفارش‌های نسخه‌ی قبلی Tifusi Panel (یک سرویس کلی با کلید tifusi) هم با همان منطق Tifusi تمدید/حذف می‌شوند
-TIFUSI_ORDER_KEYS = set(SERVICES) | {"tifusi"}
+TEST_SERVICE_ORDER = ["ikev2", "xray", "hysteria2", "l2tp", "wireguard"]
+# سفارش‌های نسخه‌ی ۴.۰ که یک سرویس کلی Tifusi بودند (بدون محدودیت پروتکل)
+GENERIC_ORDER_KEY = "tifusi"
 
 APP_ANDROID_URL = "https://github.com/javadtifusi-eng/Tifusi-VPN/releases/latest/download/tifusi-vpn.apk"
 APP_WINDOWS_URL = "https://github.com/javadtifusi-eng/Tifusi-VPN/releases/latest/download/TifusiVPN.exe"
@@ -57,52 +77,53 @@ TUT_OS = [("windows", "🪟 ویندوز"), ("android", "🤖 اندروید"), 
 
 TRAININGS = {
     "app": {
-        "title": "📱 اپ Tifusi VPN با کد اپ (اندروید / ویندوز)",
+        "title": "📱 اپ Tifusi VPN (اندروید / ویندوز)",
         "android": f"""🤖 اندروید:
 
 1️⃣ اپ Tifusi VPN را دانلود و نصب کنید:
 {APP_ANDROID_URL}
 2️⃣ اپ را باز کنید و به تب «سرورها» بروید
-3️⃣ «کد اپ» که ربات فرستاده (به شکل CODE@آدرس-پنل) را وارد کنید و «دریافت سرورها» را بزنید
-4️⃣ یک سرور را انتخاب کنید و وصل شوید
+3️⃣ «🆔 شناسه»ای که ربات فرستاده را در کادر «شناسه یا لینک اشتراک» بچسبانید و «دریافت سرورها» را بزنید
+   📷 یا به‌جای آن «اسکن بارکد» را بزنید و QR code ارسالی ربات را اسکن کنید
+4️⃣ به تب «خانه» برگردید، سرور را انتخاب کنید و دکمه‌ی اتصال را بزنید
 
-💡 به‌جای کد، لینک اشتراک را هم می‌توانید وارد کنید. با تمدید سرویس، کد و لینک عوض نمی‌شوند.""",
+💡 لینک اشتراک هم در همان کادر کار می‌کند. با تمدید سرویس، شناسه، لینک و QR عوض نمی‌شوند؛
+اگر تغییری در سرورها دادیم، در تب «سرورها» دکمه‌ی «به‌روزرسانی» را بزنید.""",
         "windows": f"""🪟 ویندوز:
 
-1️⃣ برنامه Tifusi VPN را دانلود و اجرا کنید:
+1️⃣ برنامه‌ی Tifusi VPN را دانلود و اجرا کنید:
 {APP_WINDOWS_URL}
-2️⃣ به تب «سرورها» بروید
-3️⃣ «کد اپ» (CODE@آدرس-پنل) را وارد کنید و «دریافت سرورها» را بزنید
-4️⃣ یک سرور را انتخاب کنید و وصل شوید
-
-💡 به‌جای کد، لینک اشتراک را هم می‌توانید وارد کنید.""",
+2️⃣ به بخش «سرورها» بروید
+3️⃣ «🆔 شناسه» یا لینک اشتراک را وارد کنید و «دریافت سرورها» را بزنید
+4️⃣ سرور را انتخاب کنید و وصل شوید""",
     },
     "iphone": {
-        "title": "🍎 آیفون با لینک اشتراک (پروفایل IKEv2)",
-        "ios": """🍎 آیفون / آیپد:
+        "title": "🍎 آیفون / مک",
+        "ios": """🍎 آیفون و مک:
 
-1️⃣ لینک اشتراکی که ربات فرستاده را کپی کنید
-2️⃣ لینک را در Safari باز کنید (نه در مرورگر داخل تلگرام)
-3️⃣ پروفایل IKEv2 را دانلود کنید و از Settings ← Profile Downloaded نصب کنید
+1️⃣ «🔗 لینک اشتراک» را لمس کنید تا در Safari باز شود
+2️⃣ برای IKEv2: در صفحه‌ی باز شده «نصب مستقیم روی iOS/macOS» را بزنید و اجازه‌ی دانلود پروفایل را بدهید
+3️⃣ Settings ← General ← VPN & Device Management ← پروفایل Tifusi را باز کنید و Install را بزنید
 4️⃣ از Settings ← VPN اتصال را روشن کنید
 
-💡 برای سرویس Xray روی آیفون، آموزش «Xray با v2rayNG / Streisand» را ببینید.""",
+🌐 برای Xray روی آیفون: اپ Streisand یا V2Box را نصب کنید، ➕ را بزنید و لینک اشتراک را به‌عنوان Subscription اضافه کنید.
+🔗 برای L2TP: اطلاعات سرور، نام کاربری، رمز و کلید مشترک در همان صفحه‌ی لینک اشتراک نوشته شده است؛ آن‌ها را در Settings ← VPN ← Add VPN Configuration ← L2TP وارد کنید.""",
     },
     "xray": {
-        "title": "🌐 Xray با v2rayNG / Streisand",
+        "title": "🌐 Xray با اپ‌های دیگر (v2rayNG / Streisand)",
         "android": """🤖 اندروید (v2rayNG):
 
 1️⃣ اپ v2rayNG را نصب کنید
 2️⃣ لینک اشتراک را کپی کنید
-3️⃣ در اپ از منوی ☰ ← Subscription group setting ← ➕ لینک را اضافه کنید
-4️⃣ منوی ⋮ ← Update subscription، سپس یک کانفیگ را انتخاب کنید و ▶️ را بزنید
+3️⃣ منوی ☰ ← Subscription group setting ← ➕ و لینک را اضافه کنید
+4️⃣ منوی ⋮ ← Update subscription، یک کانفیگ را انتخاب و ▶️ را بزنید
 
-💡 اپ Tifusi VPN هم با کد اپ همین سرویس را وصل می‌کند.""",
-        "ios": """🍎 آیفون (Streisand):
+💡 ساده‌ترین راه همان اپ Tifusi VPN با «🆔 شناسه» است.""",
+        "ios": """🍎 آیفون (Streisand / V2Box):
 
-1️⃣ اپ Streisand را از اپ‌استور نصب کنید
+1️⃣ اپ Streisand یا V2Box را از اپ‌استور نصب کنید
 2️⃣ لینک اشتراک را کپی کنید
-3️⃣ در اپ ➕ را بزنید و لینک را به‌عنوان Subscription اضافه کنید
+3️⃣ ➕ را بزنید و لینک را به‌عنوان Subscription اضافه کنید
 4️⃣ یک سرور را انتخاب کنید و اتصال را روشن کنید""",
     },
 }
@@ -115,9 +136,12 @@ class PanelError(Exception):
 
 
 class TifusiPanelAPI:
-    """کلاینت API پنل Tifusi Panel (هسته‌های Xray / IKEv2 / L2TP) - هر کاربر یک لینک اشتراک و یک «کد اپ»
-    می‌گیرد که مستقیم در اپ Tifusi VPN وارد می‌شود. گروه‌های پنل تعیین می‌کنند کاربر به کدام سرورها دسترسی
-    دارد؛ سروری که در هیچ گروهی نیست برای همه‌ی کاربران است. رمز کاربر را خود پنل مدیریت می‌کند."""
+    """کلاینت API پنل Tifusi Panel. هر کاربر یک لینک اشتراک و یک «شناسه» می‌گیرد که مستقیم در اپ Tifusi VPN
+    وارد می‌شود؛ رمز کاربر را خود پنل مدیریت می‌کند.
+
+    یک نمونه برای هر پنل نگه داشته می‌شود (panel_client): توکن ورود ۲۴ ساعت معتبر است، پس به‌جای ورود دوباره
+    برای هر خرید یک بار وارد می‌شود و فقط وقتی پنل 401 داد دوباره لاگین می‌کند. درخواست‌های یک پنل با قفل
+    پشت‌سرهم اجرا می‌شوند چون requests.Session برای استفاده‌ی همزمان از چند thread امن نیست."""
 
     def __init__(self, url, username, password, timeout=15):
         self.base = url.rstrip("/")
@@ -125,61 +149,105 @@ class TifusiPanelAPI:
         self.password = password
         self.timeout = timeout
         self.s = requests.Session()
-        self.s.verify = False
         self.s.headers.update({"Accept": "application/json"})
+        # اول گواهی SSL بررسی می‌شود؛ پنل با گواهی self-signed کار می‌کند ولی insecure=True می‌شود تا به ادمین هشدار داده شود
+        self.s.verify = True
+        self.insecure = False
+        self.token = None
+        self.lock = threading.RLock()
 
     def _u(self, path):
         return self.base + path
 
-    def login(self):
+    def _send(self, method, path, **kwargs):
         try:
-            r = self.s.post(self._u("/api/auth/login"),
-                            json={"username": self.username, "password": self.password},
-                            timeout=self.timeout)
+            return self.s.request(method.upper(), self._u(path), timeout=self.timeout, **kwargs)
+        except requests.exceptions.SSLError:
+            if self.s.verify is False:
+                raise PanelError("خطای SSL در اتصال به پنل")
+            self.s.verify = False
+            self.insecure = True
+            try:
+                return self.s.request(method.upper(), self._u(path), timeout=self.timeout, **kwargs)
+            except requests.RequestException as e:
+                raise PanelError(f"خطای اتصال: {e}")
         except requests.RequestException as e:
             raise PanelError(f"خطای اتصال: {e}")
-        if r.status_code == 429:
-            raise PanelError("تلاش ورود زیاد بود؛ چند دقیقه بعد دوباره امتحان کنید")
-        if r.status_code != 200:
-            raise PanelError("ورود به پنل ناموفق بود (آدرس/یوزرنیم/پسورد را چک کنید)")
-        try:
-            token = r.json().get("access_token")
-        except ValueError:
-            token = None
-        if not token:
-            raise PanelError("ورود به پنل ناموفق بود (توکن دریافت نشد)")
-        self.s.headers.update({"Authorization": f"Bearer {token}"})
-        return True
+
+    def login(self):
+        with self.lock:
+            r = self._send("post", "/api/auth/login", json={"username": self.username, "password": self.password})
+            if r.status_code == 429:
+                raise PanelError("تلاش ورود زیاد بود؛ چند دقیقه بعد دوباره امتحان کنید")
+            if r.status_code == 403:
+                raise PanelError("حساب ادمین ربات در پنل غیرفعال شده است")
+            if r.status_code != 200:
+                raise PanelError("ورود به پنل ناموفق بود (آدرس/یوزرنیم/پسورد را چک کنید)")
+            try:
+                token = r.json().get("access_token")
+            except ValueError:
+                token = None
+            if not token:
+                raise PanelError("ورود به پنل ناموفق بود (توکن دریافت نشد)")
+            self.token = token
+            self.s.headers.update({"Authorization": f"Bearer {token}"})
+            return True
 
     def _call(self, path, method="get", **kwargs):
-        try:
-            r = self.s.request(method.upper(), self._u(path), timeout=self.timeout, **kwargs)
-        except requests.RequestException as e:
-            raise PanelError(f"خطای اتصال: {e}")
-        if r.status_code >= 400:
+        with self.lock:
+            if not self.token:
+                self.login()
+            r = self._send(method, path, **kwargs)
+            if r.status_code == 401:
+                # توکن منقضی یا باطل شده (مثلاً رمز ادمین در پنل عوض شده) — یک بار ورود دوباره
+                self.login()
+                r = self._send(method, path, **kwargs)
+            if r.status_code >= 400:
+                try:
+                    detail = r.json().get("detail")
+                except ValueError:
+                    detail = None
+                if isinstance(detail, list):  # خطای اعتبارسنجی FastAPI
+                    detail = "؛ ".join(str(d.get("msg", d)) for d in detail)
+                err = PanelError(str(detail) if detail else f"عملیات ناموفق (HTTP {r.status_code})")
+                err.status = r.status_code
+                raise err
+            if not r.content:
+                return None
             try:
-                msg = r.json().get("detail")
+                return r.json()
             except ValueError:
-                msg = None
-            raise PanelError(str(msg) if msg else f"عملیات ناموفق (HTTP {r.status_code})")
-        if not r.content:
-            return None
-        try:
-            return r.json()
-        except ValueError:
-            return None
+                return None
 
     def list_groups(self):
         """گروه‌های پنل برای نگاشت سرویس ← گروه. پنلی که گروه ندارد همه‌ی سرورهایش عمومی است،
-        برای همین یک ردیف «سرورهای عمومی» (بدون گروه، شناسه ۰) برمی‌گردد تا بشود پنل را اضافه کرد."""
-        obj = self._call("/api/groups", params={"limit": 200}) or {}
+        برای همین یک ردیف «سرورهای عمومی» (بدون گروه، شناسه ۰) هم همیشه اول لیست می‌آید."""
+        try:
+            obj = self._call("/api/groups") or {}
+        except PanelError as e:
+            # ادمین ربات در پنل دسترسی «گروه‌ها» ندارد: فقط سرورهای عمومی قابل انتخاب است
+            if getattr(e, "status", None) != 403:
+                raise
+            obj = {}
         groups = obj.get("groups", []) if isinstance(obj, dict) else (obj or [])
-        result = [{"inbound_id": g.get("id"), "remark": g.get("name", ""), "port": 0,
-                   "protocol": "group", "enabled": True} for g in groups]
-        if not result:
-            result.append({"inbound_id": 0, "remark": "سرورهای عمومی (بدون گروه)", "port": 0,
-                           "protocol": "group", "enabled": True})
+        result = [{"id": 0, "name": "سرورهای عمومی (همه‌ی هاست‌های بدون گروه)"}]
+        result += [{"id": int(g.get("id")), "name": g.get("name", "") or f"#{g.get('id')}"} for g in groups]
         return result
+
+    def list_protocols(self):
+        """{پروتکل: تعداد هاست} برای پروتکل‌هایی که روی پنل حداقل یک هاست دارند.
+        پنل‌های جدید endpoint سبک /api/system/protocols دارند؛ پنل قدیمی‌تر از لیست هاست‌ها خوانده می‌شود."""
+        try:
+            rows = self._call("/api/system/protocols") or []
+            return {str(r["protocol"]): int(r.get("hosts") or 0) for r in rows if r.get("protocol")}
+        except PanelError as e:
+            if getattr(e, "status", None) not in (404, 405):
+                raise
+        obj = self._call("/api/hosts") or {}
+        counts = {}
+        for h in obj.get("hosts", []):
+            counts[h.get("protocol")] = counts.get(h.get("protocol"), 0) + 1
+        return {k: v for k, v in counts.items() if k}
 
     def find_user(self, username):
         obj = self._call("/api/users", params={"q": username, "limit": 200}) or {}
@@ -205,33 +273,39 @@ class TifusiPanelAPI:
         expire = datetime.datetime.fromtimestamp(int(expire_ts), tz=datetime.timezone.utc).isoformat()
         return expire, (int(total_gb) * 1024 ** 3 if total_gb else None)
 
-    def add_user(self, group_ids, username, total_gb, expire_ts):
+    def add_user(self, group_ids, username, total_gb, expire_ts, protocols=None, device_limit=0):
+        """protocols: پروتکل‌هایی که کاربر به آن‌ها دسترسی دارد (None = همه). device_limit: سقف دستگاه همزمان (۰ = نامحدود)."""
         expire, data_limit = self._limits(total_gb, expire_ts)
-        user = self._call("/api/users", "post", json={
-            "username": username, "status": "active", "expire": expire, "data_limit": data_limit,
-            "group_ids": [int(g) for g in group_ids if int(g)], "note": "Tifusi Bot",
-        })
-        return self._with_links(user)
+        body = {"username": username, "status": "active", "expire": expire, "data_limit": data_limit,
+                "group_ids": [int(g) for g in group_ids if int(g)], "note": "Tifusi Bot",
+                "hwid_limit": int(device_limit or 0) or None}
+        if protocols:
+            body["protocols"] = list(protocols)
+        return self._with_links(self._call("/api/users", "post", json=body))
 
-    def renew_user(self, username, total_gb, expire_ts):
-        """همان کاربر به‌روز می‌شود تا لینک اشتراک و شناسه‌ی اپ عوض نشوند؛ حجم جدید روی مصرف فعلی
-        اضافه می‌شود چون پنل مصرف را صفر نمی‌کند. اگر کاربر روی پنل نبود None برمی‌گرداند."""
+    def renew_user(self, username, total_gb, expire_ts, protocols=None, device_limit=0):
+        """همان کاربر به‌روز می‌شود تا لینک اشتراک و شناسه عوض نشوند؛ حجم جدید روی مصرف فعلی اضافه می‌شود
+        چون پنل مصرف را صفر نمی‌کند. اگر کاربر روی پنل نبود None برمی‌گرداند."""
         user = self.find_user(username)
         if not user:
             return None
         expire, extra = self._limits(total_gb, expire_ts)
         data_limit = int(user.get("used_traffic") or 0) + extra if extra else None
-        user = self._call(f"/api/users/{int(user['id'])}", "put",
-                          json={"status": "active", "expire": expire, "data_limit": data_limit})
+        body = {"status": "active", "expire": expire, "data_limit": data_limit}
+        if device_limit is not None:
+            body["hwid_limit"] = int(device_limit) or None
+        if protocols:
+            body["protocols"] = list(protocols)
+        user = self._call(f"/api/users/{int(user['id'])}", "put", json=body)
         return self._with_links(user)
 
     def del_user(self, username):
-        try:
-            user = self.find_user(username)
-            if user:
-                self._call(f"/api/users/{int(user['id'])}", "delete")
-        except PanelError:
-            return None
+        """True اگر حذف شد یا اصلاً روی پنل نبود؛ خطای پنل به‌صورت PanelError بالا می‌رود
+        تا بازگشت وجه برای سرویسی که هنوز روی پنل فعال است انجام نشود."""
+        user = self.find_user(username)
+        if user:
+            self._call(f"/api/users/{int(user['id'])}", "delete")
+        return True
 
     def usage(self, username):
         """مصرف کاربر به بایت، یا None اگر پیدا نشد."""
@@ -248,10 +322,14 @@ class TifusiPanelAPI:
 
 class DB:
     def __init__(self, path="vpn_bot.db"):
-        self.conn = sqlite3.connect(path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.lock = threading.Lock()
+        self.path = path
+        self.lock = threading.RLock()
+        self._connect()
         self._init()
+
+    def _connect(self):
+        self.conn = sqlite3.connect(self.path, check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
 
     def _init(self):
         with self.lock:
@@ -378,6 +456,68 @@ class DB:
             self.x("ALTER TABLE orders ADD COLUMN app_code TEXT DEFAULT ''")
         except Exception:
             pass
+        # مهاجرت ۴.۱: پروتکل‌های خوانده‌شده از پنل ({پروتکل: تعداد هاست})، زمان آخرین بررسی و هشدار SSL
+        for sql in ("ALTER TABLE panels ADD COLUMN protocols TEXT DEFAULT '{}'",
+                    "ALTER TABLE panels ADD COLUMN checked_at INTEGER DEFAULT 0",
+                    "ALTER TABLE panels ADD COLUMN tls_insecure INTEGER DEFAULT 0",
+                    # یادآوری‌های ارسال‌شده برای هر سفارش: 1 = سه روز مانده، 2 = یک روز مانده، 4 = منقضی شد
+                    "ALTER TABLE orders ADD COLUMN reminded INTEGER DEFAULT 0"):
+            try:
+                self.x(sql)
+            except Exception:
+                pass
+        self._archive_legacy()
+        self._migrate_41()
+
+    def _migrate_41(self):
+        """یک بار هنگام ارتقا به ۴.۱:
+        - در ۴.۰ «روی این پنل فروخته نشود» یعنی نبودن ردیف؛ در ۴.۱ نبودن ردیف یعنی «هنوز تصمیم گرفته نشده» و
+          ممکن است خودکار فعال شود. پس برای پنل‌های موجود، سرویس‌های بدون ردیف صریحاً «فروخته نشود» ثبت می‌شوند.
+        - سفارش‌هایی که قبل از ارتقا منقضی شده‌اند یادآوری انقضا نمی‌گیرند."""
+        if self.one("SELECT value FROM settings WHERE key='migrated_41'"):
+            return
+        with self.lock:
+            for (pid,) in self.conn.execute("SELECT id FROM panels").fetchall():
+                have = {r[0] for r in self.conn.execute("SELECT protocol FROM panel_inbounds WHERE panel_id=?", (pid,))}
+                for svc in SERVICES:
+                    if svc not in have:
+                        self.conn.execute("INSERT INTO panel_inbounds (panel_id,inbound_id,protocol,port,enabled,remark) "
+                                          "VALUES (?,0,?,0,0,'')", (pid, svc))
+            self.conn.execute("UPDATE orders SET reminded=7 WHERE expire_at > 0 AND expire_at < ?", (int(time.time()),))
+            self.conn.execute("INSERT OR REPLACE INTO settings (key,value) VALUES ('migrated_41','1')")
+            self.conn.commit()
+
+    def _archive_legacy(self):
+        """ربات فقط با Tifusi Panel کار می‌کند. پنل‌های نسخه‌های خیلی قدیمی (vpn-ui و ...) حذف می‌شوند و
+        سفارش‌هایشان «archived» می‌شوند: در تاریخچه و آمار می‌مانند ولی در سرویس‌های کاربر نمی‌آیند."""
+        legacy = [r["id"] for r in self.q("SELECT id FROM panels WHERE COALESCE(type,'') != 'tifusi'")]
+        for pid in legacy:
+            self.x("UPDATE orders SET status='archived' WHERE panel_id=? AND status IN ('active','delreq_pending')", (pid,))
+            self.x("DELETE FROM panel_inbounds WHERE panel_id=?", (pid,))
+            self.x("DELETE FROM panels WHERE id=?", (pid,))
+        keys = tuple(SERVICES) + (GENERIC_ORDER_KEY,)
+        marks = ",".join("?" * len(keys))
+        self.x(f"UPDATE orders SET status='archived' WHERE protocol NOT IN ({marks}) AND status IN ('active','delreq_pending')", keys)
+        if legacy:
+            log.info("archived %d legacy panel(s) from an older bot version", len(legacy))
+
+    def backup_to(self, dest):
+        """کپی سازگار دیتابیس در حال اجرا (SQLite online backup) — حتی وسط نوشتن هم فایل خراب نمی‌دهد."""
+        with self.lock:
+            out = sqlite3.connect(dest)
+            try:
+                self.conn.backup(out)
+            finally:
+                out.close()
+
+    def restore_from(self, src):
+        """جایگزینی دیتابیس با فایل بکاپ؛ نسخه‌ی فعلی قبلش کنار فایل با پسوند .before-restore نگه داشته می‌شود."""
+        with self.lock:
+            self.backup_to(self.path + ".before-restore")
+            self.conn.close()
+            shutil.copyfile(src, self.path)
+            self._connect()
+            self._init()
 
     # ---------- ابزار داخلی ----------
     def q(self, sql, params=()):
@@ -424,6 +564,18 @@ class DB:
     def add_balance(self, uid, amount):
         self.x("UPDATE users SET balance = balance + ? WHERE id=?", (int(amount), uid))
 
+    def try_spend(self, uid, amount):
+        """کسر اتمیک از کیف پول: فقط اگر موجودی کافی باشد کم می‌کند و True برمی‌گرداند.
+        جلوی خرید دوباره با یک موجودی را می‌گیرد، حتی اگر کاربر دو بار پشت‌سرهم دکمه را بزند."""
+        with self.lock:
+            cur = self.conn.execute("UPDATE users SET balance = balance - ? WHERE id=? AND balance >= ?",
+                                    (int(amount), uid, int(amount)))
+            self.conn.commit()
+            return cur.rowcount == 1
+
+    def all_user_ids(self):
+        return [r["id"] for r in self.q("SELECT id FROM users WHERE COALESCE(is_blocked,0)=0")]
+
     def get_balance(self, uid):
         u = self.get_user(uid)
         return u["balance"] if u else 0
@@ -452,11 +604,12 @@ class DB:
 
     # ---------- پنل‌ها ----------
     def add_panel(self, d):
-        return self.x("""INSERT INTO panels (name,url,username,password,location,max_users,status,type,created_at)
-            VALUES (?,?,?,?,?,?,?,?,?)""",
+        return self.x("""INSERT INTO panels (name,url,username,password,location,max_users,status,type,created_at,
+            protocols,checked_at,tls_insecure) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (d.get("name", ""), d.get("url", ""), d.get("username", ""), d.get("password", ""),
              d.get("location", ""), int(d.get("max_users", 200)), d.get("status", "active"),
-             d.get("type", "tifusi"), int(time.time())))
+             "tifusi", int(time.time()), json.dumps(d.get("protocols") or {}), int(time.time()),
+             1 if d.get("tls_insecure") else 0))
 
     def get_panels(self, active_only=False):
         if active_only:
@@ -478,17 +631,23 @@ class DB:
 
     def set_service_map(self, panel_id, mapping):
         """نگاشت سرویس ← گروه پنل در جدول panel_inbounds: protocol = کلید سرویس، inbound_id = شناسه‌ی گروه
-        (۰ = سرورهای عمومی)، remark = نام گروه. mapping: {service: {"id": ..., "name": ...}}"""
-        self.x("DELETE FROM panel_inbounds WHERE panel_id=?", (panel_id,))
-        for key in SERVICES:
-            g = mapping.get(key)
-            if g:
-                self.x("INSERT INTO panel_inbounds (panel_id,inbound_id,protocol,port,enabled,remark) VALUES (?,?,?,0,1,?)",
-                       (panel_id, int(g.get("id") or 0), key, g.get("name", "")))
+        (۰ = سرورهای عمومی)، remark = نام گروه، enabled = 0 یعنی «روی این پنل فروخته نشود».
+        mapping: {service: {"id": ..., "name": ...} یا None}. فقط کلیدهای داده‌شده عوض می‌شوند."""
+        for key, g in mapping.items():
+            if key not in SERVICES:
+                continue
+            self.x("DELETE FROM panel_inbounds WHERE panel_id=? AND protocol=?", (panel_id, key))
+            self.x("INSERT INTO panel_inbounds (panel_id,inbound_id,protocol,port,enabled,remark) VALUES (?,?,?,0,?,?)",
+                   (panel_id, int((g or {}).get("id") or 0), key, 1 if g else 0, (g or {}).get("name", "")))
 
     def get_service_map(self, panel_id):
-        """{کلید سرویس: ردیف} فقط برای سرویس‌های فعلی؛ ردیف‌های قدیمی (inbound یا گروه نسخه‌های قبل) نادیده گرفته می‌شوند."""
+        """{کلید سرویس: ردیف} برای سرویس‌هایی که روی این پنل فروخته می‌شوند."""
         rows = self.q("SELECT * FROM panel_inbounds WHERE panel_id=? AND enabled=1 ORDER BY id", (panel_id,))
+        return {r["protocol"]: r for r in rows if r["protocol"] in SERVICES}
+
+    def get_service_rows(self, panel_id):
+        """همه‌ی تصمیم‌های ادمین برای این پنل، شامل «فروخته نشود»."""
+        rows = self.q("SELECT * FROM panel_inbounds WHERE panel_id=? ORDER BY id", (panel_id,))
         return {r["protocol"]: r for r in rows if r["protocol"] in SERVICES}
 
     # ---------- پلن‌ها ----------
@@ -527,6 +686,10 @@ class DB:
     def get_order(self, oid):
         return self.one("SELECT * FROM orders WHERE id=?", (oid,))
 
+    def orders_to_remind(self):
+        return self.q("SELECT * FROM orders WHERE status='active' AND expire_at > 0 AND expire_at < ?",
+                      (int(time.time()) + 3 * 86400,))
+
     def get_user_orders(self, uid, active_only=True):
         sql = "SELECT * FROM orders WHERE user_id=?"
         if active_only:
@@ -539,8 +702,17 @@ class DB:
         sets = ",".join(f"{k}=?" for k in fields)
         self.x(f"UPDATE orders SET {sets} WHERE id=?", (*fields.values(), oid))
 
+    def claim_order(self, oid, from_status, to_status):
+        """تغییر وضعیت فقط اگر هنوز from_status باشد؛ True یعنی همین فراخوانی آن را گرفت (دو ادمین همزمان = یک برنده)."""
+        with self.lock:
+            cur = self.conn.execute("UPDATE orders SET status=? WHERE id=? AND status=?", (to_status, oid, from_status))
+            self.conn.commit()
+            return cur.rowcount == 1
+
     def count_panel_active_orders(self, panel_id):
-        return self.one("SELECT COUNT(*) c FROM orders WHERE panel_id=? AND status='active'", (panel_id,))["c"]
+        # سفارش منقضی‌شده جایی در پنل اشغال نمی‌کند؛ اگر شمرده می‌شد پنل‌ها با گذشت زمان «پر» می‌شدند
+        return self.one("SELECT COUNT(*) c FROM orders WHERE panel_id=? AND status='active' AND expire_at > ?",
+                        (panel_id, int(time.time())))["c"]
 
     # ---------- رسیدها ----------
     def create_receipt(self, uid, amount, rtype, photo_id, meta=None):
@@ -594,47 +766,54 @@ class DB:
 
 # ══════════════════════ بدنه اصلی ربات ══════════════════════
 
-logging.basicConfig(format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", level=logging.INFO)
-log = logging.getLogger("vpn_bot")
-
 db = DB()
 
 def service_name(key):
-    """نام نمایشی سرویس؛ کلیدهای نسخه‌های قبلی ربات با برچسب «سرویس قدیمی» نمایش داده می‌شوند."""
     if key in SERVICES:
         return SERVICES[key]
-    if key == "tifusi":
+    if key == GENERIC_ORDER_KEY:
         return "📱 Tifusi VPN"
-    return f"🗄 سرویس قدیمی ({key})"
-
-
-def is_legacy_panel(panel):
-    """پنل‌هایی از دیتابیس نسخه‌ی قبلی که Tifusi Panel نیستند: نه در فروش، نه در چک سلامت — فقط نمایش."""
-    return (panel["type"] or "") != "tifusi"
-
-
-def order_is_legacy(o):
-    """سفارشی که با منطق Tifusi قابل مدیریت نیست: کلیدش سرویس فعلی نیست یا پنلش Tifusi Panel نیست.
-    نوع پنل هم چک می‌شود چون سفارش‌های پنل‌های قدیمی Xray هم کلید xray دارند."""
-    if o["protocol"] not in TIFUSI_ORDER_KEYS:
-        return True
-    panel = db.get_panel(o["panel_id"])
-    return bool(panel) and is_legacy_panel(panel)
+    return f"🗄 سرویس بایگانی‌شده ({key})"
 
 
 def order_name(o):
-    return f"🗄 سرویس قدیمی ({o['protocol']})" if order_is_legacy(o) else service_name(o["protocol"])
+    return service_name(o["protocol"])
 
 
-LEGACY_ORDER_TEXT = ("⚠️ این سرویس مربوط به نسخه‌ی قبلی ربات است و دیگر از اینجا قابل تمدید یا حذف نیست.\n"
-                     "🔐 برای ادامه، لطفاً از «خرید اشتراک» یک سرویس جدید بخرید.")
+def panel_protocols(panel):
+    """{پروتکل: تعداد هاست} آخرین باری که پنل بررسی شد."""
+    try:
+        data = json.loads(panel["protocols"] or "{}")
+        return data if isinstance(data, dict) else {}
+    except (ValueError, TypeError, KeyError, IndexError):
+        return {}
 
 
-def app_code_text(order, panel):
-    """کد اپ به شکل CODE@دامنه‌ی پنل — با هر بیلد اپ کار می‌کند، حتی اگر پنل پیش‌فرض اپ پنل دیگری باشد."""
-    if not panel or not order["app_code"]:
+# پروتکل‌هایی که پنل امروز در فیلد protocols کاربر قبول می‌کند؛ پروتکل تازه‌ی پنل (مثلاً wireguard)
+# به‌محض اینکه روی پنل هاست بگیرد هم پذیرفته می‌شود.
+PANEL_KNOWN_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks", "hysteria2", "ikev2", "l2tp"}
+
+
+def service_protocols_on(panel, service):
+    """پروتکل‌های این سرویس که روی این پنل هاست دارند (به ترتیب SERVICE_PROTOCOLS) — برای تصمیم فروش."""
+    available = panel_protocols(panel)
+    return [p for p in SERVICE_PROTOCOLS.get(service, []) if available.get(p)]
+
+
+def service_access_protocols(panel, service):
+    """پروتکل‌هایی که کاربرِ این سرویس به آن‌ها دسترسی می‌گیرد: کل خانواده‌ی سرویس (نه فقط آن‌هایی که الان هاست دارند)
+    تا اگر بعداً مثلاً Trojan به Xray اضافه شد، مشتریان فعلی Xray هم بدون تمدید به آن دسترسی داشته باشند."""
+    available = panel_protocols(panel)
+    return [p for p in SERVICE_PROTOCOLS.get(service, []) if p in PANEL_KNOWN_PROTOCOLS or available.get(p)]
+
+
+def app_code_text(order, panel=None):
+    """شناسه به شکل CODE@دامنه — با هر بیلد اپ و برای هر پنلی کار می‌کند. دامنه از لینک اشتراک خوانده
+    می‌شود (آدرس عمومی پنل)، نه از آدرسی که ربات با آن به API وصل می‌شود و ممکن است IP یا پورت داخلی باشد."""
+    if not order["app_code"]:
         return "-"
-    return f"{order['app_code']}@{urlparse(panel['url']).netloc}"
+    host = urlparse(order["sub_url"] or "").netloc or (urlparse(panel["url"]).netloc if panel else "")
+    return f"{order['app_code']}@{host}" if host else order["app_code"]
 
 
 def md(s):
@@ -791,7 +970,7 @@ async def close_receipt_for_others(bot, rid, except_chat_id, note):
 def main_menu_kb(uid):
     rows = [
         ["🔐 خرید اشتراک", "♻️ تمدید سرویس"],
-        ["🎲 گردونه شانس", "🔑 اکانت تست"],
+        ["🔑 اکانت تست"],
         ["🏦 کیف پول + شارژ", "🛍 سرویس‌های من"],
         ["💵 تعرفه اشتراک ها", "👥 زیرمجموعه گیری"],
         ["📚 آموزش", "☎️ پشتیبانی"],
@@ -830,9 +1009,10 @@ def admin_menu_kb():
         [pbtn("📊 آمار ربات", "admin:stats"), pbtn("💵 رسیدهای تایید نشده", "admin:receipts")],
         [pbtn("👤 مدیریت کاربر", "admin:users"), pbtn("💸 قیمت سرویس", "admin:plans_view")],
         [pbtn("⚙️ تنظیمات عمومی", "admin:settings"), pbtn("🎫 لیست تیکت‌ها", "admin:tickets")],
-        [pbtn("🔧 قابلیت‌های پنل", "admin:panels_cap"), pbtn("🆕 آپدیت ربات", "admin:update")],
-        [pbtn("📢 کانال/گروه", "admin:channel"), pbtn("📈 گزارش", "admin:report")],
+        [pbtn("🔧 قابلیت‌های پنل", "admin:panels_cap"), pbtn("🆕 نسخه و آپدیت", "admin:update")],
+        [pbtn("📢 کانال/گروه گزارش", "admin:channel"), pbtn("📈 گزارش", "admin:report")],
         [pbtn("🖥 مدیریت پنل‌ها", "admin:panels"), pbtn("📦 مدیریت پلن‌ها", "admin:plans")],
+        [pbtn("📣 پیام همگانی", "admin:broadcast"), pbtn("💾 بکاپ", "admin:backup")],
         [pbtn("👑 مدیریت ادمین‌ها", "admin:admins")],
     ])
 
@@ -865,18 +1045,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------- فلوی کاربر: منوها ----------
-async def show_plans(query, uid):
+async def show_buy_services(query, uid):
+    """قدم اول خرید: فقط سرویس‌هایی که همین الان روی پنل‌ها هاست و ظرفیت خالی دارند."""
+    db.set_state(uid, "none")
+    services = available_services()
+    if not services:
+        await safe_edit(query, "❌ فعلاً سرویسی برای فروش در دسترس نیست. کمی بعد دوباره امتحان کنید.", reply_markup=back_kb())
+        return
+    rows = [[btn(SERVICES[svc], f"proto:{svc}")] for svc in services]
+    rows.append([btn("🔙 بازگشت", "menu:back")])
+    await safe_edit(query, "🔐 خرید اشتراک\n\n🧩 سرویس (پروتکل) مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def show_plans(query, uid, service):
+    """قدم دوم خرید: پلن‌ها برای سرویس انتخاب‌شده."""
     plans = db.get_plans(active_only=True)
     if not plans:
         await safe_edit(query, "❌ فعلاً پلنی تعریف نشده است.", reply_markup=back_kb())
         return
-    text = "🔐 خرید اشتراک\n\nلطفاً پلن مورد نظر را انتخاب کنید:"
-    rows = []
-    for p in plans:
-        rows.append([btn(plan_line(p), f"plan:{p['id']}")])
-    rows.append([btn("🔙 بازگشت", "menu:back")])
-    db.set_state(uid, "none")
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
+    db.set_state(uid, "buy_plan", {"protocol": service})
+    rows = [[btn(plan_line(p), f"plan:{p['id']}")] for p in plans]
+    rows.append([btn("🔙 بازگشت", "menu:buy")])
+    await safe_edit(query, f"🔐 خرید اشتراک — {SERVICES[service]}\n\nلطفاً پلن مورد نظر را انتخاب کنید:",
+                    reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def show_wallet(query, uid):
@@ -915,11 +1106,11 @@ async def show_tariff(query):
 
 # ---------- ساخت سرویس ----------
 def pick_panel(service, prefer_panel_id=None):
-    """Load Balancing: خلوت‌ترین پنل فعال Tifusi با ظرفیت خالی که برای این سرویس گروه انتخاب کرده.
+    """Load Balancing: خلوت‌ترین پنل فعال با ظرفیت خالی که این سرویس را می‌فروشد و پروتکلش روی آن هاست دارد.
     اگر prefer_panel_id هنوز شرایط را دارد همان برمی‌گردد (یوزرنیم مشتری روی همان پنل چک شده بود)."""
     candidates = []
     for p in db.get_panels(active_only=True):
-        if is_legacy_panel(p) or service not in db.get_service_map(p["id"]):
+        if service not in db.get_service_map(p["id"]) or not service_protocols_on(p, service):
             continue
         cnt = db.count_panel_active_orders(p["id"])
         if cnt >= p["max_users"]:
@@ -934,19 +1125,69 @@ def pick_panel(service, prefer_panel_id=None):
 
 
 def available_services():
-    """سرویس‌هایی (به ترتیب SERVICES) که حداقل یک پنل فعال با ظرفیت خالی برایشان گروه دارد."""
+    """سرویس‌هایی (به ترتیب SERVICES) که حداقل یک پنل فعال با ظرفیت خالی برایشان هاست دارد."""
     return [s for s in SERVICES if pick_panel(s)]
 
 
+_clients = {}
+_clients_lock = threading.Lock()
+
+
 def panel_client(panel):
-    return TifusiPanelAPI(panel["url"], panel["username"], panel["password"])
+    """یک کلاینت برای هر پنل تا توکن ورود دوباره استفاده شود؛ با عوض شدن آدرس/یوزر/پسورد نمونه‌ی تازه ساخته می‌شود."""
+    key = (panel["url"], panel["username"], panel["password"])
+    with _clients_lock:
+        cached = _clients.get(panel["id"])
+        if cached and cached[0] == key:
+            return cached[1]
+        client = TifusiPanelAPI(panel["url"], panel["username"], panel["password"])
+        _clients[panel["id"]] = (key, client)
+        return client
+
+
+def refresh_panel(panel):
+    """ورود به پنل و خواندن دوباره‌ی پروتکل‌ها (در thread اجرا شود). خروجی: (قبلی، فعلی) به شکل {پروتکل: تعداد}.
+    سرویس تازه‌ای که ادمین هنوز برایش تصمیمی نگرفته روی «سرورهای عمومی» فروخته می‌شود تا بدون کار اضافه
+    در ربات ظاهر شود؛ اگر ادمین «فروخته نشود» زده باشد همان می‌ماند."""
+    client = panel_client(panel)
+    client.login()
+    before = panel_protocols(panel)
+    after = client.list_protocols()
+    db.update_panel(panel["id"], protocols=json.dumps(after), checked_at=now(), tls_insecure=1 if client.insecure else 0)
+    decided = db.get_service_rows(panel["id"])
+    fresh = [svc for svc in SERVICES if svc not in decided and any(after.get(p) for p in SERVICE_PROTOCOLS[svc])]
+    if fresh:
+        # بدون گروه، همه‌ی هاست‌ها عمومی‌اند و فروش روی «سرورهای عمومی» درست است. اگر پنل گروه دارد ممکن است
+        # هاست‌های این پروتکل داخل گروهی باشند که کاربر بدون گروه به آن دسترسی ندارد؛ پس ادمین باید گروه را انتخاب کند.
+        if len(client.list_groups()) <= 1:
+            db.set_service_map(panel["id"], {svc: {"id": 0, "name": "سرورهای عمومی"} for svc in fresh})
+    return before, after
+
+
+def protocols_diff_text(before, after):
+    added = [p for p in after if p not in before]
+    removed = [p for p in before if p not in after]
+    lines = []
+    if added:
+        lines.append("➕ اضافه شد: " + "، ".join(added))
+    if removed:
+        lines.append("➖ حذف شد: " + "، ".join(removed))
+    return "\n".join(lines)
+
+
+def plan_device_limit(plan):
+    """سقف دستگاه پلن؛ None یعنی «نامعلوم» (مثلاً پلن حذف شده) تا تمدید سقف فعلی روی پنل را دست نزند."""
+    try:
+        value = plan["user_limit"]
+    except (IndexError, KeyError, TypeError):
+        return None
+    return None if value is None else int(value or 0)
 
 
 def create_service_on_panel(user_id, plan, service, username, panel_id=None):
-    """ساخت کاربر روی Tifusi Panel با گروهِ انتخاب‌شده برای این سرویس. رمز را ربات نمی‌سازد؛
-    پنل لینک اشتراک و کد اپ صادر می‌کند و همان‌ها به مشتری تحویل داده می‌شوند."""
+    """ساخت کاربر روی Tifusi Panel فقط با پروتکل‌های همین سرویس، گروه انتخاب‌شده و سقف دستگاه پلن.
+    رمز را ربات نمی‌سازد؛ پنل لینک اشتراک و شناسه صادر می‌کند و همان‌ها به مشتری تحویل داده می‌شوند."""
     if service not in SERVICES:
-        # مثلاً رسید در انتظارِ یک خرید از نسخه‌ی قبلی ربات — خطا باعث بازگشت خودکار وجه می‌شود
         raise PanelError("این سرویس دیگر فروخته نمی‌شود؛ لطفاً یک سرویس جدید بخرید")
     panel = pick_panel(service, panel_id)
     if not panel:
@@ -954,9 +1195,9 @@ def create_service_on_panel(user_id, plan, service, username, panel_id=None):
     gid = int(db.get_service_map(panel["id"])[service]["inbound_id"] or 0)
     expire_at = now() + plan["days"] * 86400
     client = panel_client(panel)
-    client.login()
     # گروه ۰ همان «سرورهای عمومی» است و به پنل فرستاده نمی‌شود (group_ids خالی)
-    res = client.add_user([gid] if gid else [], username, plan["volume_gb"], expire_at)
+    res = client.add_user([gid] if gid else [], username, plan["volume_gb"], expire_at,
+                          protocols=service_access_protocols(panel, service), device_limit=plan_device_limit(plan))
     oid = db.create_order({
         "user_id": user_id, "panel_id": panel["id"], "plan_id": plan["id"],
         "protocol": service, "username": username, "password": "", "inbound_id": gid,
@@ -984,13 +1225,14 @@ def qr_png(data):
 
 
 async def send_order_qr(context, chat_id, order, panel):
-    """ارسال QR لینک اشتراک با کپشن نام سرویس، یوزرنیم و کد اپ؛ در صورت خطا فقط False."""
+    """ارسال QR لینک اشتراک با کپشن نام سرویس، یوزرنیم و شناسه؛ در صورت خطا فقط False."""
     png = qr_png(order["sub_url"])
     if not png:
         return False
     caption = (f"{service_name(order['protocol'])}\n"
                f"👤 یوزرنیم: {order['username']}\n"
-               f"🔢 کد اپ: {app_code_text(order, panel)}")
+               f"🆔 شناسه: {app_code_text(order, panel)}\n\n"
+               f"📷 این بارکد را در اپ Tifusi VPN با «اسکن بارکد» اسکن کنید")
     try:
         await context.bot.send_photo(chat_id, png, caption=caption)
         return True
@@ -1000,11 +1242,12 @@ async def send_order_qr(context, chat_id, order, panel):
 
 
 def app_guide_text(service):
-    """لینک اپ‌ها و راهنمای کوتاه اتصال — برای همه‌ی سرویس‌ها یکسان، به‌جز نکته‌ی v2rayNG برای Xray."""
+    """لینک اپ‌ها و راهنمای کوتاه اتصال."""
     text = (f"📲 اپ Tifusi VPN:\n"
             f"🤖 اندروید: {APP_ANDROID_URL}\n"
             f"🪟 ویندوز: {APP_WINDOWS_URL}\n\n"
-            f"📌 در اپ Tifusi VPN (اندروید/ویندوز) کد اپ را در تب «سرورها» وارد کنید.\n"
+            f"📌 در اپ، تب «سرورها»: شناسه را در «شناسه یا لینک اشتراک» بچسبانید و «دریافت سرورها» را بزنید، "
+            f"یا «اسکن بارکد» را بزنید و QR همین پیام را اسکن کنید.\n"
             f"🍎 آیفون: لینک اشتراک را در Safari باز کنید.")
     if service == "xray":
         text += "\n🌐 لینک اشتراک Xray در v2rayNG و Streisand هم کار می‌کند."
@@ -1012,7 +1255,7 @@ def app_guide_text(service):
 
 
 async def deliver_service(context, chat_id, order, panel):
-    """ارسال اطلاعات سرویس به کاربر: متن (کد اپ + لینک اشتراک + لینک اپ‌ها) و بعد تصویر QR لینک اشتراک."""
+    """ارسال اطلاعات سرویس به کاربر: متن (شناسه + لینک اشتراک + لینک اپ‌ها) و بعد تصویر QR لینک اشتراک."""
     dt = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d %H:%M")
     text = (
         f"✅ سرویس شما ساخته شد!\n\n"
@@ -1021,7 +1264,7 @@ async def deliver_service(context, chat_id, order, panel):
         f"📦 حجم: {vol_text(order['volume_gb'])}\n"
         f"⏳ اعتبار: {order['days']} روز — تا {dt}\n\n"
         f"👤 یوزرنیم: `{order['username']}`\n"
-        f"🔢 کد اپ: `{app_code_text(order, panel)}`\n"
+        f"🆔 شناسه: `{app_code_text(order, panel)}`\n"
         f"🔗 لینک اشتراک:\n`{order['sub_url'] or '-'}`\n\n"
         f"{app_guide_text(order['protocol'])}\n\n"
         f"📚 آموزش کامل در منوی «📚 آموزش».")
@@ -1031,26 +1274,30 @@ async def deliver_service(context, chat_id, order, panel):
 
 # ---------- تمدید ----------
 def do_renew(order, plan):
-    """تمدید روی همان پنل Tifusi — همان کاربر به‌روز می‌شود تا لینک اشتراک و کد اپ عوض نشوند؛
-    اگر کاربر روی پنل حذف شده بود، با همان یوزرنیم و گروه سرویس دوباره ساخته می‌شود."""
-    if order_is_legacy(order):
-        raise PanelError("سرویس قدیمی قابل تمدید نیست؛ لطفاً سرویس جدید بخرید")
+    """تمدید روی همان پنل — همان کاربر به‌روز می‌شود تا لینک اشتراک، شناسه و QR عوض نشوند؛
+    پروتکل‌های کاربر با هاست‌های فعلی آن سرویس روی پنل هماهنگ می‌شوند و اگر کاربر روی پنل حذف
+    شده بود، با همان یوزرنیم و گروه سرویس دوباره ساخته می‌شود."""
+    if order["status"] != "active":
+        raise PanelError("این سرویس فعال نیست و قابل تمدید نیست؛ لطفاً سرویس جدید بخرید")
     panel = db.get_panel(order["panel_id"])
     if not panel:
         raise PanelError("پنل این سرویس حذف شده است")
     client = panel_client(panel)
-    client.login()
     base = max(now(), order["expire_at"])
     expire_at = base + plan["days"] * 86400
-    res = client.renew_user(order["username"], plan["volume_gb"], expire_at)
+    service = order["protocol"]
+    protocols = service_access_protocols(panel, service) if service in SERVICES else None
+    device_limit = plan_device_limit(plan)
+    res = client.renew_user(order["username"], plan["volume_gb"], expire_at, protocols=protocols, device_limit=device_limit)
     if res is None:
         # گروه فعلی سرویس روی پنل؛ اگر ادمین آن را برداشته، همان گروهی که سفارش با آن ساخته شده بود
-        grp = db.get_service_map(panel["id"]).get(order["protocol"])
+        grp = db.get_service_map(panel["id"]).get(service)
         gid = int((grp["inbound_id"] if grp else order["inbound_id"]) or 0)
-        res = client.add_user([gid] if gid else [], order["username"], plan["volume_gb"], expire_at)
+        res = client.add_user([gid] if gid else [], order["username"], plan["volume_gb"], expire_at,
+                              protocols=protocols, device_limit=device_limit)
     db.update_order(order["id"], expire_at=expire_at, volume_gb=plan["volume_gb"], days=plan["days"],
                     price=plan["price"], plan_id=plan.get("id", order["plan_id"]) or order["plan_id"],
-                    status="active", sub_url=res["subscription_url"], app_code=res["app_code"])
+                    status="active", reminded=0, sub_url=res["subscription_url"], app_code=res["app_code"])
     return db.get_order(order["id"]), panel
 
 
@@ -1081,30 +1328,13 @@ async def show_service_detail(query, uid, oid):
     pname = panel["name"] if panel else "حذف‌شده"
     dt = datetime.datetime.fromtimestamp(o["expire_at"]).strftime("%Y-%m-%d — %H:%M")
 
-    if order_is_legacy(o):
-        # سفارش نسخه‌ی قبلی ربات: فقط نمایش — تمدید و حذف از اینجا ممکن نیست
-        creds = f"👤 یوزرنیم: `{o['username']}`"
-        if o["password"]:
-            creds += f"\n🔑 پسورد: `{o['password']}`"
-        if o["sub_url"]:
-            creds += f"\n🔗 لینک اشتراک: `{o['sub_url']}`"
-        text = (f"{md(order_name(o))} — #{o['id']}\n🖥 پنل: {md(pname)}\n\n{creds}\n"
-                f"📦 حجم: {vol_text(o['volume_gb'])}\n"
-                f"⏳ {remaining_text(o['expire_at'])} | 🕓 {dt}\n\n{LEGACY_ORDER_TEXT}")
-        rows = [[btn("🔐 خرید اشتراک جدید", "menu:buy")],
-                [btn("🏠 بازگشت به لیست سرویس‌ها", "menu:services")]]
-        await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows), parse_mode="Markdown")
-        return
-
     # مصرف از همان پنلی که سرویس روی آن ساخته شده
     usage_line = "📊 وضعیت مصرف: در دسترس نیست (پنل پاسخ نمی‌دهد)"
     if not o["volume_gb"]:
         usage_line = "📦 حجم: نامحدود ♾ (بدون محدودیت مصرف)"
     elif panel:
         try:
-            client = panel_client(panel)
-            await asyncio.to_thread(client.login)
-            used_bytes = await asyncio.to_thread(client.usage, o["username"])
+            used_bytes = await asyncio.to_thread(panel_client(panel).usage, o["username"])
             if used_bytes is not None:
                 used = gb(used_bytes)
                 total = o["volume_gb"]
@@ -1114,10 +1344,10 @@ async def show_service_detail(query, uid, oid):
             pass
 
     creds = (f"👤 یوزرنیم: `{o['username']}`\n"
-             f"🔢 کد اپ: `{app_code_text(o, panel)}`\n"
+             f"🆔 شناسه: `{app_code_text(o, panel)}`\n"
              f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`\n"
              f"📲 اندروید: {APP_ANDROID_URL}\n🪟 ویندوز: {APP_WINDOWS_URL}")
-    text = (f"{service_name(o['protocol'])} — #{o['id']}\n"
+    text = (f"{md(service_name(o['protocol']))} — #{o['id']}\n"
             f"🖥 پنل: {md(pname)}\n\n{creds}\n\n{usage_line}\n"
             f"⏳ {remaining_text(o['expire_at'])} | 🕓 {dt}")
     rows = []
@@ -1204,13 +1434,9 @@ async def send_test_account(msg, context, uid):
 
 # ---------- منوی تمدید ----------
 async def show_renew_menu(msg, uid):
-    orders = [o for o in db.get_user_orders(uid) if o["status"] == "active"]
-    renewable = [o for o in orders if not order_is_legacy(o)]
+    renewable = [o for o in db.get_user_orders(uid) if o["status"] == "active"]
     if not renewable:
-        text = "❌ سرویس فعالی برای تمدید ندارید.\nاول از «🔐 خرید اشتراک» سرویس بخر."
-        if orders:
-            text += "\n\nℹ️ سرویس‌های نسخه‌ی قبلی ربات قابل تمدید نیستند؛ لطفاً سرویس جدید بخرید."
-        await msg.reply_text(text)
+        await msg.reply_text("❌ سرویس فعالی برای تمدید ندارید.\nاول از «🔐 خرید اشتراک» سرویس بخر.")
         return
     rows = [[btn(f"♻️ {o['username']} — {vol_text(o['volume_gb'])}", f"renew:{o['id']}")] for o in renewable]
     await msg.reply_text(f"♻️ تمدید سرویس\n\nکدام سرویس را تمدید می‌کنی؟",
@@ -1239,14 +1465,15 @@ async def finalize_wallet_purchase(query, context, uid, data):
     if not plan:
         await safe_edit(query, "❌ پلن یافت نشد.", reply_markup=back_kb())
         return
-    if db.get_balance(uid) < plan["price"]:
+    bal_before = db.get_balance(uid)
+    if not db.try_spend(uid, plan["price"]):
         await safe_edit(query, "❌ موجودی کیف پول کافی نیست. لطفاً ابتدا شارژ کنید.",
                         reply_markup=InlineKeyboardMarkup([[btn("➕ شارژ کیف پول", "wallet:charge")],
                                                            [btn("🔙 بازگشت", "menu:back")]]))
         return
+    # جلسه‌ی خرید همین‌جا بسته می‌شود تا زدن دوباره‌ی دکمه‌ی پرداخت سرویس دوم نسازد
+    db.set_state(uid, "none")
     await safe_edit(query, "♻️ در حال ساخت سرویس... لطفاً چند ثانیه صبر کنید.")
-    bal_before = db.get_balance(uid)
-    db.add_balance(uid, -plan["price"])
     try:
         order, panel = await asyncio.to_thread(
             create_service_on_panel, uid, plan, data["protocol"], data["username"], data.get("panel_id"))
@@ -1254,7 +1481,6 @@ async def finalize_wallet_purchase(query, context, uid, data):
         db.add_balance(uid, plan["price"])  # بازگشت وجه
         await context.bot.send_message(uid, f"❌ خطا در ساخت سرویس: {e}\n💰 مبلغ به کیف پول برگشت.")
         return
-    db.set_state(uid, "none")
     await deliver_service(context, uid, order, panel)
     await context.bot.send_message(uid,
         f"🧾 رسید خرید\n\n"
@@ -1267,18 +1493,10 @@ async def finalize_wallet_purchase(query, context, uid, data):
 
 
 # ---------- تمدید ----------
-def legacy_order_kb(oid):
-    return InlineKeyboardMarkup([[btn("🔐 خرید اشتراک جدید", "menu:buy")],
-                                 [btn("🔙 بازگشت", f"svc:{oid}")]])
-
-
 async def renew_menu(query, uid, oid):
     o = db.get_order(oid)
     if not o or o["user_id"] != uid or o["status"] != "active":
         await safe_edit(query, "❌ سرویس یافت نشد.", reply_markup=back_kb())
-        return
-    if order_is_legacy(o):
-        await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
         return
     plans = db.get_plans(active_only=True)
     text = (f"♻️ تمدید / ارتقای سرویس «{o['username']}»\n"
@@ -1299,9 +1517,6 @@ async def renew_pay_menu(query, uid, oid, pid):
     if not o or not plan or o["user_id"] != uid:
         await safe_edit(query, "❌ سرویس یافت نشد.", reply_markup=back_kb())
         return
-    if order_is_legacy(o):
-        await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
-        return
     kb = InlineKeyboardMarkup([
         [btn("🏦 پرداخت از کیف پول", f"rnw:w:{oid}:{pid}")],
         [btn("💳 کارت به کارت", f"rnw:c:{oid}:{pid}")],
@@ -1312,27 +1527,29 @@ async def renew_pay_menu(query, uid, oid, pid):
         f"━━━━━━━━━━━━━━━\n"
         f"📦 پلن جدید: {plan_label(plan)}\n"
         f"💰 مبلغ: {fmt(plan['price'])} تومان\n\n"
-        f"✅ یوزرنیم، کد اپ و لینک اشتراک ثابت می‌مانند.\nروش پرداخت را انتخاب کن:",
+        f"✅ یوزرنیم، شناسه، لینک اشتراک و QR ثابت می‌مانند.\nروش پرداخت را انتخاب کن:",
         reply_markup=kb)
 
 
 async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
     o = db.get_order(oid)
     p = db.get_plan(plan_id) if plan_id else db.get_plan(o["plan_id"])
-    plan = dict(p) if p else {"id": o["plan_id"], "volume_gb": o["volume_gb"], "days": o["days"], "price": o["price"]}
-    try:
-        new_o, panel = await asyncio.to_thread(do_renew, o, plan)
-    except Exception as e:
-        raise PanelError(str(e))
+    plan = dict(p) if p else {"id": o["plan_id"], "volume_gb": o["volume_gb"], "days": o["days"], "price": o["price"], "user_limit": None}
+    # فقط شکستِ خودِ تمدید خطا برمی‌گرداند (و باعث بازگشت وجه می‌شود)؛ اگر تمدید انجام شد ولی پیام نرسید،
+    # نباید پول برگردد چون سرویس تمدید شده است.
+    new_o, panel = await asyncio.to_thread(do_renew, o, plan)
     dt = datetime.datetime.fromtimestamp(new_o["expire_at"]).strftime("%Y-%m-%d %H:%M")
-    await context.bot.send_message(uid,
-        f"✅ سرویس {new_o['username']} تمدید شد!\n\n"
-        f"📦 پلن جدید: {vol_text(new_o['volume_gb'])} — {new_o['days']} روز\n"
-        f"👤 یوزرنیم: `{new_o['username']}`\n"
-        f"🔢 کد اپ: `{app_code_text(new_o, panel)}`\n"
-        f"🔗 لینک اشتراک: `{new_o['sub_url'] or '-'}`\n"
-        f"⏳ اعتبار جدید: تا {dt}",
-        parse_mode="Markdown")
+    try:
+        await context.bot.send_message(uid,
+            f"✅ سرویس `{new_o['username']}` تمدید شد!\n\n"
+            f"📦 پلن جدید: {vol_text(new_o['volume_gb'])} — {new_o['days']} روز\n"
+            f"👤 یوزرنیم: `{new_o['username']}`\n"
+            f"🆔 شناسه: `{app_code_text(new_o, panel)}`\n"
+            f"🔗 لینک اشتراک: `{new_o['sub_url'] or '-'}`\n"
+            f"⏳ اعتبار جدید: تا {dt}",
+            parse_mode="Markdown")
+    except Exception as e:
+        log.warning("renew message to %s failed: %s", uid, e)
 
 
 # ---------- درخواست حذف ----------
@@ -1341,8 +1558,8 @@ async def delreq_confirm(query, uid, oid):
     if not o or o["user_id"] != uid:
         await safe_edit(query, "❌ سرویس یافت نشد.", reply_markup=back_kb())
         return
-    if order_is_legacy(o):
-        await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
+    if o["status"] != "active":
+        await safe_edit(query, "❌ این سرویس قبلاً درخواست حذف دارد یا فعال نیست.", reply_markup=back_kb())
         return
     kb = InlineKeyboardMarkup([
         [btn("✅ بله، حذف شود", f"delreq:yes:{oid}")],
@@ -1388,9 +1605,7 @@ async def admin_stats(query):
     rc_ok = db.one("SELECT COUNT(*) c FROM receipts WHERE status='approved'")["c"]
     rc_no = db.one("SELECT COUNT(*) c FROM receipts WHERE status='rejected'")["c"]
     tk_closed = db.one("SELECT COUNT(*) c FROM tickets WHERE status='closed'")["c"]
-    all_panels = db.get_panels()
-    panels = [p for p in all_panels if not is_legacy_panel(p)]
-    p_old = len(all_panels) - len(panels)
+    panels = db.get_panels()
     p_on = len([p for p in panels if p["status"] == "active"])
     p_off = len([p for p in panels if p["status"] == "offline"])
     p_ina = len([p for p in panels if p["status"] == "inactive"])
@@ -1410,8 +1625,7 @@ async def admin_stats(query):
             f"💰 درآمد کل: {fmt(t['revenue'])} تومان\n"
             f"━━━━━━━━━━━━━━━\n"
             f"🖥 پنل‌ها\n"
-            f"🟢 فعال: {p_on} | 🔴 آفلاین: {p_off} | ⚪ غیرفعال: {p_ina} | مجموع: {len(panels)}"
-            f"{f' | 🗄 قدیمی: {p_old}' if p_old else ''}\n"
+            f"🟢 فعال: {p_on} | 🔴 آفلاین: {p_off} | ⚪ غیرفعال: {p_ina} | مجموع: {len(panels)}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"💵 رسیدها\n"
             f"⏳ در انتظار: {t['pending_receipts']} | ✅ تاییدشده: {rc_ok} | ❌ ردشده: {rc_no}\n"
@@ -1499,8 +1713,15 @@ async def rc_approve(query, context, rid):
         await query.message.reply_text(f"✅ رسید #{rid} تایید شد — سرویس ساخته و برای کاربر ارسال شد.")
     elif r["rtype"] == "renew":
         o = db.get_order(meta.get("order_id"))
-        if not o:
-            await query.message.reply_text("❌ سفارش یافت نشد.")
+        if not o or o["status"] != "active":
+            # سرویس در این فاصله حذف/بایگانی شده: تمدید نمی‌شود و مبلغ به کیف پول برمی‌گردد
+            db.add_balance(r["user_id"], r["amount"])
+            try:
+                await context.bot.send_message(r["user_id"],
+                    f"❌ سرویسی که برای تمدیدش پرداخت کردید دیگر فعال نیست.\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما برگشت.")
+            except Exception:
+                pass
+            await query.message.reply_text(f"⚠️ سفارش رسید #{rid} فعال نیست؛ تمدید انجام نشد و وجه به کیف پول کاربر برگشت.")
             return
         try:
             await do_renew_and_deliver(query, context, r["user_id"], o["id"], meta.get("plan_id"))
@@ -1570,10 +1791,10 @@ async def admin_user_panel(query, uid_target):
 
 # ---------- تنظیمات ----------
 SETTING_KEYS = [
+    ("backup_chat_id", "💾 آیدی کانال بکاپ"),
     ("card_number", "🏦 شماره کارت"),
     ("card_name", "👤 صاحب حساب"),
     ("support_id", "☎️ پشتیبانی"),
-    ("price_per_gb", "💵 قیمت هر گیگ"),
     ("test_volume_gb", "🔑 حجم تست"),
     ("test_days", "🔑 مدت تست"),
     ("faq_text", "❓ سوالات متداول"),
@@ -1695,7 +1916,7 @@ async def admin_plan_detail(query, pid):
         ul = int(p["user_limit"] or 0)
     except (IndexError, KeyError, TypeError, ValueError):
         ul = 0
-    ul_text = f"{ul} کاربره" if ul else "پیروی از اینباند"
+    ul_text = f"{ul} دستگاه همزمان" if ul else "بدون محدودیت دستگاه"
     text = f"📦 پلن #{p['id']}\n🛍️ {plan_label(p)}\n👥 لیمت دستگاه همزمان: {ul_text}\n📌 وضعیت: {st}"
     kb = InlineKeyboardMarkup([
         [btn("✏️ عنوان", f"ple:{pid}:title")],
@@ -1712,63 +1933,71 @@ async def admin_plan_detail(query, pid):
 
 # ---------- مدیریت پنل‌ها ----------
 def panel_status_icon(p):
-    if is_legacy_panel(p):
-        return "🗄 قدیمی (غیرفعال)"
     return {"offline": "🔴 Offline", "inactive": "⚪ غیرفعال"}.get(p["status"], "🟢")
 
 
-def service_map_text(panel_id):
-    """نمایش نگاشت سرویس ← گروه یک پنل."""
-    smap = db.get_service_map(panel_id)
+def protocols_text(panel):
+    protos = panel_protocols(panel)
+    if not protos:
+        return "  — هیچ پروتکلی روی این پنل هاست ندارد"
+    return "\n".join(f"  • {p} ({n} هاست)" for p, n in protos.items())
+
+
+def service_map_text(panel):
+    """نمایش سرویس‌ها روی یک پنل: فروخته می‌شود / فروخته نمی‌شود / روی پنل هاست ندارد."""
+    rows = db.get_service_rows(panel["id"])
     lines = []
     for key, name in SERVICES.items():
-        g = smap.get(key)
-        if g:
-            lines.append(f"  ✅ {name} ← گروه «{g['remark'] or '-'}» (#{g['inbound_id']})")
+        on_panel = service_protocols_on(panel, key)
+        r = rows.get(key)
+        if not on_panel:
+            lines.append(f"  ⚫ {name} ← روی پنل هاست ندارد")
+        elif r and r["enabled"]:
+            lines.append(f"  ✅ {name} ← گروه «{r['remark'] or '-'}»")
+        elif r:
+            lines.append(f"  🚫 {name} ← روی این پنل فروخته نمی‌شود")
         else:
-            lines.append(f"  ❌ {name} ← روی این پنل فروخته نمی‌شود")
+            lines.append(f"  ✅ {name} ← سرورهای عمومی")
     return "\n".join(lines)
 
 
-def groups_for_state(groups):
-    """گروه‌های list_groups به شکل فشرده برای ذخیره در state (شناسه ۰ = سرورهای عمومی)."""
-    return [{"id": int(g["inbound_id"] or 0), "name": g["remark"] or f"#{g['inbound_id']}"} for g in groups]
-
-
 def map_step_view(sd):
-    """یک مرحله از انتخاب گروه: برای سرویس شماره‌ی step یک گروه یا «روی این پنل فروخته نشود».
+    """یک مرحله از انتخاب گروه برای سرویس‌هایی که روی همین پنل هاست دارند.
     هم در جادوی افزودن پنل (ap_map) و هم در انتخاب مجدد برای پنل موجود (pm_map) استفاده می‌شود."""
-    keys = list(SERVICES)
+    keys = sd["services"]
     step = sd.get("step", 0)
     key = keys[step]
     text = (f"🧩 انتخاب گروه سرویس‌ها ({step + 1}/{len(keys)})\n\n"
             f"گروه پنل تعیین می‌کند کاربر به کدام سرورها دسترسی دارد؛ سروری که در هیچ گروهی نیست برای همه است.\n\n")
     for k in keys[:step]:
         g = sd["map"].get(k)
-        text += f"{'✅' if g else '❌'} {SERVICES[k]} ← {('«' + g['name'] + '»') if g else 'فروخته نمی‌شود'}\n"
+        text += f"{'✅' if g else '🚫'} {SERVICES[k]} ← {('«' + g['name'] + '»') if g else 'فروخته نمی‌شود'}\n"
     text += f"\n👉 سرویس «{SERVICES[key]}» روی کدام گروه فروخته شود؟"
     cur = sd.get("current", {}).get(key)
-    if sd.get("panel_id"):
-        text += f"\n(انتخاب فعلی: {('«' + cur + '»') if cur else 'فروخته نمی‌شود'})"
+    if sd.get("panel_id") and cur:
+        text += f"\n(انتخاب فعلی: {cur})"
     rows = [[btn(f"👥 {g['name']}", f"apm:{key}:{g['id']}")] for g in sd["groups"]]
     rows.append([btn("🚫 روی این پنل فروخته نشود", f"apm:{key}:x")])
     rows.append([btn("🔙 انصراف", f"pb:{sd['panel_id']}" if sd.get("panel_id") else "admin:panels")])
     return text, InlineKeyboardMarkup(rows)
 
 
+def mappable_services(protocols):
+    return [svc for svc in SERVICES if any(protocols.get(p) for p in SERVICE_PROTOCOLS[svc])]
+
+
 async def admin_panels(query):
     panels = db.get_panels()
     rows = [[btn("➕ افزودن پنل", "pb:add")]]
-    text = f"🖥 مدیریت پنل‌های Tifusi Panel:\n\n"
+    text = "🖥 مدیریت پنل‌های Tifusi Panel:\n\n"
     for p in panels:
         cnt = db.count_panel_active_orders(p["id"])
-        text += f"{panel_status_icon(p)} #{p['id']} {p['name']} — {p['location']} — {cnt}/{p['max_users']} کاربر\n"
-        suffix = "قدیمی" if is_legacy_panel(p) else f"{cnt}/{p['max_users']}"
-        rows.append([btn(f"#{p['id']} {p['name']} ({suffix})", f"pb:{p['id']}")])
+        sold = [SERVICES[k].split()[0] for k in db.get_service_map(p["id"]) if service_protocols_on(p, k)]
+        text += (f"{panel_status_icon(p)} #{p['id']} {p['name']} — {p['location']} — {cnt}/{p['max_users']} کاربر "
+                 f"{' '.join(sold)}\n")
+        rows.append([btn(f"#{p['id']} {p['name']} ({cnt}/{p['max_users']})", f"pb:{p['id']}")])
     if not panels:
         text += "پنلی ثبت نشده.\n"
-    if any(is_legacy_panel(p) for p in panels):
-        text += "\nℹ️ پنل‌های «قدیمی» از نسخه‌ی قبلی ربات هستند و در فروش، تمدید و چک سلامت استفاده نمی‌شوند."
     rows.append([btn("🔙 بازگشت", "admin:menu")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
@@ -1779,27 +2008,19 @@ async def admin_panel_detail(query, pid):
         await safe_edit(query, "❌ پنل یافت نشد.")
         return
     cnt = db.count_panel_active_orders(pid)
-    if is_legacy_panel(p):
-        text = (f"🗄 پنل #{p['id']}: {p['name']} — قدیمی (غیرفعال)\n\n"
-                f"🌐 آدرس: {p['url']}\n📍 موقعیت: {p['location'] or '—'}\n"
-                f"👥 سفارش‌های فعال ثبت‌شده: {cnt}\n\n"
-                f"⚠️ این پنل از نسخه‌ی قبلی ربات است و Tifusi Panel نیست؛ برای فروش، تمدید و چک سلامت "
-                f"استفاده نمی‌شود و سرویس‌های قبلی کاربرانش فقط نمایش داده می‌شوند.")
-        kb = InlineKeyboardMarkup([
-            [btn("🗑 حذف پنل", f"pb:del:{pid}")],
-            [btn("🔙 بازگشت", "admin:panels")],
-        ])
-        await safe_edit(query, text, reply_markup=kb)
-        return
     icons = {"active": "🟢 فعال", "inactive": "⚪ غیرفعال", "offline": "🔴 Offline"}
+    checked = datetime.datetime.fromtimestamp(p["checked_at"]).strftime("%Y-%m-%d %H:%M") if p["checked_at"] else "هرگز"
+    tls = "\n⚠️ گواهی SSL پنل معتبر نیست (self-signed)؛ اتصال رمزنگاری شده ولی هویت پنل تایید نمی‌شود." if p["tls_insecure"] else ""
     text = (f"🖥 پنل #{p['id']}: {p['name']} (Tifusi Panel)\n\n"
             f"🌐 آدرس: {p['url']}\n👤 یوزر: {p['username']}\n"
             f"📍 موقعیت: {p['location'] or '—'}\n"
             f"📌 وضعیت: {icons.get(p['status'], p['status'])}\n"
-            f"👥 کاربران: {cnt}/{p['max_users']}\n\n"
-            f"🧩 سرویس‌ها و گروه‌ها:\n{service_map_text(pid)}")
+            f"👥 کاربران فعال ربات: {cnt}/{p['max_users']}\n"
+            f"🕓 آخرین بررسی: {checked}{tls}\n\n"
+            f"📡 پروتکل‌های روی پنل:\n{protocols_text(p)}\n\n"
+            f"🧩 سرویس‌ها:\n{service_map_text(p)}")
     kb = InlineKeyboardMarkup([
-        [btn("🔄 تست اتصال", f"pb:test:{pid}")],
+        [btn("🔄 بررسی اتصال و به‌روزرسانی پروتکل‌ها", f"pb:test:{pid}")],
         [btn("🔁 فعال / غیرفعال", f"pb:toggle:{pid}")],
         [btn("🧩 انتخاب گروه سرویس‌ها", f"pbm:{pid}")],
         [btn("✏️ ویرایش پنل", f"pb:edit:{pid}")],
@@ -1810,19 +2031,32 @@ async def admin_panel_detail(query, pid):
 
 
 async def admin_panel_test(query, pid):
+    """بررسی اتصال + خواندن دوباره‌ی پروتکل‌ها از پنل؛ تغییرات بلافاصله در فروش ربات اعمال می‌شود."""
     p = db.get_panel(pid)
     if not p:
         return
-    back = InlineKeyboardMarkup([[btn("🔙 بازگشت", f"pb:{pid}")]])
-    if is_legacy_panel(p):
-        await safe_edit(query, f"🗄 پنل {p['name']} قدیمی است و تست نمی‌شود.", reply_markup=back)
-        return
-    await safe_edit(query, f"🔄 در حال تست پنل {p['name']}...")
+    back = InlineKeyboardMarkup([[btn("🔙 بازگشت به پنل", f"pb:{pid}")]])
+    await safe_edit(query, f"🔄 در حال بررسی پنل {p['name']}...")
     try:
-        ms = await asyncio.to_thread(panel_client(p).ping)
-        await query.message.reply_text(f"✅ پنل {p['name']} — Online ({ms}ms)", reply_markup=back)
+        t0 = time.time()
+        before, after = await asyncio.to_thread(refresh_panel, p)
+        ms = int((time.time() - t0) * 1000)
     except Exception as e:
+        if p["status"] == "active":
+            db.update_panel(pid, status="offline")
         await query.message.reply_text(f"❌ پنل {p['name']} — Offline\nخطا: {e}", reply_markup=back)
+        return
+    if p["status"] == "offline":
+        db.update_panel(pid, status="active")
+    p = db.get_panel(pid)
+    diff = protocols_diff_text(before, after)
+    changes = f"🔔 تغییرات:\n{diff}" if diff else "✔️ پروتکل‌ها تغییری نکرده‌اند."
+    await query.message.reply_text(
+        f"✅ پنل {p['name']} — Online ({ms}ms)\n\n"
+        f"📡 پروتکل‌های روی پنل:\n{protocols_text(p)}\n\n"
+        f"{changes}\n\n"
+        f"🧩 سرویس‌ها:\n{service_map_text(p)}",
+        reply_markup=back)
 
 
 async def admin_panel_edit(query, pid):
@@ -1840,17 +2074,18 @@ async def admin_panel_edit(query, pid):
 
 
 async def finish_panel_wizard(message, uid, draft):
-    draft["type"] = "tifusi"
+    mapping = {svc: draft["map"].get(svc) for svc in draft.get("services", [])}
     pid = db.add_panel(draft)
-    db.set_service_map(pid, draft.get("map", {}))
+    db.set_service_map(pid, mapping)
     db.set_state(uid, "none")
-    note = ("از این پس کاربران جدید به‌صورت خودکار روی خلوت‌ترین پنل ساخته می‌شوند." if draft.get("map") else
-            "⚠️ هیچ سرویسی برای این پنل انتخاب نشد؛ تا از «🧩 انتخاب گروه سرویس‌ها» گروهی انتخاب نکنید، "
-            "روی این پنل فروشی انجام نمی‌شود.")
+    p = db.get_panel(pid)
+    note = ("از این پس کاربران جدید به‌صورت خودکار روی خلوت‌ترین پنل ساخته می‌شوند." if db.get_service_map(pid) else
+            "⚠️ هیچ سرویسی برای فروش روی این پنل انتخاب نشد؛ از «🧩 انتخاب گروه سرویس‌ها» فعالش کنید.")
     await message.reply_text(
         f"✅ پنل «{draft['name']}» با موفقیت ثبت شد!\n\n"
         f"🌐 {draft['url']}\n📍 {draft['location']}\n👥 سقف: {draft['max_users']} کاربر\n\n"
-        f"🧩 سرویس‌ها:\n{service_map_text(pid)}\n\n{note}",
+        f"📡 پروتکل‌ها:\n{protocols_text(p)}\n\n🧩 سرویس‌ها:\n{service_map_text(p)}\n\n{note}\n\n"
+        f"💡 هر وقت روی پنل پروتکل جدیدی اضافه کردید، «🔄 بررسی اتصال» را بزنید (هر ۵ دقیقه هم خودکار بررسی می‌شود).",
         reply_markup=main_menu_kb(uid))
 
 
@@ -1860,18 +2095,87 @@ async def admin_panels_cap(query):
         await safe_edit(query, "پنلی ثبت نشده است.",
                         reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
         return
-    text = f"🔧 قابلیت‌ها و ظرفیت پنل‌ها:\n\n"
+    text = "🔧 قابلیت‌ها و ظرفیت پنل‌ها:\n\n"
     icons = {"active": "🟢", "inactive": "⚪", "offline": "🔴"}
     for p in panels:
-        if is_legacy_panel(p):
-            text += f"🗄 {p['name']} — قدیمی (غیرفعال)\n"
-            continue
         cnt = db.count_panel_active_orders(p["id"])
-        smap = db.get_service_map(p["id"])
-        sold = [SERVICES[k] for k in SERVICES if k in smap]
+        sold = [SERVICES[k] for k in SERVICES if k in db.get_service_map(p["id"]) and service_protocols_on(p, k)]
         text += (f"{icons.get(p['status'], '⚪')} {p['name']} — {cnt}/{p['max_users']} کاربر\n"
+                 f"   📡 {', '.join(panel_protocols(p)) or '—'}\n"
                  f"   🧩 {', '.join(sold) if sold else '—'}\n")
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+
+
+# ---------- بکاپ ----------
+async def send_backup(bot, chat_id, note="💾 بکاپ دیتابیس ربات"):
+    """کپی سازگار دیتابیس (کاربران، کیف پول‌ها، سفارش‌ها، پنل‌ها، پلن‌ها، تنظیمات) به‌صورت فایل برای ادمین."""
+    fd, tmp = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        await asyncio.to_thread(db.backup_to, tmp)
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+        t = db.totals()
+        with open(tmp, "rb") as f:
+            await bot.send_document(chat_id, f, filename=f"tifusi-bot-backup_{stamp}.db",
+                caption=(f"{note}\n🕓 {stamp}\n👤 کاربران: {t['users']} | 🧾 سفارش‌ها: {t['orders']} | "
+                         f"✅ فعال: {t['active']}\n\n♻️ برای بازگردانی: پنل مدیریت ← 💾 بکاپ ← بازگردانی"))
+        return True
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+async def admin_backup_menu(query):
+    auto = db.setting("backup_auto", "1") == "1"
+    await safe_edit(query,
+        "💾 بکاپ ربات\n\n"
+        "بکاپ شامل همه‌چیز است: کاربران، موجودی کیف پول‌ها، سفارش‌ها، رسیدها، پنل‌ها، پلن‌ها و تنظیمات.\n\n"
+        f"🕓 بکاپ خودکار روزانه (ساعت ۳ بامداد به ادمین اصلی): {'فعال ✅' if auto else 'غیرفعال ❌'}\n"
+        "📢 اگر «آیدی کانال بکاپ» را در تنظیمات عمومی وارد کنید، بکاپ روزانه آنجا هم فرستاده می‌شود.",
+        reply_markup=InlineKeyboardMarkup([
+            [btn("📥 دریافت بکاپ الان", "bk:now")],
+            [btn("♻️ بازگردانی از فایل بکاپ", "bk:restore")],
+            [btn("🔁 بکاپ خودکار: روشن/خاموش", "bk:auto")],
+            [btn("🔙 بازگشت", "admin:menu")],
+        ]))
+
+
+# ---------- پیام همگانی ----------
+async def run_broadcast(bot, admin_id, payload):
+    """ارسال پیام به همه‌ی کاربرانِ غیرمسدود با سرعت امن تلگرام (~۲۰ پیام در ثانیه) در پس‌زمینه."""
+    ids = db.all_user_ids()
+    sent = failed = 0
+    for i, uid in enumerate(ids):
+        for attempt in range(3):
+            try:
+                if payload.get("photo_id"):
+                    await bot.send_photo(uid, payload["photo_id"], caption=payload.get("text") or None)
+                else:
+                    await bot.send_message(uid, payload["text"])
+                sent += 1
+                break
+            except RetryAfter as e:
+                await asyncio.sleep(float(getattr(e, "retry_after", 5)) + 1)
+            except (Forbidden, BadRequest):
+                failed += 1  # ربات بلاک شده یا کاربر حذف شده
+                break
+            except Exception as e:
+                if attempt == 2:
+                    failed += 1
+                    log.warning("broadcast to %s failed: %s", uid, e)
+                await asyncio.sleep(1)
+        await asyncio.sleep(0.05)
+        if (i + 1) % 500 == 0:
+            try:
+                await bot.send_message(admin_id, f"📢 در حال ارسال... {i + 1}/{len(ids)}")
+            except Exception:
+                pass
+    try:
+        await bot.send_message(admin_id, f"✅ پیام همگانی تمام شد.\n📨 موفق: {sent}\n❌ ناموفق (ربات بلاک/حذف شده): {failed}")
+    except Exception:
+        pass
 
 
 # =================== مسیریاب Callback ===================
@@ -1901,40 +2205,38 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.set_state(uid, "none")
                 await safe_edit(query, "🏠 منوی اصلی:", reply_markup=None)
             elif what == "buy":
-                await show_plans(query, uid)
+                await show_buy_services(query, uid)
             elif what == "services":
                 await show_services(query, uid)
             return
 
-        if cmd == "plan":
-            db.set_state(uid, "buy_proto", {"plan_id": int(parts[1])})
-            # فقط سرویس‌هایی که حداقل یک پنل فعال با ظرفیت خالی برایشان گروه دارد
-            rows = [[btn(SERVICES[s], f"proto:{s}")] for s in available_services()]
-            if not rows:
-                await safe_edit(query, "❌ فعلاً ظرفیت خالی برای ساخت سرویس وجود ندارد. کمی بعد تلاش کن.",
-                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "menu:buy")]]))
-                return
-            rows.append([btn("🔙 بازگشت", "menu:buy")])
-            await safe_edit(query, "🧩 سرویس مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(rows))
-            return
-
         if cmd == "proto":
-            state, sd = db.get_state(uid)
             service = parts[1] if len(parts) > 1 else ""
-            if service not in SERVICES or not sd.get("plan_id") or not pick_panel(service):
-                # دکمه‌ی قدیمی یا سرویسی که الان ظرفیت ندارد
+            if service not in SERVICES or not pick_panel(service):
+                # دکمه‌ی قدیمی یا سرویسی که الان ظرفیت/هاست ندارد
                 await safe_edit(query, "❌ این سرویس الان در دسترس نیست. دوباره از «خرید اشتراک» شروع کنید.",
                                 reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "menu:buy")]]))
                 return
-            sd["protocol"] = service
+            await show_plans(query, uid, service)
+            return
+
+        if cmd == "plan":
+            state, sd = db.get_state(uid)
+            plan = db.get_plan(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
+            service = sd.get("protocol")
+            if state != "buy_plan" or service not in SERVICES or not plan or not plan["active"]:
+                await safe_edit(query, "❌ جلسه خرید منقضی شده. دوباره از «خرید اشتراک» شروع کنید.",
+                                reply_markup=InlineKeyboardMarkup([[btn("🔐 خرید اشتراک", "menu:buy")]]))
+                return
+            sd["plan_id"] = plan["id"]
             db.set_state(uid, "buy_username", sd)
             await safe_edit(query,
-                f"👤 انتخاب نام کاربری\n\nیک نام کاربری دلخواه ارسال کنید\n\n"
-                "⚠️ نام کاربری باید بدون @ ، فاصله و خط تیره باشد\n"
-                "⚠️ نام کاربری باید انگلیسی باشد\n\n"
+                f"👤 انتخاب نام کاربری\n\n🧩 {SERVICES[service]}\n📦 {plan_label(plan)}\n\n"
+                "یک نام کاربری دلخواه ارسال کنید\n\n"
+                "⚠️ فقط حروف انگلیسی، عدد و _ ؛ با حرف شروع شود؛ ۳ تا ۲۰ کاراکتر\n\n"
                 "✅ نام‌های صحیح: ali12 | mahdi | ws1_ksdf\n"
-                "❌ نام‌های نادرست: ali | tele@ | محسن | _mahdi",
-                reply_markup=InlineKeyboardMarkup([[btn("🏠 بازگشت به منوی قبل", "menu:buy")]]))
+                "❌ نام‌های نادرست: al | tele@ | محسن | _mahdi",
+                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", f"proto:{service}")]]))
             return
 
         if cmd == "pay":
@@ -1958,7 +2260,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "qr":
             o = db.get_order(int(parts[1]))
-            if o and o["user_id"] == uid and o["status"] == "active" and not order_is_legacy(o):
+            if o and o["user_id"] == uid and o["status"] == "active":
                 if not await send_order_qr(context, uid, o, db.get_panel(o["panel_id"])):
                     await query.message.reply_text("❌ ساخت QR code ممکن نشد؛ لینک اشتراک را از متن سرویس کپی کنید.")
             return
@@ -1975,23 +2277,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             oid = int(parts[2])
             pid = int(parts[3]) if len(parts) > 3 else None
             o = db.get_order(oid)
-            if not o or o["user_id"] != uid:
-                return
-            if order_is_legacy(o):
-                await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
+            if not o or o["user_id"] != uid or o["status"] != "active":
                 return
             p = db.get_plan(pid) if pid else db.get_plan(o["plan_id"])
             price = p["price"] if p else o["price"]
             plan_id = pid or o["plan_id"]
             if parts[1] == "w":
-                if db.get_balance(uid) < price:
+                bal_before = db.get_balance(uid)
+                if not db.try_spend(uid, price):
                     await safe_edit(query, "❌ موجودی کیف پول کافی نیست.",
                         reply_markup=InlineKeyboardMarkup([[btn("💰 افزایش موجودی", "wallet:charge")],
                                                            [btn("🔙 بازگشت", f"svc:{oid}")]]))
                     return
                 await safe_edit(query, "♻️ در حال تمدید...")
-                bal_before = db.get_balance(uid)
-                db.add_balance(uid, -price)
                 try:
                     await do_renew_and_deliver(query, context, uid, oid, plan_id)
                 except Exception as e:
@@ -2013,9 +2311,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             oid = int(parts[-1])
             if parts[1] == "yes":
                 o = db.get_order(oid)
-                if o and o["user_id"] == uid and o["status"] == "active" and order_is_legacy(o):
-                    await safe_edit(query, LEGACY_ORDER_TEXT, reply_markup=legacy_order_kb(oid))
-                elif o and o["user_id"] == uid and o["status"] == "active":
+                if o and o["user_id"] == uid and o["status"] == "active":
                     db.update_order(oid, status="delreq_pending")
                     await safe_edit(query, "✅ درخواست حذف ثبت شد و برای ادمین ارسال شد.", reply_markup=back_kb())
                     await notify_admin(context.bot,
@@ -2103,9 +2399,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await admin_panels_cap(query)
             elif what == "update":
                 await safe_edit(query,
-                    f"🆕 نسخه ربات: {db.setting('bot_version', '3.0')}\n"
-                    f"📅 تاریخ نسخه: {db.setting('bot_version_date', '—')}",
+                    f"🆕 نسخه ربات: {BOT_VERSION}\n📅 تاریخ نسخه: {BOT_VERSION_DATE}\n\n"
+                    f"برای آپدیت، روی سرور ربات بزنید:\n tifusi bot\n"
+                    f"و گزینه‌ی «Update bot» را انتخاب کنید. تنظیمات و دیتابیس حفظ می‌شوند؛\n"
+                    f"برای اطمینان قبلش از «💾 بکاپ» یک نسخه بگیرید.",
                     reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+            elif what == "backup":
+                await admin_backup_menu(query)
+            elif what == "broadcast":
+                db.set_state(uid, "broadcast_msg")
+                await safe_edit(query,
+                    f"📣 پیام همگانی\n\nمتن پیام (یا یک عکس با کپشن) را بفرستید.\n"
+                    f"👥 گیرندگان: {len(db.all_user_ids())} کاربر غیرمسدود",
+                    reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:menu")]]))
             elif what == "channel":
                 await admin_channel(query)
             elif what == "report":
@@ -2120,6 +2426,60 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                     reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
                 else:
                     await admin_admins(query)
+            return
+
+        if cmd == "bk":
+            if parts[1] == "now":
+                await safe_edit(query, "⏳ در حال آماده‌سازی بکاپ...")
+                try:
+                    await send_backup(context.bot, uid)
+                except Exception as e:
+                    await query.message.reply_text(f"❌ ساخت بکاپ ناموفق بود: {e}")
+            elif parts[1] == "auto":
+                db.set_setting("backup_auto", "0" if db.setting("backup_auto", "1") == "1" else "1")
+                await admin_backup_menu(query)
+            elif parts[1] == "restore":
+                if uid != ADMIN_ID:
+                    await safe_edit(query, "⛔ فقط ادمین اصلی می‌تواند بکاپ را بازگردانی کند.",
+                                    reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:backup")]]))
+                    return
+                db.set_state(uid, "restore_file")
+                await safe_edit(query,
+                    "♻️ بازگردانی بکاپ\n\nفایل بکاپ (‎.db) را همین‌جا بفرستید.\n\n"
+                    "⚠️ همه‌ی اطلاعات فعلی ربات با محتوای فایل جایگزین می‌شود. نسخه‌ی فعلی قبلش کنار دیتابیس ذخیره می‌شود.",
+                    reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:backup")]]))
+            elif parts[1] == "yes":
+                state, sd = db.get_state(uid)
+                path = sd.get("path")
+                if uid != ADMIN_ID or state != "restore_confirm" or not path or not os.path.exists(path):
+                    await safe_edit(query, "❌ جلسه‌ی بازگردانی منقضی شده؛ دوباره فایل را بفرستید.")
+                    return
+                try:
+                    await asyncio.to_thread(db.restore_from, path)
+                except Exception as e:
+                    await safe_edit(query, f"❌ بازگردانی ناموفق بود: {e}")
+                    return
+                finally:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                with _clients_lock:
+                    _clients.clear()
+                db.set_state(uid, "none")
+                t = db.totals()
+                await safe_edit(query, f"✅ بکاپ بازگردانی شد.\n👤 کاربران: {t['users']} | 🧾 سفارش‌ها: {t['orders']} | ✅ فعال: {t['active']}")
+            return
+
+        if cmd == "bc":
+            state, sd = db.get_state(uid)
+            if parts[1] == "go" and state == "broadcast_confirm" and (sd.get("text") or sd.get("photo_id")):
+                db.set_state(uid, "none")
+                await safe_edit(query, "📣 ارسال شروع شد؛ نتیجه را همین‌جا گزارش می‌دهم.")
+                context.application.create_task(run_broadcast(context.bot, uid, sd))
+            else:
+                db.set_state(uid, "none")
+                await safe_edit(query, "❌ پیام همگانی لغو شد.", reply_markup=InlineKeyboardMarkup([[btn("🔙", "admin:menu")]]))
             return
 
         if cmd == "adm":
@@ -2214,32 +2574,34 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             o = db.get_order(oid)
             if not o:
                 return
+            if not db.claim_order(oid, "delreq_pending", "deleting" if parts[1] == "ok" else "active"):
+                await safe_edit(query, f"⚠️ درخواست حذف سرویس #{oid} قبلاً توسط ادمین دیگری بررسی شده است.")
+                return
             if parts[1] == "ok":
                 panel = db.get_panel(o["panel_id"])
-                err = ""
-                if order_is_legacy(o):
-                    # درخواست حذفی که قبل از به‌روزرسانی ثبت شده؛ پنل قدیمی از ربات مدیریت نمی‌شود
-                    err = "سرویس قدیمی است؛ در صورت نیاز کاربر را دستی از پنل قبلی حذف کنید"
-                elif panel:
+                if panel:
                     try:
-                        client = panel_client(panel)
-                        await asyncio.to_thread(client.login)
-                        await asyncio.to_thread(client.del_user, o["username"])
+                        await asyncio.to_thread(panel_client(panel).del_user, o["username"])
                     except Exception as e:
-                        err = str(e)
+                        db.claim_order(oid, "deleting", "delreq_pending")
+                        # کاربر هنوز روی پنل فعال است؛ بازگشت وجه انجام نمی‌شود تا ادمین دوباره تلاش کند
+                        await safe_edit(query, f"❌ حذف سرویس #{oid} از پنل ناموفق بود: {e}\n"
+                                               f"درخواست باز ماند؛ بعد از رفع مشکل پنل دوباره تایید کنید.",
+                                        reply_markup=InlineKeyboardMarkup([[btn("🔁 تلاش دوباره", f"dq:ok:{oid}"),
+                                                                            btn("❌ رد درخواست", f"dq:no:{oid}")]]))
+                        return
                 # بازگشت وجه متناسب با روزهای باقی‌مانده
                 refund = 0
                 if o["expire_at"] > now() and o["days"]:
-                    refund = int(o["price"] * (o["expire_at"] - now()) / (o["days"] * 86400))
+                    refund = min(int(o["price"]), int(o["price"] * (o["expire_at"] - now()) / (o["days"] * 86400)))
                 db.update_order(oid, status="deleted")
                 if refund:
                     db.add_balance(o["user_id"], refund)
                 await context.bot.send_message(o["user_id"],
                     f"🗑 سرویس {o['username']} حذف شد.\n💰 مبلغ {fmt(refund)} تومان به کیف پول شما برگشت.")
                 await safe_edit(query, f"✅ سرویس #{oid} حذف شد و {fmt(refund)} تومان برگشت." +
-                                (f"\n⚠️ خطای پنل: {err}" if err else ""))
+                                ("" if panel else "\n⚠️ پنل این سرویس در ربات وجود ندارد؛ اگر کاربر روی سرور مانده دستی حذفش کنید."))
             else:
-                db.update_order(oid, status="active")
                 await context.bot.send_message(o["user_id"], "❌ درخواست حذف سرویس شما توسط ادمین رد شد.")
                 await safe_edit(query, f"❌ درخواست حذف سرویس #{oid} رد شد.")
             return
@@ -2310,21 +2672,27 @@ async def on_callback_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # انتخاب مجدد گروه سرویس‌ها برای پنل موجود — گروه‌ها تازه از خود پنل خوانده می‌شوند
             pid = int(parts[1])
             p = db.get_panel(pid)
-            if not p or is_legacy_panel(p):
-                await safe_edit(query, "❌ این پنل Tifusi Panel نیست یا حذف شده است.",
+            if not p:
+                await safe_edit(query, "❌ این پنل حذف شده است.",
                                 reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:panels")]]))
                 return
-            await safe_edit(query, f"🔄 در حال دریافت گروه‌های پنل {p['name']}...")
+            await safe_edit(query, f"🔄 در حال دریافت پروتکل‌ها و گروه‌های پنل {p['name']}...")
             try:
-                client = panel_client(p)
-                await asyncio.to_thread(client.login)
-                groups = await asyncio.to_thread(client.list_groups)
+                await asyncio.to_thread(refresh_panel, p)
+                groups = await asyncio.to_thread(panel_client(p).list_groups)
             except Exception as e:
                 await safe_edit(query, f"❌ اتصال ناموفق: {e}",
                                 reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", f"pb:{pid}")]]))
                 return
-            current = {k: (r["remark"] or f"#{r['inbound_id']}") for k, r in db.get_service_map(pid).items()}
-            sd = {"panel_id": pid, "groups": groups_for_state(groups), "map": {}, "step": 0, "current": current}
+            p = db.get_panel(pid)
+            services = mappable_services(panel_protocols(p))
+            if not services:
+                await safe_edit(query, "⚠️ روی این پنل هنوز هیچ هاستی تعریف نشده؛ اول در پنل هاست بسازید.",
+                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", f"pb:{pid}")]]))
+                return
+            rows = db.get_service_rows(pid)
+            current = {k: (("«" + (r["remark"] or "-") + "»") if r["enabled"] else "فروخته نمی‌شود") for k, r in rows.items()}
+            sd = {"panel_id": pid, "groups": groups, "services": services, "map": {}, "step": 0, "current": current}
             db.set_state(uid, "pm_map", sd)
             text, kb = map_step_view(sd)
             await safe_edit(query, text, reply_markup=kb)
@@ -2332,11 +2700,13 @@ async def on_callback_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "apm":
             state, sd = db.get_state(uid)
-            keys = list(SERVICES)
+            keys = sd.get("services", [])
             step = sd.get("step", 0)
             if state not in ("ap_map", "pm_map") or step >= len(keys) or len(parts) < 3 or parts[1] != keys[step]:
                 return  # دکمه‌ی قدیمی یا دوبار زده‌شده
-            if parts[2] != "x":
+            if parts[2] == "x":
+                sd["map"][parts[1]] = None
+            else:
                 g = next((g for g in sd["groups"] if str(g["id"]) == parts[2]), None)
                 if not g:
                     return
@@ -2394,7 +2764,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
     # ---------- خرید ----------
     if state == "buy_username":
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{2,19}", text):
-            await msg.reply_text("❌ نام کاربری نامعتبر است.\nباید با حرف انگلیسی شروع شود، ۳ تا ۲۰ کاراکتر، بدون @ و فاصله و خط تیره:")
+            await msg.reply_text("❌ نام کاربری نامعتبر است.\nباید با حرف انگلیسی شروع شود، ۳ تا ۲۰ کاراکتر، فقط حروف انگلیسی، عدد و _ :")
             return True
         plan = db.get_plan(sd.get("plan_id"))
         service = sd.get("protocol")
@@ -2406,14 +2776,12 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             return True
         # چک تکراری نبودن یوزرنیم روی همان پنلی که سرویس روی آن ساخته می‌شود
         try:
-            client = panel_client(panel)
-            await asyncio.to_thread(client.login)
-            if await asyncio.to_thread(client.get_user, text):
+            if await asyncio.to_thread(panel_client(panel).find_user, text):
                 await msg.reply_text("❌ این یوزرنیم قبلاً روی سرور استفاده شده. لطفاً یوزرنیم دیگری انتخاب کنید:")
                 return True
-        except Exception:
-            pass
-        # مرحله‌ی رمز حذف شده: پنل خودش لینک اشتراک و کد اپ صادر می‌کند
+        except PanelError as e:
+            await msg.reply_text(f"❌ ارتباط با سرور برقرار نشد ({e}). چند لحظه بعد دوباره یوزرنیم را بفرستید:")
+            return True
         sd["username"] = text
         sd["panel_id"] = panel["id"]
         db.set_state(uid, "buy_pay", sd)
@@ -2422,7 +2790,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             f"📦 {md(plan_label(plan))}\n"
             f"🧩 سرویس: {SERVICES[service]}\n👤 یوزرنیم: `{text}`\n"
             f"💰 مبلغ: {fmt(plan['price'])} تومان\n\n"
-            f"🔑 رمز لازم نیست؛ بعد از ساخت سرویس، کد اپ و لینک اشتراک برایتان ارسال می‌شود.\n"
+            f"🔑 رمز لازم نیست؛ بعد از ساخت سرویس، شناسه، لینک اشتراک و QR برایتان ارسال می‌شود.\n"
             f"⚠️ سرویس فقط بعد از پرداخت و تایید، ساخته و فعال می‌شود.\n\nروش پرداخت:",
             reply_markup=pay_kb(), parse_mode="Markdown")
         return True
@@ -2435,7 +2803,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             await msg.reply_text("❌ فقط عدد وارد کنید (به تومان):")
             return True
         if not (20000 <= amount <= 50000000):
-            await msg.reply_text("❌ مبلغ باید بین ۲۰٬۰۰۰ تا ۵٬۰۰۰٬۰۰۰ تومان باشد:")
+            await msg.reply_text("❌ مبلغ باید بین ۲۰٬۰۰۰ تا ۵۰٬۰۰۰٬۰۰۰ تومان باشد:")
             return True
         db.set_state(uid, "charge_confirm", {"amount": amount})
         await msg.reply_text(card_charge_text(amount), reply_markup=InlineKeyboardMarkup([
@@ -2503,6 +2871,9 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
 
     # ---------- ادمین: تنظیمات ----------
     if state == "set_value" and is_admin(uid):
+        if sd["key"] in ("test_volume_gb", "test_days") and not (text.isdigit() and int(text) > 0):
+            await msg.reply_text("❌ یک عدد بزرگ‌تر از صفر وارد کنید:")
+            return True
         db.set_setting(sd["key"], text)
         db.set_state(uid, "none")
         await msg.reply_text(f"✅ تنظیم «{sd['key']}» ذخیره شد.")
@@ -2601,20 +2972,30 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
 
     if state == "ap_pass" and is_admin(uid):
         sd["password"] = text
-        wait = await msg.reply_text("🔄 در حال تست اتصال و دریافت گروه‌های پنل...")
+        wait = await msg.reply_text("🔄 در حال تست اتصال و خواندن پروتکل‌ها و گروه‌های پنل...")
         try:
             client = TifusiPanelAPI(sd["url"], sd["username"], sd["password"])
             await asyncio.to_thread(client.login)
-            # پنلی که گروه ندارد یک ردیف «سرورهای عمومی» با شناسه‌ی ۰ برمی‌گرداند
+            protocols = await asyncio.to_thread(client.list_protocols)
             groups = await asyncio.to_thread(client.list_groups)
         except Exception as e:
             await wait.edit_text(f"❌ اتصال ناموفق: {e}\n\nاز اول شروع کنید: 🖥 مدیریت پنل‌ها ← ➕ افزودن پنل")
             db.set_state(uid, "none")
             return True
-        sd.update({"groups": groups_for_state(groups), "map": {}, "step": 0})
+        services = mappable_services(protocols)
+        found = "، ".join(f"{p} ({n})" for p, n in protocols.items()) or "هیچ هاستی تعریف نشده"
+        sd.update({"groups": groups, "services": services, "map": {}, "step": 0,
+                   "protocols": protocols, "tls_insecure": client.insecure})
+        warn = "\n⚠️ گواهی SSL پنل معتبر نیست (self-signed)." if client.insecure else ""
+        if not services:
+            db.set_state(uid, "ap_location", sd)
+            await wait.edit_text(f"✅ اتصال موفق!{warn}\n📡 پروتکل‌ها: {found}\n\n"
+                                 "⚠️ روی این پنل هنوز هاستی نیست؛ پنل ثبت می‌شود و بعد از ساخت هاست، «🔄 بررسی اتصال» را بزنید.\n\n"
+                                 "📍 موقعیت پنل را وارد کنید (مثلاً 🇩🇪 آلمان):")
+            return True
         db.set_state(uid, "ap_map", sd)
         view_text, kb = map_step_view(sd)
-        await wait.edit_text("✅ اتصال موفق!\n\n" + view_text, reply_markup=kb)
+        await wait.edit_text(f"✅ اتصال موفق!{warn}\n📡 پروتکل‌های پنل: {found}\n\n" + view_text, reply_markup=kb)
         return True
 
     if state == "ap_location" and is_admin(uid):
@@ -2642,10 +3023,33 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
     # ---------- ادمین: ویرایش پنل ----------
     if state == "ae_value" and is_admin(uid):
         field, pid = sd["field"], sd["panel_id"]
-        val = int(text) if field == "max_users" else text
+        if field == "max_users" and not (text.isdigit() and int(text) > 0):
+            await msg.reply_text("❌ سقف کاربر باید عدد بزرگ‌تر از صفر باشد:")
+            return True
+        if field == "url" and not text.startswith("http"):
+            await msg.reply_text("❌ آدرس باید با http یا https شروع شود:")
+            return True
+        if field not in ("name", "url", "username", "password", "location", "max_users"):
+            db.set_state(uid, "none")
+            return True
+        val = int(text) if field == "max_users" else (text.rstrip("/") if field == "url" else text)
         db.update_panel(pid, **{field: val})
         db.set_state(uid, "none")
         await msg.reply_text("✅ پنل به‌روزرسانی شد.")
+        return True
+
+    # ---------- ادمین: پیام همگانی ----------
+    if state == "broadcast_msg" and is_admin(uid):
+        if len(text) > 4000:
+            await msg.reply_text(f"❌ متن {len(text)} کاراکتر است؛ حداکثر ۴۰۰۰ کاراکتر مجاز است. کوتاه‌تر بفرستید:")
+            return True
+        if not text:
+            await msg.reply_text("❌ متن خالی است؛ متن یا عکس بفرستید:")
+            return True
+        db.set_state(uid, "broadcast_confirm", {"text": text})
+        await msg.reply_text(f"👀 پیش‌نمایش پیام همگانی:\n━━━━━━━━━━━━━━━\n{text}\n━━━━━━━━━━━━━━━\n"
+                             f"👥 برای {len(db.all_user_ids())} کاربر ارسال شود؟",
+                             reply_markup=InlineKeyboardMarkup([[btn("✅ ارسال", "bc:go"), btn("❌ لغو", "bc:no")]]))
         return True
 
     return False
@@ -2653,7 +3057,6 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
 
 MENU_ACTIONS = {
     "🔐 خرید اشتراک": "buy", "♻️ تمدید سرویس": "renew_menu", "🔑 اکانت تست": "test",
-    "🎲 گردونه شانس": "wheel", "🎡 گردونه شانس": "wheel",
     "🛍 سرویس‌های من": "services", "🏦 کیف پول + شارژ": "wallet", "🏦 کیف پول": "wallet",
     "💵 تعرفه اشتراک ها": "tariff", "💵 تعرفه‌ها": "tariff", "💵 تعرفه": "tariff",
     "👥 زیرمجموعه گیری": "referral", "👥 زیرمجموعه‌گیری": "referral",
@@ -2662,7 +3065,7 @@ MENU_ACTIONS = {
 
 
 # مرحله‌هایی که ورودی متنی ندارند و منتظر دکمه‌اند
-BUTTON_WAIT_STATES = ("buy_proto", "buy_pay", "charge_confirm", "ap_map", "pm_map")
+BUTTON_WAIT_STATES = ("buy_plan", "buy_pay", "charge_confirm", "ap_map", "pm_map", "broadcast_confirm", "restore_confirm")
 
 
 class FakeQuery:
@@ -2711,13 +3114,11 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     fq = FakeQuery(msg)
     if action == "buy":
-        await show_plans(fq, uid)
+        await show_buy_services(fq, uid)
     elif action == "renew_menu":
         await show_renew_menu(msg, uid)
     elif action == "test":
         await send_test_account(msg, context, uid)
-    elif action == "wheel":
-        await msg.reply_text("🎲 گردونه شانس به‌زودی فعال می‌شود! 🎁\nجوایز و تخفیف‌های هیجانی در راه است...")
     elif action == "services":
         await show_services(fq, uid)
     elif action == "wallet":
@@ -2749,6 +3150,15 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     state, sd = db.get_state(uid)
     photo_id = msg.photo[-1].file_id
+
+    if state == "broadcast_msg" and is_admin(uid):
+        if len(msg.caption or "") > 900:
+            await msg.reply_text("❌ کپشن عکس حداکثر ۹۰۰ کاراکتر می‌تواند باشد؛ دوباره بفرستید:")
+            return
+        db.set_state(uid, "broadcast_confirm", {"photo_id": photo_id, "text": msg.caption or ""})
+        await msg.reply_photo(photo_id, caption=(msg.caption or "") + f"\n\n👥 برای {len(db.all_user_ids())} کاربر ارسال شود؟",
+                              reply_markup=InlineKeyboardMarkup([[btn("✅ ارسال", "bc:go"), btn("❌ لغو", "bc:no")]]))
+        return
 
     if state == "support_message":
         tid = db.create_ticket(uid, msg.caption or "(عکس)", photo_id)
@@ -2800,23 +3210,116 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
+# ---------- بازگردانی بکاپ (فایل) ----------
+async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    uid = update.effective_user.id
+    state, sd = db.get_state(uid)
+    if uid != ADMIN_ID or state != "restore_file":
+        return
+    doc = msg.document
+    if doc.file_size and doc.file_size > 20 * 1024 * 1024:
+        await msg.reply_text("❌ فایل بزرگ‌تر از ۲۰ مگابایت است.")
+        return
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        tg_file = await doc.get_file()
+        await tg_file.download_to_drive(path)
+        check = sqlite3.connect(path)
+        try:
+            tables = {r[0] for r in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {"users", "orders", "panels", "plans", "settings"} <= tables:
+                raise ValueError("این فایل بکاپ ربات نیست")
+            users = check.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            orders = check.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+        finally:
+            check.close()
+    except Exception as e:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        await msg.reply_text(f"❌ فایل قابل استفاده نیست: {e}")
+        return
+    db.set_state(uid, "restore_confirm", {"path": path})
+    await msg.reply_text(
+        f"♻️ فایل بکاپ معتبر است: 👤 {users} کاربر | 🧾 {orders} سفارش\n\n"
+        f"⚠️ با تایید، همه‌ی اطلاعات فعلی ربات با این فایل جایگزین می‌شود. ادامه می‌دهید؟",
+        reply_markup=InlineKeyboardMarkup([[btn("✅ بله، بازگردانی شود", "bk:yes"), btn("❌ انصراف", "admin:backup")]]))
+
+
 # =================== جاب‌ها ===================
 async def health_job(context: ContextTypes.DEFAULT_TYPE):
-    """چک سلامت پنل‌ها هر ۵ دقیقه (فقط Tifusi Panel؛ پنل‌های قدیمی نادیده گرفته می‌شوند)."""
+    """هر ۵ دقیقه: اتصال پنل‌ها + خواندن دوباره‌ی پروتکل‌ها. پنلی که جواب ندهد از فروش خارج می‌شود و
+    پروتکلی که روی پنل اضافه/حذف شد بدون دخالت ادمین در ربات اعمال می‌شود (با اطلاع به ادمین)."""
     for p in db.get_panels():
-        if p["status"] == "inactive" or is_legacy_panel(p):
-            continue  # غیرفعال دستی یا پنل قدیمی — از چرخه خارج است
+        if p["status"] == "inactive":
+            continue  # غیرفعال دستی — از چرخه خارج است
         try:
-            await asyncio.to_thread(panel_client(p).login)
+            before, after = await asyncio.to_thread(refresh_panel, p)
             ok = True
-        except Exception:
-            ok = False
+        except Exception as e:
+            log.warning("panel %s check failed: %s", p["id"], e)
+            ok, before, after = False, {}, {}
         if not ok and p["status"] == "active":
             db.update_panel(p["id"], status="offline")
-            await notify_admin(context.bot, f"⚠️ پنل «{p['name']}» offline شد و از Load Balancing خارج شد!")
+            await notify_admin(context.bot, f"⚠️ پنل «{p['name']}» offline شد و از فروش خارج شد!")
         elif ok and p["status"] == "offline":
             db.update_panel(p["id"], status="active")
             await notify_admin(context.bot, f"✅ پنل «{p['name']}» دوباره online شد.")
+        if ok and p["checked_at"] and set(before) != set(after):
+            fresh = db.get_panel(p["id"])
+            waiting = [SERVICES[s] for s in SERVICES
+                       if s not in db.get_service_rows(p["id"]) and service_protocols_on(fresh, s)]
+            note = (f"\n\n⚠️ برای فروش این سرویس‌ها گروه انتخاب کنید (🖥 مدیریت پنل‌ها ← 🧩 انتخاب گروه سرویس‌ها): "
+                    f"{'، '.join(waiting)}") if waiting else ""
+            await notify_admin(context.bot, f"🔔 پروتکل‌های پنل «{p['name']}» تغییر کرد:\n"
+                                            f"{protocols_diff_text(before, after)}{note}")
+
+
+async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
+    """هر ساعت: یادآوری انقضا — ۳ روز مانده، ۱ روز مانده، و وقتی منقضی شد. هر یادآوری یک بار ارسال می‌شود
+    و با تمدید دوباره فعال می‌شود. اکانت‌های تست (قیمت صفر) یادآوری نمی‌گیرند."""
+    t = now()
+    for o in db.orders_to_remind():
+        if not o["price"]:
+            continue
+        left = o["expire_at"] - t
+        sent = o["reminded"] or 0
+        if left <= -2 * 86400:
+            db.x("UPDATE orders SET reminded = reminded | 7 WHERE id=?", (o["id"],))
+            continue
+        if left <= 0 and not sent & 4:
+            text, mark = f"⛔ سرویس «{o['username']}» منقضی شد.\nبرای وصل شدن دوباره، تمدیدش کنید؛ شناسه و لینک عوض نمی‌شوند.", 7
+        elif 0 < left <= 86400 and not sent & 2:
+            text, mark = f"⏰ فقط کمتر از یک روز از سرویس «{o['username']}» باقی مانده است.", 3
+        elif 86400 < left <= 3 * 86400 and not sent & 1:
+            text, mark = f"⏳ کمتر از ۳ روز از اعتبار سرویس «{o['username']}» باقی مانده است.", 1
+        else:
+            continue
+        try:
+            await context.bot.send_message(o["user_id"], text, reply_markup=InlineKeyboardMarkup([
+                [btn("♻️ تمدید سرویس", f"renew:{o['id']}")]]))
+        except Exception as e:
+            log.info("reminder to %s failed: %s", o["user_id"], e)
+        # فقط اگر در این فاصله تمدید نشده باشد (تمدید expire_at را عوض و reminded را صفر می‌کند)
+        db.x("UPDATE orders SET reminded = reminded | ? WHERE id=? AND expire_at=?", (mark, o["id"], o["expire_at"]))
+        await asyncio.sleep(0.05)
+
+
+async def daily_backup_job(context: ContextTypes.DEFAULT_TYPE):
+    if db.setting("backup_auto", "1") != "1":
+        return
+    targets = [ADMIN_ID]
+    chat = db.setting("backup_chat_id", "").strip()
+    if chat:
+        targets.append(chat if chat.startswith("@") else int(chat) if chat.lstrip("-").isdigit() else chat)
+    for target in targets:
+        try:
+            await send_backup(context.bot, target, "💾 بکاپ خودکار روزانه‌ی ربات")
+        except Exception as e:
+            log.warning("daily backup to %s failed: %s", target, e)
 
 
 async def daily_report_job(context: ContextTypes.DEFAULT_TYPE):
@@ -2836,20 +3339,45 @@ async def on_error(update, context):
     log.exception("خطای ربات: %s", context.error)
 
 
+_user_locks = weakref.WeakValueDictionary()
+
+
+def per_user(handler):
+    """پیام‌های کاربرهای مختلف همزمان پردازش می‌شوند (یک خرید کند بقیه را منتظر نمی‌گذارد)، ولی پیام‌های
+    یک کاربر پشت‌سرهم؛ وگرنه دو بار زدن سریع یک دکمه می‌توانست دو عملیات همزمان روی state او اجرا کند."""
+    async def wrapped(update, context):
+        user = update.effective_user
+        if not user:
+            return await handler(update, context)
+        lock = _user_locks.get(user.id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _user_locks[user.id] = lock
+        async with lock:
+            return await handler(update, context)
+    return wrapped
+
+
 def main():
     if not BOT_TOKEN or not ADMIN_ID:
         raise SystemExit("❌ ابتدا BOT_TOKEN و ADMIN_ID را در بالای همین فایل (bot.py) پر کنید.")
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(on_callback_admin, pattern=r"^(pb|pbe|pbm|apm|pl|ple):"))
-    app.add_handler(CallbackQueryHandler(on_callback))
-    app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, on_photo))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
+    app = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).build()
+    app.add_handler(CommandHandler("start", per_user(start)))
+    app.add_handler(CallbackQueryHandler(per_user(on_callback_admin), pattern=r"^(pb|pbe|pbm|apm|pl|ple):"))
+    app.add_handler(CallbackQueryHandler(per_user(on_callback)))
+    app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, per_user(on_photo)))
+    app.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, per_user(on_document)))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, per_user(on_message)))
     app.add_error_handler(on_error)
     if app.job_queue:
-        app.job_queue.run_repeating(health_job, interval=300, first=60)
+        app.job_queue.run_repeating(health_job, interval=300, first=30)
+        app.job_queue.run_repeating(reminder_job, interval=3600, first=120)
         app.job_queue.run_daily(daily_report_job, time=datetime.time(23, 0))
-    log.info("🤖 ربات v4.0 روشن شد...")
+        app.job_queue.run_daily(daily_backup_job, time=datetime.time(3, 0))
+    else:
+        log.warning("job-queue نصب نیست: چک سلامت، یادآوری انقضا و بکاپ خودکار اجرا نمی‌شوند "
+                    "(pip install 'python-telegram-bot[job-queue]')")
+    log.info("🤖 ربات v%s روشن شد...", BOT_VERSION)
     asyncio.set_event_loop(asyncio.new_event_loop())
     app.run_polling(drop_pending_updates=True)
 

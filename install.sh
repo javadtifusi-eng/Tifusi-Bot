@@ -1,8 +1,8 @@
 #!/bin/bash
 # ============================================================
-#   Tifusi Bot — One-Line Installer (v4.0)
+#   Tifusi Bot — One-Line Installer (v4.1)
 #   Telegram VPN Shop Bot for Tifusi Panel
-#   Services: Xray / WireGuard / IKEv2 / L2TP
+#   Services: read from Tifusi Panel (Xray / Hysteria2 / IKEv2 / L2TP / WireGuard)
 # ============================================================
 REPO_URL="https://raw.githubusercontent.com/javadtifusi-eng/Tifusi-Bot/main"
 
@@ -36,8 +36,8 @@ banner() {
          |____/ \___/ |_|
 EOF
     echo -e "${NC}"
-    echo -e "${CYAN}  Tifusi Bot — Telegram VPN Shop Bot | v4.0${NC}"
-    echo -e "${YELLOW}  Tifusi Panel | Services: Xray / WireGuard / IKEv2 / L2TP${NC}"
+    echo -e "${CYAN}  Tifusi Bot — Telegram VPN Shop Bot | v4.1${NC}"
+    echo -e "${YELLOW}  Tifusi Panel | Services: read from Tifusi Panel (Xray / Hysteria2 / IKEv2 / L2TP / WireGuard)${NC}"
     echo -e "${GREEN}  --------------------------------------------${NC}"
     echo ""
 }
@@ -130,7 +130,7 @@ make_shortcut() {
 BIN=/usr/local/bin
 APP_REPO="javadtifusi-eng/Tifusi-VPN"
 # tifusi.versionBase in the app's gradle.properties: release vN is shown in the app as 1.(N - base).
-APP_VERSION_BASE=20
+APP_VERSION_BASE=26
 
 app_info() {
   local tag
