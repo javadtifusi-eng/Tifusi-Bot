@@ -1,0 +1,54 @@
+Tifusi Source-Available License
+Copyright (c) 2025-2026 javadtifusi-eng (Tifusi). All rights reserved.
+
+This repository is published so that people can see the source, install the
+software and run it. It is NOT open source. Publishing the code publicly does
+not give anyone the right to copy it.
+
+1. What you may do
+   a. Read the source code in this repository.
+   b. Download, install and run the unmodified software, as distributed by the
+      official repository or its official releases and container images, to
+      operate your own servers and services, including commercial services.
+   c. Change the configuration files and settings the software is designed to
+      let operators change.
+   d. Report issues.
+
+2. What you may not do without prior written permission from the copyright holder
+   a. Copy all or any part of the source code, graphics, logos or
+      documentation into another project, product or repository.
+   b. Modify the software and use, publish or distribute the modified version.
+   c. Redistribute, re-upload, mirror, sell, sublicense or rent the software or
+      any part of it, in source or compiled form.
+   d. Rebrand the software, or remove or alter the name "Tifusi", the logos,
+      this license or any copyright notice.
+   e. Use the source code to build a competing product, including by
+      translating, porting or rewriting it in another language.
+
+3. GitHub
+   GitHub's Terms of Service let GitHub users view and fork public
+   repositories on GitHub. That permission applies only inside GitHub and
+   grants no rights beyond section 1. A fork may not be modified, published
+   elsewhere or used in violation of section 2.
+
+4. Trademarks
+   "Tifusi", "Tifusi Panel", "Tifusi VPN", "Tifusi Bot" and the Tifusi logos
+   are the identifiers of the copyright holder and may not be used for other
+   products.
+
+5. Third-party components
+   Third-party software used by this project (for example Xray-core,
+   strongSwan and the libraries it depends on) stays under its own license.
+   This license covers only the code and assets written for Tifusi.
+
+6. Termination
+   Any violation ends all permissions granted by this license immediately.
+   The copyright holder may take legal action and send takedown requests,
+   including DMCA notices, against infringing copies.
+
+7. No warranty
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. THE
+   COPYRIGHT HOLDER IS NOT LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY
+   ARISING FROM THE SOFTWARE OR ITS USE.
+
+For permission requests, contact the author on Telegram: https://t.me/javadheydeari

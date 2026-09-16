@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# Tifusi Bot — Copyright (c) 2025-2026 javadtifusi-eng (Tifusi). All rights reserved.
+# Source-available, not open source: copying, modifying, redistributing or rebranding
+# this code without written permission is prohibited. See LICENSE.
 """ربات فروش اشتراک VPN — تک‌فایلی (همه‌چیز در همین یک فایل) — فقط Tifusi Panel | چندپنلی.
 پروتکل‌هایی که فروخته می‌شوند از خود پنل خوانده می‌شوند.
 فقط BOT_TOKEN و ADMIN_ID را در بالای فایل پر کنید و اجرا کنید: python bot.py"""
