@@ -721,6 +721,9 @@ class DB:
             sql += " AND status IN ('active','delreq_pending')"
         return self.q(sql + " ORDER BY id DESC", (uid,))
 
+    def pending_delete_requests(self):
+        return self.q("SELECT * FROM orders WHERE status='delreq_pending' ORDER BY id")
+
     def update_order(self, oid, **fields):
         if not fields:
             return
@@ -1049,6 +1052,7 @@ def admin_menu_kb():
     return InlineKeyboardMarkup([
         [btn("📊 آمار ربات", "admin:stats")],
         [pbtn("💵 رسیدهای تایید نشده", "admin:receipts"), pbtn("🎫 لیست تیکت‌ها", "admin:tickets")],
+        [btn("🗑 درخواست‌های حذف", "admin:delreqs")],
         [btn("🖥 مدیریت پنل‌ها", "admin:panels")],
         [pbtn("📦 مدیریت پلن‌ها", "admin:plans"), pbtn("💸 قیمت سرویس", "admin:plans_view")],
         [pbtn("👤 مدیریت کاربر", "admin:users"), pbtn("👑 مدیریت ادمین‌ها", "admin:admins")],
@@ -1741,6 +1745,25 @@ async def admin_stats(query):
             f"📅 ۳۰ روز گذشته:\n"
             f"👤 کاربر جدید: {month['new_users']} | 🛍 سفارش: {month['new_orders']} | 💰 {fmt(month['revenue'])} تومان")
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+
+
+async def admin_delete_requests(query):
+    """درخواست‌های حذفی که هنوز بررسی نشده‌اند. تا پیش از این، دکمه‌های تایید/رد فقط
+    روی همان پیام اعلان ادمین بودند؛ با پاک شدن آن چت، سفارش برای همیشه در حالت
+    «درخواست حذف» می‌ماند — نه تمدید می‌شود و نه دوباره می‌شود درخواست داد."""
+    orders = db.pending_delete_requests()
+    if not orders:
+        await safe_edit(query, "✅ درخواست حذف بررسی‌نشده‌ای وجود ندارد.",
+                        reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        return
+    rows = []
+    text = "🗑 درخواست‌های حذف بررسی‌نشده:\n\n"
+    for o in orders:
+        text += f"#{o['id']} — {o['username']} — {service_name(o['protocol'])} — کاربر {o['user_id']}\n"
+        rows.append([btn(f"✅ تایید حذف #{o['id']}", f"dq:ok:{o['id']}"),
+                     btn(f"❌ رد #{o['id']}", f"dq:no:{o['id']}")])
+    rows.append([btn("🔙 بازگشت", "admin:menu")])
+    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def admin_receipts(query):
@@ -2514,6 +2537,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await admin_stats(query)
             elif what == "receipts":
                 await admin_receipts(query)
+            elif what == "delreqs":
+                await admin_delete_requests(query)
             elif what == "users":
                 db.set_state(uid, "au_search")
                 await safe_edit(query, "👤 آیدی عددی یا یوزرنیم کاربر را ارسال کنید:",
