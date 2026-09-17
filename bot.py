@@ -9,6 +9,8 @@ import re
 import json
 import time
 import io
+import html
+import secrets
 import asyncio
 import logging
 import datetime
@@ -36,8 +38,8 @@ log = logging.getLogger("vpn_bot")
 # ══════════════════════ تنظیمات — فقط همین دو مقدار را پر کنید ══════════════════════
 BOT_TOKEN = ""      # توکن ربات از @BotFather
 ADMIN_ID = 0        # آیدی عددی ادمین از @userinfobot
-BOT_VERSION = "4.1"
-BOT_VERSION_DATE = "2026-09-16"
+BOT_VERSION = "4.2"
+BOT_VERSION_DATE = "2026-09-17"
 DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل — وقتی پنل به این عدد برسد، خریدهای جدید می‌روند پنل بعدی (تمدیدها همیشه روی همان پنل انجام می‌شوند)
 # ════════════════════════════════════════════════════════════════════════════════════
 
@@ -70,17 +72,23 @@ TEST_SERVICE_ORDER = ["ikev2", "xray", "hysteria2", "l2tp", "wireguard"]
 GENERIC_ORDER_KEY = "tifusi"
 
 APP_ANDROID_URL = "https://github.com/javadtifusi-eng/Tifusi-VPN/releases/latest/download/tifusi-vpn.apk"
-APP_WINDOWS_URL = "https://github.com/javadtifusi-eng/Tifusi-VPN/releases/latest/download/TifusiVPN.exe"
+
+# سرویس‌هایی که مشتری با نام کاربری و رمز به آن‌ها وصل می‌شود و موقع خرید رمز دلخواه می‌گیرند
+IPSEC_SERVICES = {"ikev2", "l2tp"}
+# همان قاعده‌ی پنل (IPSEC_PASSWORD_PATTERN): نود رمز را داخل گیومه در swanctl.conf و chap-secrets
+# می‌نویسد، پس گیومه، بک‌اسلش و فاصله باعث می‌شوند IKEv2/L2TP رمز دیگری را چک کنند
+IPSEC_PASSWORD_RE = re.compile(r"[A-Za-z0-9@#$%&*._+=!-]{6,32}")
+IPSEC_PASSWORD_RULES = "۶ تا ۳۲ کاراکتر؛ فقط حروف انگلیسی، عدد و @ # $ % & * . _ + = ! -"
 
 
 # ══════════════════════ آموزش اتصال (training) ══════════════════════
 
 # هر آموزش فقط سیستم‌عامل‌هایی را دارد که برایش معنی دارد؛ اگر یکی باشد مستقیم همان نمایش داده می‌شود
-TUT_OS = [("windows", "🪟 ویندوز"), ("android", "🤖 اندروید"), ("ios", "🍎 آیفون")]
+TUT_OS = [("android", "🤖 اندروید"), ("ios", "🍎 آیفون")]
 
 TRAININGS = {
     "app": {
-        "title": "📱 اپ Tifusi VPN (اندروید / ویندوز)",
+        "title": "📱 اپ Tifusi VPN (اندروید)",
         "android": f"""🤖 اندروید:
 
 1️⃣ اپ Tifusi VPN را دانلود و نصب کنید:
@@ -92,13 +100,6 @@ TRAININGS = {
 
 💡 لینک اشتراک هم در همان کادر کار می‌کند. با تمدید سرویس، شناسه، لینک و QR عوض نمی‌شوند؛
 اگر تغییری در سرورها دادیم، در تب «سرورها» دکمه‌ی «به‌روزرسانی» را بزنید.""",
-        "windows": f"""🪟 ویندوز:
-
-1️⃣ برنامه‌ی Tifusi VPN را دانلود و اجرا کنید:
-{APP_WINDOWS_URL}
-2️⃣ به بخش «سرورها» بروید
-3️⃣ «🆔 شناسه» یا لینک اشتراک را وارد کنید و «دریافت سرورها» را بزنید
-4️⃣ سرور را انتخاب کنید و وصل شوید""",
     },
     "iphone": {
         "title": "🍎 آیفون / مک",
@@ -268,7 +269,14 @@ class TifusiPanelAPI:
     def _with_links(self, user):
         links = self._call(f"/api/users/{int(user['id'])}/links") or {}
         return {"user": user, "subscription_url": links.get("subscription_url", ""),
-                "app_code": links.get("app_code", "")}
+                "app_code": links.get("app_code", ""),
+                "ikev2_configs": links.get("ikev2_configs") or [],
+                "l2tp_configs": links.get("l2tp_configs") or []}
+
+    def links(self, username):
+        """لینک‌ها و اطلاعات اتصال IKEv2/L2TP کاربر همان‌طور که پنل الان می‌دهد؛ None اگر کاربر روی پنل نبود."""
+        user = self.find_user(username)
+        return self._with_links(user) if user else None
 
     @staticmethod
     def _limits(total_gb, expire_ts):
@@ -276,14 +284,17 @@ class TifusiPanelAPI:
         expire = datetime.datetime.fromtimestamp(int(expire_ts), tz=datetime.timezone.utc).isoformat()
         return expire, (int(total_gb) * 1024 ** 3 if total_gb else None)
 
-    def add_user(self, group_ids, username, total_gb, expire_ts, protocols=None, device_limit=0):
-        """protocols: پروتکل‌هایی که کاربر به آن‌ها دسترسی دارد (None = همه). device_limit: سقف دستگاه همزمان (۰ = نامحدود)."""
+    def add_user(self, group_ids, username, total_gb, expire_ts, protocols=None, device_limit=0, ipsec_password=None):
+        """protocols: پروتکل‌هایی که کاربر به آن‌ها دسترسی دارد (None = همه). device_limit: سقف دستگاه همزمان (۰ = نامحدود).
+        ipsec_password: رمز ورود IKEv2/L2TP؛ None یعنی پنل مثل قبل از رمز خودش استفاده کند."""
         expire, data_limit = self._limits(total_gb, expire_ts)
         body = {"username": username, "status": "active", "expire": expire, "data_limit": data_limit,
                 "group_ids": [int(g) for g in group_ids if int(g)], "note": "Tifusi Bot",
                 "hwid_limit": int(device_limit or 0) or None}
         if protocols:
             body["protocols"] = list(protocols)
+        if ipsec_password:
+            body["ipsec_password"] = ipsec_password
         return self._with_links(self._call("/api/users", "post", json=body))
 
     def renew_user(self, username, total_gb, expire_ts, protocols=None, device_limit=0):
@@ -986,7 +997,7 @@ def main_menu_kb(uid):
 FAQ_DEFAULT = """💡 سوالات متداول ⁉️
 
 1️⃣ فیلترشکن شما از چه نوعیه؟
-✅ سرویس‌های ما روی Tifusi Panel هستند: Xray (VLESS/VMess/Trojan)، IKEv2 و L2TP — با اپ Tifusi VPN روی اندروید و ویندوز و با لینک اشتراک روی آیفون.
+✅ سرویس‌های ما روی Tifusi Panel هستند: Xray (VLESS/VMess/Trojan)، IKEv2 و L2TP — با اپ Tifusi VPN روی اندروید و با لینک اشتراک روی آیفون.
 
 2️⃣ اگر قبل از منقضی شدن اکانت تمدید کنم، روزهای باقی‌مانده می‌سوزد؟
 ✅ خیر، روزهای باقی‌مانده محاسبه و به تمدید اضافه می‌شود.
@@ -1187,23 +1198,33 @@ def plan_device_limit(plan):
     return None if value is None else int(value or 0)
 
 
-def create_service_on_panel(user_id, plan, service, username, panel_id=None):
+def random_ipsec_password():
+    """رمز ۱۰ کاراکتری بدون نویسه‌های شبیه به هم (0/O و 1/l/I) تا دستی در تنظیمات VPN آیفون راحت تایپ شود."""
+    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(10))
+
+
+def create_service_on_panel(user_id, plan, service, username, panel_id=None, ipsec_password=None):
     """ساخت کاربر روی Tifusi Panel فقط با پروتکل‌های همین سرویس، گروه انتخاب‌شده و سقف دستگاه پلن.
-    رمز را ربات نمی‌سازد؛ پنل لینک اشتراک و شناسه صادر می‌کند و همان‌ها به مشتری تحویل داده می‌شوند."""
+    برای IKEv2/L2TP رمز انتخابی مشتری فرستاده می‌شود؛ اگر نداشت (اکانت تست، یا رسیدی که قبل از این نسخه
+    ثبت شده) یک رمز تصادفی ساخته می‌شود."""
     if service not in SERVICES:
         raise PanelError("این سرویس دیگر فروخته نمی‌شود؛ لطفاً یک سرویس جدید بخرید")
     panel = pick_panel(service, panel_id)
     if not panel:
         raise PanelError(f"ظرفیت پنل‌های سرویس «{SERVICES[service]}» تکمیل است یا پنلی فعال نیست")
+    if service in IPSEC_SERVICES and not ipsec_password:
+        ipsec_password = random_ipsec_password()
     gid = int(db.get_service_map(panel["id"])[service]["inbound_id"] or 0)
     expire_at = now() + plan["days"] * 86400
     client = panel_client(panel)
     # گروه ۰ همان «سرورهای عمومی» است و به پنل فرستاده نمی‌شود (group_ids خالی)
     res = client.add_user([gid] if gid else [], username, plan["volume_gb"], expire_at,
-                          protocols=service_access_protocols(panel, service), device_limit=plan_device_limit(plan))
+                          protocols=service_access_protocols(panel, service), device_limit=plan_device_limit(plan),
+                          ipsec_password=ipsec_password)
     oid = db.create_order({
         "user_id": user_id, "panel_id": panel["id"], "plan_id": plan["id"],
-        "protocol": service, "username": username, "password": "", "inbound_id": gid,
+        "protocol": service, "username": username, "password": ipsec_password or "", "inbound_id": gid,
         "price": plan["price"], "volume_gb": plan["volume_gb"], "days": plan["days"],
         "expire_at": expire_at, "sub_url": res["subscription_url"], "app_code": res["app_code"],
     })
@@ -1227,52 +1248,66 @@ def qr_png(data):
         return None
 
 
-async def send_order_qr(context, chat_id, order, panel):
-    """ارسال QR لینک اشتراک با کپشن نام سرویس، یوزرنیم و شناسه؛ در صورت خطا فقط False."""
+async def send_order_qr(context, chat_id, order):
+    """بارکد لینک اشتراک با خود لینک زیر آن؛ اگر بارکد ساخته یا فرستاده نشد False."""
     png = qr_png(order["sub_url"])
     if not png:
         return False
-    caption = (f"{service_name(order['protocol'])}\n"
-               f"👤 یوزرنیم: {order['username']}\n"
-               f"🆔 شناسه: {app_code_text(order, panel)}\n\n"
-               f"📷 این بارکد را در اپ Tifusi VPN با «اسکن بارکد» اسکن کنید")
     try:
-        await context.bot.send_photo(chat_id, png, caption=caption)
+        await context.bot.send_photo(chat_id, png, caption=order["sub_url"])
         return True
     except Exception as e:
         log.warning("send QR failed for %s: %s", chat_id, e)
         return False
 
 
-def app_guide_text(service):
-    """لینک اپ‌ها و راهنمای کوتاه اتصال."""
-    text = (f"📲 اپ Tifusi VPN:\n"
-            f"🤖 اندروید: {APP_ANDROID_URL}\n"
-            f"🪟 ویندوز: {APP_WINDOWS_URL}\n\n"
-            f"📌 در اپ، تب «سرورها»: شناسه را در «شناسه یا لینک اشتراک» بچسبانید و «دریافت سرورها» را بزنید، "
-            f"یا «اسکن بارکد» را بزنید و QR همین پیام را اسکن کنید.\n"
-            f"🍎 آیفون: لینک اشتراک را در Safari باز کنید.")
-    if service == "xray":
-        text += "\n🌐 لینک اشتراک Xray در v2rayNG و Streisand هم کار می‌کند."
-    return text
+def delivery_details_html(order, panel, links):
+    """بعد از بارکد به همین ترتیب: پروفایل آیفون، شناسه، اطلاعات ورود IKEv2/L2TP و لینک اپ — بدون متن آموزشی.
+    رمز از خود پنل خوانده می‌شود نه از سفارش، تا همیشه همانی باشد که نود واقعاً چک می‌کند."""
+    esc = html.escape
+    ikev2 = (links or {}).get("ikev2_configs") or []
+    l2tp = (links or {}).get("l2tp_configs") or []
+    parts = []
+    if ikev2 and ikev2[0].get("mobileconfig_url"):
+        parts.append(f"🍎 نصب پروفایل آیفون:\n{esc(ikev2[0]['mobileconfig_url'])}")
+    parts.append(f"🆔 شناسه: <code>{esc(app_code_text(order, panel))}</code>")
+
+    configs = ikev2 + l2tp
+    if configs:
+        lines = [f"👤 نام کاربری: <code>{esc(configs[0]['username'])}</code>",
+                 f"🔑 رمز عبور: <code>{esc(configs[0]['password'])}</code>"]
+        for cfg in configs:
+            if len(configs) > 1:
+                lines.append(f"\n📍 {esc(cfg.get('remark') or cfg['server'])}")
+            lines.append(f"🌐 آدرس: <code>{esc(cfg['server'])}</code>")
+            if cfg.get("remote_id"):
+                lines.append(f"🪪 ریموت آیدی: <code>{esc(cfg['remote_id'])}</code>")
+            if cfg.get("psk"):
+                lines.append(f"🔐 سکرت: <code>{esc(cfg['psk'])}</code>")
+        parts.append("\n".join(lines))
+    elif order["protocol"] in IPSEC_SERVICES and order["password"]:
+        # پنل جواب نداد: دست‌کم نام کاربری و رمزی که با آن ساخته شد
+        parts.append(f"👤 نام کاربری: <code>{esc(order['username'])}</code>\n"
+                     f"🔑 رمز عبور: <code>{esc(order['password'])}</code>")
+
+    parts.append(f"📲 Tifusi VPN:\n{esc(APP_ANDROID_URL)}")
+    return "\n\n".join(parts)
 
 
 async def deliver_service(context, chat_id, order, panel):
-    """ارسال اطلاعات سرویس به کاربر: متن (شناسه + لینک اشتراک + لینک اپ‌ها) و بعد تصویر QR لینک اشتراک."""
-    dt = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d %H:%M")
-    text = (
-        f"✅ سرویس شما ساخته شد!\n\n"
-        f"{service_name(order['protocol'])} — #{order['id']}\n"
-        f"🖥 پنل: {md(panel['name'])} {md(panel['location'])}\n"
-        f"📦 حجم: {vol_text(order['volume_gb'])}\n"
-        f"⏳ اعتبار: {order['days']} روز — تا {dt}\n\n"
-        f"👤 یوزرنیم: `{order['username']}`\n"
-        f"🆔 شناسه: `{app_code_text(order, panel)}`\n"
-        f"🔗 لینک اشتراک:\n`{order['sub_url'] or '-'}`\n\n"
-        f"{app_guide_text(order['protocol'])}\n\n"
-        f"📚 آموزش کامل در منوی «📚 آموزش».")
-    await context.bot.send_message(chat_id, text, parse_mode="Markdown")
-    await send_order_qr(context, chat_id, order, panel)
+    """تحویل سرویس: یک خط خلاصه، بارکد لینک اشتراک با لینک زیرش، و بعد delivery_details_html."""
+    dt = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")
+    await context.bot.send_message(chat_id, f"✅ {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — تا {dt}")
+    if order["sub_url"] and not await send_order_qr(context, chat_id, order):
+        await context.bot.send_message(chat_id, order["sub_url"])
+    links = None
+    if order["protocol"] in IPSEC_SERVICES:
+        try:
+            links = await asyncio.to_thread(panel_client(panel).links, order["username"])
+        except PanelError as e:
+            log.warning("fetching IPsec details for %s failed: %s", order["username"], e)
+    await context.bot.send_message(chat_id, delivery_details_html(order, panel, links),
+                                   parse_mode="HTML", disable_web_page_preview=True)
 
 
 # ---------- تمدید ----------
@@ -1297,7 +1332,8 @@ def do_renew(order, plan):
         grp = db.get_service_map(panel["id"]).get(service)
         gid = int((grp["inbound_id"] if grp else order["inbound_id"]) or 0)
         res = client.add_user([gid] if gid else [], order["username"], plan["volume_gb"], expire_at,
-                              protocols=protocols, device_limit=device_limit)
+                              protocols=protocols, device_limit=device_limit,
+                              ipsec_password=order["password"] or None)
     db.update_order(order["id"], expire_at=expire_at, volume_gb=plan["volume_gb"], days=plan["days"],
                     price=plan["price"], plan_id=plan.get("id", order["plan_id"]) or order["plan_id"],
                     status="active", reminded=0, sub_url=res["subscription_url"], app_code=res["app_code"])
@@ -1349,7 +1385,7 @@ async def show_service_detail(query, uid, oid):
     creds = (f"👤 یوزرنیم: `{o['username']}`\n"
              f"🆔 شناسه: `{app_code_text(o, panel)}`\n"
              f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`\n"
-             f"📲 اندروید: {APP_ANDROID_URL}\n🪟 ویندوز: {APP_WINDOWS_URL}")
+             f"📲 اندروید: {APP_ANDROID_URL}")
     text = (f"{md(service_name(o['protocol']))} — #{o['id']}\n"
             f"🖥 پنل: {md(pname)}\n\n{creds}\n\n{usage_line}\n"
             f"⏳ {remaining_text(o['expire_at'])} | 🕓 {dt}")
@@ -1453,6 +1489,32 @@ def pay_kb():
     ])
 
 
+def password_prompt_text(service):
+    return (f"🔑 رمز عبور {SERVICES[service]}\n\n"
+            f"یک رمز دلخواه ارسال کنید، یا «🎲 رمز تصادفی» را بزنید.\n\n"
+            f"⚠️ {IPSEC_PASSWORD_RULES}")
+
+
+def password_prompt_kb(service):
+    return InlineKeyboardMarkup([[btn("🎲 رمز تصادفی", "bpw:random")],
+                                 [btn("🔙 بازگشت", f"proto:{service}")]])
+
+
+def invoice_text(sd, plan):
+    """پیش‌فاکتور خرید (Markdown)؛ برای IKEv2/L2TP رمز انتخاب‌شده هم نشان داده می‌شود."""
+    service = sd["protocol"]
+    text = (f"🧾 پیش‌فاکتور\n"
+            f"📦 {md(plan_label(plan))}\n"
+            f"🧩 سرویس: {SERVICES[service]}\n👤 یوزرنیم: `{sd['username']}`\n")
+    if sd.get("ipsec_password"):
+        text += f"🔑 رمز عبور: `{sd['ipsec_password']}`\n"
+    text += f"💰 مبلغ: {fmt(plan['price'])} تومان\n\n"
+    if not sd.get("ipsec_password"):
+        text += "🔑 رمز لازم نیست؛ بعد از ساخت سرویس، شناسه، لینک اشتراک و QR برایتان ارسال می‌شود.\n"
+    text += "⚠️ سرویس فقط بعد از پرداخت و تایید، ساخته و فعال می‌شود.\n\nروش پرداخت:"
+    return text
+
+
 def card_info_text(amount):
     card = db.setting("card_number", "—")
     name = db.setting("card_name", "—")
@@ -1477,7 +1539,8 @@ async def finalize_wallet_purchase(query, context, uid, data):
     await safe_edit(query, "♻️ در حال ساخت سرویس... لطفاً چند ثانیه صبر کنید.")
     try:
         order, panel = await asyncio.to_thread(
-            create_service_on_panel, uid, plan, data["protocol"], data["username"], data.get("panel_id"))
+            create_service_on_panel, uid, plan, data["protocol"], data["username"], data.get("panel_id"),
+            data.get("ipsec_password"))
     except Exception as e:
         db.add_balance(uid, plan["price"])  # بازگشت وجه
         await context.bot.send_message(uid, f"❌ خطا در ساخت سرویس: {e}\n💰 مبلغ به کیف پول برگشت.")
@@ -1701,7 +1764,8 @@ async def rc_approve(query, context, rid):
             return
         try:
             order, panel = await asyncio.to_thread(
-                create_service_on_panel, r["user_id"], plan, meta["protocol"], meta["username"], meta.get("panel_id"))
+                create_service_on_panel, r["user_id"], plan, meta["protocol"], meta["username"], meta.get("panel_id"),
+                meta.get("ipsec_password"))
         except Exception as e:
             db.add_balance(r["user_id"], r["amount"])  # بازگشت خودکار وجه
             await context.bot.send_message(r["user_id"],
@@ -2236,6 +2300,18 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", f"proto:{service}")]]))
             return
 
+        if cmd == "bpw":
+            state, sd = db.get_state(uid)
+            plan = db.get_plan(sd.get("plan_id"))
+            if state != "buy_password" or not plan or sd.get("protocol") not in SERVICES or not sd.get("username"):
+                await safe_edit(query, "❌ جلسه خرید منقضی شده. دوباره از «خرید اشتراک» شروع کنید.",
+                                reply_markup=InlineKeyboardMarkup([[btn("🔐 خرید اشتراک", "menu:buy")]]))
+                return
+            sd["ipsec_password"] = random_ipsec_password()
+            db.set_state(uid, "buy_pay", sd)
+            await safe_edit(query, invoice_text(sd, plan), reply_markup=pay_kb(), parse_mode="Markdown")
+            return
+
         if cmd == "pay":
             state, sd = db.get_state(uid)
             plan = db.get_plan(sd.get("plan_id"))
@@ -2258,7 +2334,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cmd == "qr":
             o = db.get_order(int(parts[1]))
             if o and o["user_id"] == uid and o["status"] == "active":
-                if not await send_order_qr(context, uid, o, db.get_panel(o["panel_id"])):
+                if not await send_order_qr(context, uid, o):
                     await query.message.reply_text("❌ ساخت QR code ممکن نشد؛ لینک اشتراک را از متن سرویس کپی کنید.")
             return
 
@@ -2780,15 +2856,28 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             return True
         sd["username"] = text
         sd["panel_id"] = panel["id"]
+        if service in IPSEC_SERVICES:
+            db.set_state(uid, "buy_password", sd)
+            await msg.reply_text(password_prompt_text(service), reply_markup=password_prompt_kb(service))
+            return True
         db.set_state(uid, "buy_pay", sd)
-        await msg.reply_text(
-            f"🧾 پیش‌فاکتور\n"
-            f"📦 {md(plan_label(plan))}\n"
-            f"🧩 سرویس: {SERVICES[service]}\n👤 یوزرنیم: `{text}`\n"
-            f"💰 مبلغ: {fmt(plan['price'])} تومان\n\n"
-            f"🔑 رمز لازم نیست؛ بعد از ساخت سرویس، شناسه، لینک اشتراک و QR برایتان ارسال می‌شود.\n"
-            f"⚠️ سرویس فقط بعد از پرداخت و تایید، ساخته و فعال می‌شود.\n\nروش پرداخت:",
-            reply_markup=pay_kb(), parse_mode="Markdown")
+        await msg.reply_text(invoice_text(sd, plan), reply_markup=pay_kb(), parse_mode="Markdown")
+        return True
+
+    if state == "buy_password":
+        if not IPSEC_PASSWORD_RE.fullmatch(text):
+            await msg.reply_text(f"❌ رمز نامعتبر است.\n{IPSEC_PASSWORD_RULES}\n\nدوباره ارسال کنید:",
+                                 reply_markup=password_prompt_kb(sd.get("protocol")) if sd.get("protocol") in SERVICES else None)
+            return True
+        plan = db.get_plan(sd.get("plan_id"))
+        if not plan or sd.get("protocol") not in SERVICES or not sd.get("username"):
+            db.set_state(uid, "none")
+            await msg.reply_text("❌ جلسه خرید منقضی شده. دوباره از «🔐 خرید اشتراک» شروع کنید.",
+                                 reply_markup=main_menu_kb(uid))
+            return True
+        sd["ipsec_password"] = text
+        db.set_state(uid, "buy_pay", sd)
+        await msg.reply_text(invoice_text(sd, plan), reply_markup=pay_kb(), parse_mode="Markdown")
         return True
 
     # ---------- شارژ کیف پول ----------
@@ -3184,7 +3273,8 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         rid = db.create_receipt(uid, plan["price"], "purchase", photo_id, meta={
             "kind": "purchase", "plan_id": plan["id"], "protocol": sd["protocol"],
-            "username": sd["username"], "panel_id": sd.get("panel_id")})
+            "username": sd["username"], "panel_id": sd.get("panel_id"),
+            "ipsec_password": sd.get("ipsec_password")})
         db.set_state(uid, "none")
         await msg.reply_text("✅ رسید شما ثبت شد.\n⏳ بعد از تایید ادمین، سرویس به‌صورت خودکار ساخته و ارسال می‌شود.",
                              reply_markup=main_menu_kb(uid))
