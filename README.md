@@ -28,7 +28,7 @@
 
 The customer taps "Buy subscription", picks a service (protocol), then a plan, and sends the username they want. The bot does the rest: payment, creating the user on the least busy panel, delivering the **access code**, **subscription link** and **QR code**, expiry reminders, renewals and refunds, all automatically. ⚡
 
-> 🔑 **No passwords.** Customers never type a password. The panel issues each user a subscription link and an access code (like `javad7KQ4MP9X@panel-address`). In the **[Tifusi VPN](https://github.com/javadtifusi-eng/Tifusi-VPN)** app (Android / Windows) the code is entered on the "Servers" tab, or the QR is scanned with "Scan QR"; on iPhone the subscription link opens in Safari. Renewing keeps the code, link and QR unchanged.
+> 🔑 **Passwords only where they matter.** The panel issues each user a subscription link and an access code (like `javad7KQ4MP9X@panel-address`). In the **[Tifusi VPN](https://github.com/javadtifusi-eng/Tifusi-VPN)** app for Android the code is entered on the "Servers" tab, or the QR is scanned with "Scan QR"; on iPhone the subscription link opens in Safari. Only IKEv2 and L2TP buyers are asked for a password, right after the username — they can type their own or tap "Random password". Renewing keeps the code, link, QR and password unchanged.
 
 ### 📡 Protocols come straight from the panel
 
@@ -60,7 +60,7 @@ The bot knows every service, but **only offers a service to customers when the p
 |---|---|
 | 🛍️ **Plan store** | Unlimited plans with data, duration, price and simultaneous device limit |
 | 📡 **Protocols from the panel** | Only protocols that have hosts on the panel are sold; panel changes apply automatically |
-| 📱 **Full delivery** | Access code, subscription link, QR code and Tifusi VPN download links for Android and Windows |
+| 📱 **Full delivery** | QR code with the subscription link beneath it, the iPhone profile, access code, IKEv2/L2TP username, password, address, remote ID and secret, and the Tifusi VPN Android link |
 | 🔑 **Test account** | Once per user; off by default and enabled from General settings |
 | 🖥️ **Multiple panels** | Several servers with custom capacity; when one panel is full, new purchases move to the next |
 | 🔄 **Smart renewal** | Always renews the same user on the same panel; code, link and QR stay the same |
