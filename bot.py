@@ -52,11 +52,11 @@ DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل 
 # پس اگر فردا روی پنل مثلاً Hysteria2 یا WireGuard اضافه شد، کافی است ادمین «بررسی اتصال» را بزند
 # (یا چک خودکار ۵ دقیقه‌ای برسد) تا در ربات ظاهر شود؛ پروتکلی که هاستش حذف شد هم از فروش خارج می‌شود.
 SERVICES = {
-    "xray": "🌐 Xray (VLESS / VMess / Trojan / Shadowsocks)",
-    "hysteria2": "⚡ Hysteria2",
-    "ikev2": "🛡 IKEv2",
-    "l2tp": "🔗 L2TP",
-    "wireguard": "🔒 WireGuard",
+    "xray": "Xray",
+    "hysteria2": "Hysteria2",
+    "ikev2": "IKEv2",
+    "l2tp": "L2TP",
+    "wireguard": "WireGuard",
 }
 # پروتکل‌های پنل برای هر سرویس — کاربر ساخته‌شده فقط به همین پروتکل‌ها دسترسی می‌گیرد
 SERVICE_PROTOCOLS = {
@@ -437,9 +437,15 @@ class DB:
             self.x("ALTER TABLE plans ADD COLUMN title TEXT DEFAULT ''")
         except Exception:
             pass
-        # مهاجرت: ستون تعداد کاربر (دستگاه همزمان) برای هر پلن — 0 یعنی پیروی از لیمت اینباند
+        # مهاجرت: ستون تعداد کاربر (دستگاه همزمان) برای هر پلن — 0 یعنی بدون محدودیت
         try:
             self.x("ALTER TABLE plans ADD COLUMN user_limit INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        # مهاجرت: هر پلن مال یک سرویس است؛ پلن‌های قبل از این نسخه (سرویس خالی) برای همه‌ی سرویس‌ها
+        # نشان داده می‌شوند تا فروش ربات بعد از آپدیت قطع نشود، تا وقتی ادمین سرویسشان را تعیین کند
+        try:
+            self.x("ALTER TABLE plans ADD COLUMN service TEXT DEFAULT ''")
         except Exception:
             pass
         # پلن پیش‌فرضی ساخته نمی‌شود — ادمین بعد از استارت خودش پلن‌ها را
@@ -665,15 +671,20 @@ class DB:
         return {r["protocol"]: r for r in rows if r["protocol"] in SERVICES}
 
     # ---------- پلن‌ها ----------
-    def add_plan(self, volume_gb, days, price, title="", user_limit=0):
-        return self.x("INSERT INTO plans (volume_gb,days,price,active,created_at,title,user_limit) VALUES (?,?,?,1,?,?,?)",
-                      (int(volume_gb), int(days), int(price), int(time.time()), title, int(user_limit)))
+    def add_plan(self, volume_gb, days, price, title="", user_limit=0, service=""):
+        return self.x("INSERT INTO plans (volume_gb,days,price,active,created_at,title,user_limit,service) VALUES (?,?,?,1,?,?,?,?)",
+                      (int(volume_gb), int(days), int(price), int(time.time()), title, int(user_limit), service))
 
-    def get_plans(self, active_only=False):
-        sql = "SELECT * FROM plans"
+    def get_plans(self, active_only=False, service=None):
+        """service: فقط پلن‌های همان سرویس (به‌علاوه‌ی پلن‌های قدیمی بدون سرویس)."""
+        where, args = [], []
         if active_only:
-            sql += " WHERE active=1"
-        return self.q(sql + " ORDER BY volume_gb")
+            where.append("active=1")
+        if service is not None:
+            where.append("service IN (?, '')")
+            args.append(service)
+        sql = "SELECT * FROM plans" + (" WHERE " + " AND ".join(where) if where else "")
+        return self.q(sql + " ORDER BY volume_gb", tuple(args))
 
     def get_plan(self, pid):
         return self.one("SELECT * FROM plans WHERE id=?", (pid,))
@@ -904,6 +915,22 @@ def plan_label(p):
     return f"{vol_text(p['volume_gb'])} | {p['days']} روز | {fmt(p['price'])} تومان"
 
 
+def plan_service(p):
+    try:
+        return p["service"] or ""
+    except (IndexError, KeyError):
+        return ""
+
+
+def plan_fits(p, service):
+    """پلن برای این سرویس فروخته می‌شود؟ پلن قدیمی بدون سرویس برای همه."""
+    return plan_service(p) in ("", service)
+
+
+def plan_service_name(p):
+    return SERVICES.get(plan_service(p), "همه‌ی سرویس‌ها (پلن قدیمی)")
+
+
 def plan_line(p):
     """خط تعرفه: 🛍️ عنوان — قیمت (اعداد انگلیسی). اگر عنوان ندارد، لیبل کامل ساخته می‌شود."""
     try:
@@ -1063,7 +1090,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_buy_services(query, uid):
     """قدم اول خرید: فقط سرویس‌هایی که همین الان روی پنل‌ها هاست و ظرفیت خالی دارند."""
     db.set_state(uid, "none")
-    services = available_services()
+    # سرویسی که هنوز پلنی ندارد نشان داده نمی‌شود تا مشتری به صفحه‌ی خالی نرسد
+    services = [s for s in available_services() if db.get_plans(active_only=True, service=s)]
     if not services:
         await safe_edit(query, "❌ فعلاً سرویسی برای فروش در دسترس نیست. کمی بعد دوباره امتحان کنید.", reply_markup=back_kb())
         return
@@ -1073,10 +1101,11 @@ async def show_buy_services(query, uid):
 
 
 async def show_plans(query, uid, service):
-    """قدم دوم خرید: پلن‌ها برای سرویس انتخاب‌شده."""
-    plans = db.get_plans(active_only=True)
+    """قدم دوم خرید: پلن‌های همان سرویس انتخاب‌شده، هر کدام با قیمت خودش."""
+    plans = db.get_plans(active_only=True, service=service)
     if not plans:
-        await safe_edit(query, "❌ فعلاً پلنی تعریف نشده است.", reply_markup=back_kb())
+        await safe_edit(query, f"❌ فعلاً پلنی برای {SERVICES[service]} تعریف نشده است.",
+                        reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "menu:buy")]]))
         return
     db.set_state(uid, "buy_plan", {"protocol": service})
     rows = [[btn(plan_line(p), f"plan:{p['id']}")] for p in plans]
@@ -1111,10 +1140,11 @@ async def show_referral(query, context, uid):
 
 
 async def show_tariff(query):
-    plans = db.get_plans(active_only=True)
-    text = "💵 تعرفه‌ها (الگوی قیمت)\n\n"
-    for p in plans:
-        text += plan_line(p) + "\n"
+    text = "💵 تعرفه‌ها (الگوی قیمت)\n"
+    for service in available_services():
+        plans = db.get_plans(active_only=True, service=service)
+        if plans:
+            text += f"\n{SERVICES[service]}\n" + "".join(plan_line(p) + "\n" for p in plans)
     await safe_edit(query, text, reply_markup=back_kb())
 
 
@@ -1350,10 +1380,9 @@ async def show_services(query, uid):
     rows = []
     for o in orders:
         name = order_name(o)
-        icon = name.split()[0]
         status = "" if o["status"] == "active" else " ⏳(درخواست حذف)"
-        text += f"{icon} {o['username']} ← {name}\n"
-        rows.append([btn(f"{icon} {o['username']}{status}", f"svc:{o['id']}")])
+        text += f"{o['username']} ← {name}\n"
+        rows.append([btn(f"{o['username']} — {name}{status}", f"svc:{o['id']}")])
     rows.append([btn("🔙 بازگشت", "menu:back")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
@@ -1562,7 +1591,7 @@ async def renew_menu(query, uid, oid):
     if not o or o["user_id"] != uid or o["status"] != "active":
         await safe_edit(query, "❌ سرویس یافت نشد.", reply_markup=back_kb())
         return
-    plans = db.get_plans(active_only=True)
+    plans = db.get_plans(active_only=True, service=o["protocol"])
     text = (f"♻️ تمدید / ارتقای سرویس «{o['username']}»\n"
             f"━━━━━━━━━━━━━━━\n"
             f"پلن فعلی: {vol_text(o['volume_gb'])} — {o['days']} روز\n\n"
@@ -1578,7 +1607,7 @@ async def renew_menu(query, uid, oid):
 async def renew_pay_menu(query, uid, oid, pid):
     o = db.get_order(oid)
     plan = db.get_plan(pid)
-    if not o or not plan or o["user_id"] != uid:
+    if not o or not plan or o["user_id"] != uid or not plan_fits(plan, o["protocol"]):
         await safe_edit(query, "❌ سرویس یافت نشد.", reply_markup=back_kb())
         return
     kb = InlineKeyboardMarkup([
@@ -1966,12 +1995,23 @@ async def admin_report_menu(query):
 async def admin_plans(query):
     plans = db.get_plans()
     rows = [[btn("➕ افزودن پلن جدید", "pl:add")]]
-    text = f"📦 مدیریت پلن‌ها:\n🧺 فعال | 🔴 غیرفعال\n"
-    for p in plans:
-        st = "🧺" if p["active"] else "🔴"
-        rows.append([btn(f"{st} #{p['id']} | {plan_label(p)}", f"pl:{p['id']}")])
+    text = f"📦 مدیریت پلن‌ها (هر سرویس پلن‌ها و قیمت‌های خودش):\n🧺 فعال | 🔴 غیرفعال\n"
+    for service in [*SERVICES, ""]:
+        group = [p for p in plans if plan_service(p) == service]
+        if not group:
+            continue
+        rows.append([btn(f"── {SERVICES.get(service, 'همه‌ی سرویس‌ها (پلن قدیمی)')} ──", "pl:noop")])
+        for p in group:
+            st = "🧺" if p["active"] else "🔴"
+            rows.append([btn(f"{st} #{p['id']} | {plan_label(p)} — {fmt(p['price'])} تومان", f"pl:{p['id']}")])
     rows.append([btn("🔙 بازگشت", "admin:menu")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
+
+
+def plan_service_kb(prefix, back):
+    rows = [[btn(name, f"{prefix}:{key}")] for key, name in SERVICES.items()]
+    rows.append([btn("🔙 بازگشت", back)])
+    return InlineKeyboardMarkup(rows)
 
 
 async def admin_plan_detail(query, pid):
@@ -1985,9 +2025,10 @@ async def admin_plan_detail(query, pid):
     except (IndexError, KeyError, TypeError, ValueError):
         ul = 0
     ul_text = f"{ul} دستگاه همزمان" if ul else "بدون محدودیت دستگاه"
-    text = f"📦 پلن #{p['id']}\n🛍️ {plan_label(p)}\n👥 لیمت دستگاه همزمان: {ul_text}\n📌 وضعیت: {st}"
+    text = (f"📦 پلن #{p['id']}\n🧩 سرویس: {plan_service_name(p)}\n🛍️ {plan_label(p)}\n"
+            f"💰 قیمت: {fmt(p['price'])} تومان\n👥 لیمت دستگاه همزمان: {ul_text}\n📌 وضعیت: {st}")
     kb = InlineKeyboardMarkup([
-        [btn("✏️ عنوان", f"ple:{pid}:title")],
+        [btn("✏️ عنوان", f"ple:{pid}:title"), btn("🧩 سرویس", f"pl:svc:{pid}")],
         [btn("✏️ حجم (گیگ)", f"ple:{pid}:volume_gb"), btn("✏️ مدت (روز)", f"ple:{pid}:days")],
         [btn("✏️ قیمت (تومان)", f"ple:{pid}:price"), btn("👥 تعداد کاربر (0 تا 5)", f"ple:{pid}:user_limit")],
         [btn("🔁 فعال / غیرفعال", f"pl:toggle:{pid}"), btn("🗑 حذف پلن", f"pl:del:{pid}")],
@@ -2058,9 +2099,9 @@ async def admin_panels(query):
     text = "🖥 مدیریت پنل‌های Tifusi Panel:\n\n"
     for p in panels:
         cnt = db.count_panel_active_orders(p["id"])
-        sold = [SERVICES[k].split()[0] for k in db.get_service_map(p["id"]) if service_protocols_on(p, k)]
+        sold = [SERVICES[k] for k in db.get_service_map(p["id"]) if service_protocols_on(p, k)]
         text += (f"{panel_status_icon(p)} #{p['id']} {p['name']} — {p['location']} — {cnt}/{p['max_users']} کاربر "
-                 f"{' '.join(sold)}\n")
+                 f"{'، '.join(sold)}\n")
         pbtns.append(btn(f"#{p['id']} {p['name']} ({cnt}/{p['max_users']})", f"pb:{p['id']}"))
     rows = [[btn("➕ افزودن پنل", "pb:add")]] + [pbtns[i:i + 2] for i in range(0, len(pbtns), 2)]
     if not panels:
@@ -2285,7 +2326,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state, sd = db.get_state(uid)
             plan = db.get_plan(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
             service = sd.get("protocol")
-            if state != "buy_plan" or service not in SERVICES or not plan or not plan["active"]:
+            if (state != "buy_plan" or service not in SERVICES or not plan or not plan["active"]
+                    or not plan_fits(plan, service)):
                 await safe_edit(query, "❌ جلسه خرید منقضی شده. دوباره از «خرید اشتراک» شروع کنید.",
                                 reply_markup=InlineKeyboardMarkup([[btn("🔐 خرید اشتراک", "menu:buy")]]))
                 return
@@ -2353,6 +2395,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not o or o["user_id"] != uid or o["status"] != "active":
                 return
             p = db.get_plan(pid) if pid else db.get_plan(o["plan_id"])
+            # پلن سرویس دیگری (با قیمت دیگر) نباید با دکمه‌ی دست‌کاری‌شده برای این سرویس خریده شود
+            if pid and (not p or not plan_fits(p, o["protocol"])):
+                return
             price = p["price"] if p else o["price"]
             plan_id = pid or o["plan_id"]
             if parts[1] == "w":
@@ -2798,9 +2843,23 @@ async def on_callback_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if cmd == "pl":
-            if parts[1] == "add":
-                db.set_state(uid, "plan_add_title")
-                await safe_edit(query, "➕ افزودن پلن\n\n1) عنوان پلن را بنویسید (مثلاً: 20 گیگ یک کاربره یک ماهه یا نامحدود دو کاربره یک ماهه):")
+            if parts[1] == "noop":
+                return
+            if parts[1] == "add" and len(parts) == 2:
+                await safe_edit(query, "➕ افزودن پلن\n\nاین پلن برای کدام سرویس است؟",
+                                reply_markup=plan_service_kb("pl:add", "admin:plans"))
+            elif parts[1] == "add" and parts[2] in SERVICES:
+                db.set_state(uid, "plan_add_title", {"service": parts[2]})
+                await safe_edit(query, f"➕ افزودن پلن {SERVICES[parts[2]]}\n\n"
+                                       "1) عنوان پلن را بنویسید (مثلاً: 20 گیگ یک کاربره یک ماهه یا نامحدود دو کاربره یک ماهه):")
+            elif parts[1] == "svc" and len(parts) == 3:
+                pid = int(parts[2])
+                await safe_edit(query, f"🧩 سرویس پلن #{pid} را انتخاب کنید:",
+                                reply_markup=plan_service_kb(f"pl:setsvc:{pid}", f"pl:{pid}"))
+            elif parts[1] == "setsvc" and parts[3] in SERVICES:
+                pid = int(parts[2])
+                db.update_plan(pid, service=parts[3])
+                await admin_plan_detail(query, pid)
             elif parts[1] == "toggle":
                 pid = int(parts[2])
                 p = db.get_plan(pid)
@@ -3000,9 +3059,9 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             return True
         sd["days"] = int(text)
         db.set_state(uid, "plan_add_users", sd)
-        await msg.reply_text("۴) این پلن چند کاربره باشد؟ (عدد 1 تا 5)\n\n"
-                             "یعنی حداکثر چند دستگاه بتوانند همزمان با این اکانت وصل شوند.\n"
-                             "۰ یعنی بدون لیمت اختصاصی — از User Limit اینباند پیروی می‌کند.")
+        await msg.reply_text("۴) این پلن چند کاربره باشد؟ (عدد 0 تا 5)\n\n"
+                             "یعنی حداکثر چند دستگاه بتوانند همزمان با این اکانت وصل شوند؛ دستگاه اضافه تا خالی شدن جا منتظر می‌ماند.\n"
+                             "۰ یعنی بدون محدودیت.")
         return True
 
     if state == "plan_add_users" and is_admin(uid):
@@ -3010,10 +3069,12 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             await msg.reply_text("❌ عددی بین 0 تا 5 وارد کنید:")
             return True
         vol = parse_volume_from_title(sd.get("title", ""))
-        db.add_plan(vol, sd["days"], sd["price"], sd.get("title", ""), int(text))
+        service = sd.get("service") if sd.get("service") in SERVICES else ""
+        db.add_plan(vol, sd["days"], sd["price"], sd.get("title", ""), int(text), service)
         db.set_state(uid, "none")
-        ul_txt = f"{text} کاربره" if int(text) else "پیروی از اینباند"
-        await msg.reply_text(f"✅ پلن «{sd.get('title')}» — {fmt(sd['price'])} تومان — {sd['days']} روز — 👥 {ul_txt} اضافه شد.")
+        ul_txt = f"{text} کاربره" if int(text) else "بدون محدودیت"
+        await msg.reply_text(f"✅ پلن {SERVICES.get(service, '')} «{sd.get('title')}» — {fmt(sd['price'])} تومان — "
+                             f"{sd['days']} روز — 👥 {ul_txt} اضافه شد.")
         return True
 
     if state == "plan_edit_value" and is_admin(uid):
@@ -3026,7 +3087,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             await msg.reply_text("❌ عدد وارد کنید:")
             return True
         if sd["field"] == "user_limit" and not (0 <= int(text) <= 5):
-            await msg.reply_text("❌ تعداد کاربر باید بین 0 تا 5 باشد (۰ = پیروی از لیمت اینباند):")
+            await msg.reply_text("❌ تعداد کاربر باید بین 0 تا 5 باشد (۰ = بدون محدودیت):")
             return True
         db.update_plan(sd["plan_id"], **{sd["field"]: int(text)})
         db.set_state(uid, "none")
