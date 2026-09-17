@@ -1394,6 +1394,18 @@ async def show_service_detail(query, uid, oid):
         return
     panel = db.get_panel(o["panel_id"])
     pname = panel["name"] if panel else "حذف‌شده"
+
+    # لینک و شناسه از پنل خوانده می‌شوند نه از سفارش: اگر آدرس عمومی پنل عوض شده
+    # باشد (مثلاً پورت داشبورد تغییر کرده)، مقدار ذخیره‌شده‌ی قدیمی دیگر باز نمی‌شود.
+    if panel:
+        try:
+            fresh = await asyncio.to_thread(panel_client(panel).links, o["username"])
+        except PanelError:
+            fresh = None
+        if fresh and (fresh["subscription_url"] != o["sub_url"] or fresh["app_code"] != o["app_code"]):
+            db.update_order(oid, sub_url=fresh["subscription_url"], app_code=fresh["app_code"])
+            o = db.get_order(oid)
+
     dt = datetime.datetime.fromtimestamp(o["expire_at"]).strftime("%Y-%m-%d — %H:%M")
 
     # مصرف از همان پنلی که سرویس روی آن ساخته شده
