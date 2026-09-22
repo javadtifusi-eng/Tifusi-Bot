@@ -884,7 +884,7 @@ def copy_code_button(code):
     python-telegram-bot وجود ندارد، آن‌وقت None برمی‌گردد و شناسه در کپشن می‌آید."""
     try:
         from telegram import CopyTextButton
-        return InlineKeyboardButton(f"🆔 کپی شناسه — {code[:12]}…", copy_text=CopyTextButton(code))
+        return InlineKeyboardButton("کپی شناسه", copy_text=CopyTextButton(code))
     except Exception:
         return None
 
@@ -1436,7 +1436,7 @@ async def deliver_service(context, chat_id, order, panel):
         copy_btn = copy_code_button(code)
         rows = [[copy_btn]] if copy_btn else []
         if not copy_btn:
-            caption += f"\n\n🆔 شناسه: <code>{html.escape(code)}</code>"
+            caption += f"\n\nشناسه: <code>{html.escape(code)}</code>"
         if apple_url:
             # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
             rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
