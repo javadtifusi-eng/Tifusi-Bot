@@ -303,6 +303,9 @@ update_bot() {
     OLD_ADMIN=$(grep -m1 "^ADMIN_ID" "$BOT_FILE" | grep -oE "[0-9]+" | head -1)
     OLD_MAXU=$(grep -m1 "^DEFAULT_PANEL_MAX_USERS" "$BOT_FILE" | grep -oE "[0-9]+" | head -1)
     cp "$BOT_FILE" /root/bot.py.bak
+    # A version can need a package the installed one didn't (the delivery card
+    # needs arabic-reshaper and python-bidi), so an update installs deps too.
+    install_deps
     download_bot
     sed -i "s|^BOT_TOKEN = .*|BOT_TOKEN = \"$OLD_TOKEN\"|" "$BOT_FILE"
     sed -i "s|^ADMIN_ID = .*|ADMIN_ID = $OLD_ADMIN        # admin numeric id|" "$BOT_FILE"
