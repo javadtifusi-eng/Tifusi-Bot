@@ -879,6 +879,16 @@ def btn(text, data):
     return InlineKeyboardButton(text, callback_data=data)
 
 
+def copy_code_button(code):
+    """دکمه‌ای که با یک لمس شناسه را کپی می‌کند (Bot API 8.0). روی نسخه‌های قدیمی‌تر
+    python-telegram-bot وجود ندارد، آن‌وقت None برمی‌گردد و شناسه در کپشن می‌آید."""
+    try:
+        from telegram import CopyTextButton
+        return InlineKeyboardButton(f"🆔 کپی شناسه — {code[:12]}…", copy_text=CopyTextButton(code))
+    except Exception:
+        return None
+
+
 def pbtn(text, data):
     """دکمه پهن — با فاصله نامرئی دو طرف متن تا ستون‌ها کل عرض صفحه را پر کنند."""
     return InlineKeyboardButton(f"⠀{text}⠀", callback_data=data)
@@ -1269,13 +1279,10 @@ def create_service_on_panel(user_id, plan, service, username, panel_id=None, ips
     return db.get_order(oid), panel
 
 
-def delivery_card_png(order, apple):
-    """کارت تصویری تحویل — همان زبان بصری صفحه‌ی اطلاعات اشتراک پنل: نشان تیفوسی، وضعیت و حجم
-    و انقضا، بارکد لینک اشتراک، شناسه و کاشی‌های نصب. اگر فونت/نشان‌ها یا کتابخانه‌ها نبودند
-    None برمی‌گردد تا تحویل به تحویل متنی قبلی برگردد و هیچ‌وقت به‌خاطر یک تصویر شکست نخورد.
-
-    متن فارسی پیش از رسم reshape و bidi می‌شود؛ برچسب فارسی و مقدار لاتین هر ردیف جدا کشیده
-    می‌شوند، چون bidi روی رشته‌ی ترکیبی ترتیب عددها را جابه‌جا می‌کند (۲۰۲۶-۱۰-۲۲ ← ۲۲-۱۰-۲۰۲۶)."""
+def delivery_card_png(order):
+    """کارت تصویری تحویل: فقط نشان تیفوسی و بارکد لینک اشتراک. باقی چیزها (نام، حجم، انقضا،
+    شناسه، نصب) روی کپشن و دکمه‌های واقعی زیر عکس‌اند، چون داخل تصویر هیچ‌چیز قابل لمس نیست.
+    اگر فونت/نشان‌ها یا کتابخانه‌ها نبودند None برمی‌گردد تا تحویل به حالت متنی قبلی برگردد."""
     if not order["sub_url"]:
         return None
     try:
@@ -1301,101 +1308,37 @@ def delivery_card_png(order, apple):
             def fa(text):
                 return get_display(arabic_reshaper.reshape(text))
 
-        img = Image.new("RGB", (CARD_W, 1500), CARD_GROUND)
+        img = Image.new("RGB", (CARD_W, 1100), CARD_GROUND)
         d = ImageDraw.Draw(img)
 
         def width(text, f):
             return d.textbbox((0, 0), text, font=f)[2]
 
-        f_title, f_name, f_code = font("Bold", 44), font("Bold", 34), font("Bold", 25)
-        f_sub, f_label, f_value = font("Regular", 24), font("Regular", 22), font("Regular", 26)
+        f_title, f_sub = font("Bold", 46), font("Regular", 25)
 
         mark = Image.open(os.path.join(ASSET_DIR, "tifusi-mark.png")).convert("RGBA")
-        mark = mark.resize((176, int(176 * mark.height / mark.width)), Image.LANCZOS)
-        img.paste(mark, ((CARD_W - mark.width) // 2, 54), mark)
+        mark = mark.resize((200, int(200 * mark.height / mark.width)), Image.LANCZOS)
+        img.paste(mark, ((CARD_W - mark.width) // 2, 60), mark)
 
-        y = 54 + mark.height + 14
+        y = 60 + mark.height + 16
         d.text(((CARD_W - width("Tifusi VPN", f_title)) // 2, y), "Tifusi VPN", font=f_title, fill=CARD_TEXT)
-        y += 58
+        y += 62
         t = fa("اشتراک شما فعال شد")
         d.text(((CARD_W - width(t, f_sub)) // 2, y), t, font=f_sub, fill=CARD_MUTED)
 
-        y += 62
-        box_h = 210
-        d.rounded_rectangle([56, y, CARD_W - 56, y + box_h], radius=26, fill=CARD_PANEL, outline=CARD_HAIR, width=2)
-
-        pill = fa("فعال")
-        d.rounded_rectangle([92, y + 32, 92 + width(pill, f_label) + 44, y + 76], radius=22,
-                            fill="#2a1505", outline=CARD_ACCENT, width=2)
-        d.text((114, y + 38), pill, font=f_label, fill=CARD_ACCENT)
-        d.text((CARD_W - 92 - width(order["username"], f_name), y + 30), order["username"], font=f_name, fill=CARD_TEXT)
-
-        bar_y = y + 104
-        d.rounded_rectangle([92, bar_y, CARD_W - 92, bar_y + 12], radius=6, fill="#0e0e0e")
-
-        row_y = bar_y + 34
-        lbl, val = fa("حجم:"), fa(vol_text(order["volume_gb"]))
-        x = CARD_W - 92 - width(lbl, f_value)
-        d.text((x, row_y), lbl, font=f_value, fill=CARD_MUTED)
-        d.text((x - 14 - width(val, f_value), row_y), val, font=f_value, fill=CARD_DIM)
-
-        lbl = fa("انقضا:")
-        val = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")
-        d.text((92, row_y), val, font=f_value, fill=CARD_DIM)
-        d.text((92 + width(val, f_value) + 14, row_y), lbl, font=f_value, fill=CARD_MUTED)
-
-        y += box_h + 48
-        qr = qrcode.make(order["sub_url"], box_size=10, border=1).convert("RGB").resize((376, 376), Image.NEAREST)
-        qx = (CARD_W - 416) // 2
-        d.rounded_rectangle([qx, y, qx + 416, y + 416], radius=22, fill="#ffffff")
+        y += 56
+        qr = qrcode.make(order["sub_url"], box_size=10, border=1).convert("RGB").resize((500, 500), Image.NEAREST)
+        box = 540
+        qx = (CARD_W - box) // 2
+        d.rounded_rectangle([qx, y, qx + box, y + box], radius=26, fill="#ffffff")
         img.paste(qr, (qx + 20, y + 20))
 
-        y += 450
+        y += box + 30
         t = fa(f"بارکد اشتراک {SERVICES.get(order['protocol'], '')}".strip())
-        d.text(((CARD_W - width(t, f_label)) // 2, y), t, font=f_label, fill=CARD_MUTED)
-
-        # شناسه هرگز کوتاه نمی‌شود — مشتری باید کاملش را داشته باشد؛ در چند خط می‌شکند.
-        code, lines = app_code_text(order), []
-        while code:
-            cut = len(code)
-            while cut > 1 and width(code[:cut], f_code) > CARD_W - 160:
-                cut -= 1
-            lines.append(code[:cut])
-            code = code[cut:]
-
-        y += 52
-        code_h = 74 + len(lines) * 36
-        d.rounded_rectangle([56, y, CARD_W - 56, y + code_h], radius=22, fill=CARD_PANEL, outline=CARD_HAIR, width=2)
-        t = fa("شناسه ورود در برنامه")
-        d.text(((CARD_W - width(t, f_label)) // 2, y + 20), t, font=f_label, fill=CARD_MUTED)
-        for i, line in enumerate(lines):
-            d.text(((CARD_W - width(line, f_code)) // 2, y + 58 + i * 36), line, font=f_code, fill=CARD_TEXT)
-
-        def tile(top, icon_name, plate_bg, icon_size, title, subtitle, badge):
-            d.rounded_rectangle([56, top, CARD_W - 56, top + CARD_TILE_H], radius=22,
-                                fill=CARD_PANEL, outline=CARD_HAIR, width=2)
-            plate = Image.new("RGBA", (88, 88), plate_bg)
-            icon = Image.open(os.path.join(ASSET_DIR, icon_name)).convert("RGBA").resize((icon_size, icon_size), Image.LANCZOS)
-            plate.paste(icon, ((88 - icon_size) // 2, (88 - icon_size) // 2), icon)
-            mask = Image.new("L", (88, 88), 0)
-            ImageDraw.Draw(mask).rounded_rectangle([0, 0, 87, 87], radius=22, fill=255)
-            img.paste(plate, (CARD_W - 180, top + 20), mask)
-
-            tx = CARD_W - 202
-            d.text((tx - width(title, f_value), top + 30), title, font=f_value, fill=CARD_TEXT)
-            d.text((tx - width(subtitle, f_label), top + 70), subtitle, font=f_label, fill=CARD_MUTED)
-            d.rounded_rectangle([92, top + 42, 92 + width(badge, f_label) + 44, top + 86], radius=14, fill=CARD_ACCENT)
-            d.text((114, top + 48), badge, font=f_label, fill="#1a0d02")
-
-        y += code_h + 20
-        tile(y, "app-icon.png", (0, 0, 0, 0), 88, fa("دانلود برنامه اندروید"), "Tifusi VPN", fa("دانلود"))
-        if apple:
-            y += CARD_TILE_H + 12
-            tile(y, "apple-mark.png", (245, 245, 245, 255), 54,
-                 fa("نصب پروفایل آیفون و مک"), fa("IKEv2 با یک لمس"), fa("نصب"))
+        d.text(((CARD_W - width(t, f_sub)) // 2, y), t, font=f_sub, fill=CARD_MUTED)
 
         buf = io.BytesIO()
-        img.crop((0, 0, CARD_W, y + CARD_TILE_H + 56)).save(buf, format="PNG", optimize=True)
+        img.crop((0, 0, CARD_W, y + 60)).save(buf, format="PNG", optimize=True)
         buf.seek(0)
         buf.name = "tifusi.png"
         return buf
@@ -1467,9 +1410,9 @@ def delivery_details_html(order, panel, links):
 
 
 async def deliver_service(context, chat_id, order, panel):
-    """تحویل سرویس: یک کارت تصویری با نشان و بارکد و شناسه، و زیرش لینک‌های قابل لمس.
-    شناسه در کپشن هم می‌آید چون از روی تصویر نمی‌شود کپی کرد. اگر کارت ساخته نشد،
-    همان تحویل متنی قبلی (خلاصه، بارکد، جزئیات) فرستاده می‌شود."""
+    """تحویل سرویس: کارتی با نشان و بارکد، نام و حجم و انقضا در کپشن، و زیرش دکمه‌های واقعی
+    (کپی شناسه، نصب پروفایل آیفون، دانلود اپ، صفحه‌ی اشتراک). اگر کارت ساخته نشد، همان
+    تحویل متنی قبلی (خلاصه، بارکد، جزئیات) فرستاده می‌شود."""
     dt = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")
     summary = f"✅ {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — تا {dt}"
     links = None
@@ -1482,16 +1425,22 @@ async def deliver_service(context, chat_id, order, panel):
     details = delivery_details_html(order, panel, links)
     ikev2 = (links or {}).get("ikev2_configs") or []
     apple_url = ikev2[0].get("mobileconfig_url") if ikev2 else None
-    card = await asyncio.to_thread(delivery_card_png, order, bool(apple_url))
+    card = await asyncio.to_thread(delivery_card_png, order)
     if card:
-        # کاشی‌های داخل تصویر فقط نقاشی‌اند — تلگرام هیچ نقطه‌ای از یک عکس را قابل لمس نمی‌کند،
-        # پس دکمه‌های واقعی همان‌ها هستند که درست زیر عکس می‌نشینند.
-        rows = []
+        # داخل تصویر فقط نشان و بارکد است: تلگرام هیچ نقطه‌ای از یک عکس را قابل لمس نمی‌کند،
+        # پس نام و حجم و انقضا در کپشن و بقیه روی دکمه‌های واقعی زیر عکس می‌نشینند.
+        code = app_code_text(order)
+        caption = (f"✅ <b>{html.escape(order['username'])}</b> — {html.escape(service_name(order['protocol']))}\n"
+                   f"📦 حجم: {html.escape(vol_text(order['volume_gb']))}\n"
+                   f"📅 انقضا: {dt}")
+        copy_btn = copy_code_button(code)
+        rows = [[copy_btn]] if copy_btn else []
+        if not copy_btn:
+            caption += f"\n\n🆔 شناسه: <code>{html.escape(code)}</code>"
         if apple_url:
-            rows.append([InlineKeyboardButton("🍎 نصب پروفایل آیفون و مک", url=apple_url)])
+            # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
+            rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
         rows.append([InlineKeyboardButton("📲 دانلود اپ اندروید", url=APP_ANDROID_URL)])
-        rows.append([InlineKeyboardButton("🔗 صفحه‌ی اشتراک", url=order["sub_url"])])
-        caption = f"{html.escape(summary)}\n\n🆔 شناسه: <code>{html.escape(app_code_text(order))}</code>"
         try:
             await context.bot.send_photo(chat_id, card, caption=caption, parse_mode="HTML",
                                          reply_markup=InlineKeyboardMarkup(rows))
