@@ -1279,19 +1279,27 @@ def delivery_card_png(order, apple):
     if not order["sub_url"]:
         return None
     try:
-        import arabic_reshaper
         import qrcode
-        from PIL import Image, ImageDraw, ImageFont
-        try:
-            from bidi import get_display
-        except ImportError:
-            from bidi.algorithm import get_display
+        from PIL import Image, ImageDraw, ImageFont, features
 
         def font(name, size):
             return ImageFont.truetype(os.path.join(ASSET_DIR, f"Vazirmatn-{name}.ttf"), size)
 
-        def fa(text):
-            return get_display(arabic_reshaper.reshape(text))
+        if features.check("raqm"):
+            # Pillow built with libraqm joins and reorders Persian itself. Running
+            # reshape+bidi before it reverses the line a second time — the card came
+            # out with «اشتراک شما فعال شد» drawn as «دش لاعف امش کارتشا».
+            def fa(text):
+                return text
+        else:
+            import arabic_reshaper
+            try:
+                from bidi import get_display
+            except ImportError:
+                from bidi.algorithm import get_display
+
+            def fa(text):
+                return get_display(arabic_reshaper.reshape(text))
 
         img = Image.new("RGB", (CARD_W, 1500), CARD_GROUND)
         d = ImageDraw.Draw(img)
@@ -1473,11 +1481,23 @@ async def deliver_service(context, chat_id, order, panel):
 
     details = delivery_details_html(order, panel, links)
     ikev2 = (links or {}).get("ikev2_configs") or []
-    card = await asyncio.to_thread(delivery_card_png, order, bool(ikev2 and ikev2[0].get("mobileconfig_url")))
+    apple_url = ikev2[0].get("mobileconfig_url") if ikev2 else None
+    card = await asyncio.to_thread(delivery_card_png, order, bool(apple_url))
     if card:
-        caption = f"{html.escape(summary)}\n\n🔗 لینک اشتراک:\n{html.escape(order['sub_url'])}\n\n{details}"
+        # کاشی‌های داخل تصویر فقط نقاشی‌اند — تلگرام هیچ نقطه‌ای از یک عکس را قابل لمس نمی‌کند،
+        # پس دکمه‌های واقعی همان‌ها هستند که درست زیر عکس می‌نشینند.
+        rows = []
+        if apple_url:
+            rows.append([InlineKeyboardButton("🍎 نصب پروفایل آیفون و مک", url=apple_url)])
+        rows.append([InlineKeyboardButton("📲 دانلود اپ اندروید", url=APP_ANDROID_URL)])
+        rows.append([InlineKeyboardButton("🔗 صفحه‌ی اشتراک", url=order["sub_url"])])
+        caption = f"{html.escape(summary)}\n\n🆔 شناسه: <code>{html.escape(app_code_text(order))}</code>"
         try:
-            await context.bot.send_photo(chat_id, card, caption=caption, parse_mode="HTML")
+            await context.bot.send_photo(chat_id, card, caption=caption, parse_mode="HTML",
+                                         reply_markup=InlineKeyboardMarkup(rows))
+            if order["protocol"] == "l2tp":
+                await context.bot.send_message(chat_id, details, parse_mode="HTML",
+                                               disable_web_page_preview=True)
             return
         except Exception as e:
             log.warning("send delivery card failed for %s: %s", chat_id, e)
