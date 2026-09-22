@@ -18,7 +18,6 @@ import os
 import shutil
 import tempfile
 import weakref
-from urllib.parse import urlparse
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.error import RetryAfter, Forbidden, BadRequest
@@ -72,6 +71,13 @@ TEST_SERVICE_ORDER = ["ikev2", "xray", "hysteria2", "l2tp", "wireguard"]
 GENERIC_ORDER_KEY = "tifusi"
 
 APP_ANDROID_URL = "https://github.com/javadtifusi-eng/Tifusi-VPN/releases/latest/download/tifusi-vpn.apk"
+
+# فونت و نشان‌های کارت تحویل؛ نصب‌کننده آن‌ها را کنار bot.py از همین مخزن می‌گیرد.
+ASSET_DIR = "/root/tifusi-bot-assets"
+CARD_W = 900
+CARD_TILE_H = 128
+CARD_GROUND, CARD_PANEL, CARD_HAIR = "#0a0a0a", "#141414", "#232323"
+CARD_ACCENT, CARD_TEXT, CARD_MUTED, CARD_DIM = "#f97316", "#f5f5f5", "#8b8b8b", "#d4d4d4"
 
 # سرویس‌هایی که مشتری با نام کاربری و رمز به آن‌ها وصل می‌شود و موقع خرید رمز دلخواه می‌گیرند
 IPSEC_SERVICES = {"ikev2", "l2tp"}
@@ -835,13 +841,11 @@ def service_access_protocols(panel, service):
     return [p for p in SERVICE_PROTOCOLS.get(service, []) if p in PANEL_KNOWN_PROTOCOLS or available.get(p)]
 
 
-def app_code_text(order, panel=None):
-    """شناسه به شکل CODE@دامنه — با هر بیلد اپ و برای هر پنلی کار می‌کند. دامنه از لینک اشتراک خوانده
-    می‌شود (آدرس عمومی پنل)، نه از آدرسی که ربات با آن به API وصل می‌شود و ممکن است IP یا پورت داخلی باشد."""
-    if not order["app_code"]:
-        return "-"
-    host = urlparse(order["sub_url"] or "").netloc or (urlparse(panel["url"]).netloc if panel else "")
-    return f"{order['app_code']}@{host}" if host else order["app_code"]
+def app_code_text(order):
+    """شناسه دقیقاً همان‌طور که پنل می‌دهد — لخت و بدون @دامنه. دامنه‌ی پنل از قبل داخل خود شناسه
+    (بخش base32 بعد از خط تیره) است، پس چسباندن دوباره‌ی آن هم اضافی است و هم شناسه را در پیامک
+    شبیه نشانی وب و در معرض فیلتر می‌کند."""
+    return order["app_code"] or "-"
 
 
 def md(s):
@@ -1265,6 +1269,133 @@ def create_service_on_panel(user_id, plan, service, username, panel_id=None, ips
     return db.get_order(oid), panel
 
 
+def delivery_card_png(order, apple):
+    """کارت تصویری تحویل — همان زبان بصری صفحه‌ی اطلاعات اشتراک پنل: نشان تیفوسی، وضعیت و حجم
+    و انقضا، بارکد لینک اشتراک، شناسه و کاشی‌های نصب. اگر فونت/نشان‌ها یا کتابخانه‌ها نبودند
+    None برمی‌گردد تا تحویل به تحویل متنی قبلی برگردد و هیچ‌وقت به‌خاطر یک تصویر شکست نخورد.
+
+    متن فارسی پیش از رسم reshape و bidi می‌شود؛ برچسب فارسی و مقدار لاتین هر ردیف جدا کشیده
+    می‌شوند، چون bidi روی رشته‌ی ترکیبی ترتیب عددها را جابه‌جا می‌کند (۲۰۲۶-۱۰-۲۲ ← ۲۲-۱۰-۲۰۲۶)."""
+    if not order["sub_url"]:
+        return None
+    try:
+        import arabic_reshaper
+        import qrcode
+        from PIL import Image, ImageDraw, ImageFont
+        try:
+            from bidi import get_display
+        except ImportError:
+            from bidi.algorithm import get_display
+
+        def font(name, size):
+            return ImageFont.truetype(os.path.join(ASSET_DIR, f"Vazirmatn-{name}.ttf"), size)
+
+        def fa(text):
+            return get_display(arabic_reshaper.reshape(text))
+
+        img = Image.new("RGB", (CARD_W, 1500), CARD_GROUND)
+        d = ImageDraw.Draw(img)
+
+        def width(text, f):
+            return d.textbbox((0, 0), text, font=f)[2]
+
+        f_title, f_name, f_code = font("Bold", 44), font("Bold", 34), font("Bold", 25)
+        f_sub, f_label, f_value = font("Regular", 24), font("Regular", 22), font("Regular", 26)
+
+        mark = Image.open(os.path.join(ASSET_DIR, "tifusi-mark.png")).convert("RGBA")
+        mark = mark.resize((176, int(176 * mark.height / mark.width)), Image.LANCZOS)
+        img.paste(mark, ((CARD_W - mark.width) // 2, 54), mark)
+
+        y = 54 + mark.height + 14
+        d.text(((CARD_W - width("Tifusi VPN", f_title)) // 2, y), "Tifusi VPN", font=f_title, fill=CARD_TEXT)
+        y += 58
+        t = fa("اشتراک شما فعال شد")
+        d.text(((CARD_W - width(t, f_sub)) // 2, y), t, font=f_sub, fill=CARD_MUTED)
+
+        y += 62
+        box_h = 210
+        d.rounded_rectangle([56, y, CARD_W - 56, y + box_h], radius=26, fill=CARD_PANEL, outline=CARD_HAIR, width=2)
+
+        pill = fa("فعال")
+        d.rounded_rectangle([92, y + 32, 92 + width(pill, f_label) + 44, y + 76], radius=22,
+                            fill="#2a1505", outline=CARD_ACCENT, width=2)
+        d.text((114, y + 38), pill, font=f_label, fill=CARD_ACCENT)
+        d.text((CARD_W - 92 - width(order["username"], f_name), y + 30), order["username"], font=f_name, fill=CARD_TEXT)
+
+        bar_y = y + 104
+        d.rounded_rectangle([92, bar_y, CARD_W - 92, bar_y + 12], radius=6, fill="#0e0e0e")
+
+        row_y = bar_y + 34
+        lbl, val = fa("حجم:"), fa(vol_text(order["volume_gb"]))
+        x = CARD_W - 92 - width(lbl, f_value)
+        d.text((x, row_y), lbl, font=f_value, fill=CARD_MUTED)
+        d.text((x - 14 - width(val, f_value), row_y), val, font=f_value, fill=CARD_DIM)
+
+        lbl = fa("انقضا:")
+        val = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")
+        d.text((92, row_y), val, font=f_value, fill=CARD_DIM)
+        d.text((92 + width(val, f_value) + 14, row_y), lbl, font=f_value, fill=CARD_MUTED)
+
+        y += box_h + 48
+        qr = qrcode.make(order["sub_url"], box_size=10, border=1).convert("RGB").resize((376, 376), Image.NEAREST)
+        qx = (CARD_W - 416) // 2
+        d.rounded_rectangle([qx, y, qx + 416, y + 416], radius=22, fill="#ffffff")
+        img.paste(qr, (qx + 20, y + 20))
+
+        y += 450
+        t = fa(f"بارکد اشتراک {SERVICES.get(order['protocol'], '')}".strip())
+        d.text(((CARD_W - width(t, f_label)) // 2, y), t, font=f_label, fill=CARD_MUTED)
+
+        # شناسه هرگز کوتاه نمی‌شود — مشتری باید کاملش را داشته باشد؛ در چند خط می‌شکند.
+        code, lines = app_code_text(order), []
+        while code:
+            cut = len(code)
+            while cut > 1 and width(code[:cut], f_code) > CARD_W - 160:
+                cut -= 1
+            lines.append(code[:cut])
+            code = code[cut:]
+
+        y += 52
+        code_h = 74 + len(lines) * 36
+        d.rounded_rectangle([56, y, CARD_W - 56, y + code_h], radius=22, fill=CARD_PANEL, outline=CARD_HAIR, width=2)
+        t = fa("شناسه ورود در برنامه")
+        d.text(((CARD_W - width(t, f_label)) // 2, y + 20), t, font=f_label, fill=CARD_MUTED)
+        for i, line in enumerate(lines):
+            d.text(((CARD_W - width(line, f_code)) // 2, y + 58 + i * 36), line, font=f_code, fill=CARD_TEXT)
+
+        def tile(top, icon_name, plate_bg, icon_size, title, subtitle, badge):
+            d.rounded_rectangle([56, top, CARD_W - 56, top + CARD_TILE_H], radius=22,
+                                fill=CARD_PANEL, outline=CARD_HAIR, width=2)
+            plate = Image.new("RGBA", (88, 88), plate_bg)
+            icon = Image.open(os.path.join(ASSET_DIR, icon_name)).convert("RGBA").resize((icon_size, icon_size), Image.LANCZOS)
+            plate.paste(icon, ((88 - icon_size) // 2, (88 - icon_size) // 2), icon)
+            mask = Image.new("L", (88, 88), 0)
+            ImageDraw.Draw(mask).rounded_rectangle([0, 0, 87, 87], radius=22, fill=255)
+            img.paste(plate, (CARD_W - 180, top + 20), mask)
+
+            tx = CARD_W - 202
+            d.text((tx - width(title, f_value), top + 30), title, font=f_value, fill=CARD_TEXT)
+            d.text((tx - width(subtitle, f_label), top + 70), subtitle, font=f_label, fill=CARD_MUTED)
+            d.rounded_rectangle([92, top + 42, 92 + width(badge, f_label) + 44, top + 86], radius=14, fill=CARD_ACCENT)
+            d.text((114, top + 48), badge, font=f_label, fill="#1a0d02")
+
+        y += code_h + 20
+        tile(y, "app-icon.png", (0, 0, 0, 0), 88, fa("دانلود برنامه اندروید"), "Tifusi VPN", fa("دانلود"))
+        if apple:
+            y += CARD_TILE_H + 12
+            tile(y, "apple-mark.png", (245, 245, 245, 255), 54,
+                 fa("نصب پروفایل آیفون و مک"), fa("IKEv2 با یک لمس"), fa("نصب"))
+
+        buf = io.BytesIO()
+        img.crop((0, 0, CARD_W, y + CARD_TILE_H + 56)).save(buf, format="PNG", optimize=True)
+        buf.seek(0)
+        buf.name = "tifusi.png"
+        return buf
+    except Exception as e:
+        log.warning("delivery card render failed: %s", e)
+        return None
+
+
 def qr_png(data):
     """تصویر QR لینک اشتراک در حافظه (PNG). اگر کتابخانه‌ی qrcode نبود یا خطا داد None برمی‌گردد
     تا تحویل متنی سرویس هیچ‌وقت به‌خاطر QR متوقف نشود."""
@@ -1304,22 +1435,21 @@ def delivery_details_html(order, panel, links):
     parts = []
     if ikev2 and ikev2[0].get("mobileconfig_url"):
         parts.append(f"🍎 نصب پروفایل آیفون:\n{esc(ikev2[0]['mobileconfig_url'])}")
-    parts.append(f"🆔 شناسه: <code>{esc(app_code_text(order, panel))}</code>")
+    parts.append(f"🆔 شناسه: <code>{esc(app_code_text(order))}</code>")
 
-    configs = ikev2 + l2tp
-    if configs:
-        lines = [f"👤 نام کاربری: <code>{esc(configs[0]['username'])}</code>",
-                 f"🔑 رمز عبور: <code>{esc(configs[0]['password'])}</code>"]
-        for cfg in configs:
-            if len(configs) > 1:
+    # فقط L2TP: IKEv2 با یک لمس پروفایل نصب می‌شود، پس مشتری هیچ‌وقت آدرس و رمز را دستی وارد
+    # نمی‌کند و فرستادنشان جز سردرگمی چیزی ندارد. L2TP نصب‌کننده‌ی یک‌لمسی ندارد و بدون این‌ها وصل نمی‌شود.
+    if l2tp:
+        lines = [f"👤 نام کاربری: <code>{esc(l2tp[0]['username'])}</code>",
+                 f"🔑 رمز عبور: <code>{esc(l2tp[0]['password'])}</code>"]
+        for cfg in l2tp:
+            if len(l2tp) > 1:
                 lines.append(f"\n📍 {esc(cfg.get('remark') or cfg['server'])}")
             lines.append(f"🌐 آدرس: <code>{esc(cfg['server'])}</code>")
-            if cfg.get("remote_id"):
-                lines.append(f"🪪 ریموت آیدی: <code>{esc(cfg['remote_id'])}</code>")
             if cfg.get("psk"):
                 lines.append(f"🔐 سکرت: <code>{esc(cfg['psk'])}</code>")
         parts.append("\n".join(lines))
-    elif order["protocol"] in IPSEC_SERVICES and order["password"]:
+    elif order["protocol"] == "l2tp" and order["password"]:
         # پنل جواب نداد: دست‌کم نام کاربری و رمزی که با آن ساخته شد
         parts.append(f"👤 نام کاربری: <code>{esc(order['username'])}</code>\n"
                      f"🔑 رمز عبور: <code>{esc(order['password'])}</code>")
@@ -1329,19 +1459,33 @@ def delivery_details_html(order, panel, links):
 
 
 async def deliver_service(context, chat_id, order, panel):
-    """تحویل سرویس: یک خط خلاصه، بارکد لینک اشتراک با لینک زیرش، و بعد delivery_details_html."""
+    """تحویل سرویس: یک کارت تصویری با نشان و بارکد و شناسه، و زیرش لینک‌های قابل لمس.
+    شناسه در کپشن هم می‌آید چون از روی تصویر نمی‌شود کپی کرد. اگر کارت ساخته نشد،
+    همان تحویل متنی قبلی (خلاصه، بارکد، جزئیات) فرستاده می‌شود."""
     dt = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")
-    await context.bot.send_message(chat_id, f"✅ {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — تا {dt}")
-    if order["sub_url"] and not await send_order_qr(context, chat_id, order):
-        await context.bot.send_message(chat_id, order["sub_url"])
+    summary = f"✅ {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — تا {dt}"
     links = None
     if order["protocol"] in IPSEC_SERVICES:
         try:
             links = await asyncio.to_thread(panel_client(panel).links, order["username"])
         except PanelError as e:
             log.warning("fetching IPsec details for %s failed: %s", order["username"], e)
-    await context.bot.send_message(chat_id, delivery_details_html(order, panel, links),
-                                   parse_mode="HTML", disable_web_page_preview=True)
+
+    details = delivery_details_html(order, panel, links)
+    ikev2 = (links or {}).get("ikev2_configs") or []
+    card = await asyncio.to_thread(delivery_card_png, order, bool(ikev2 and ikev2[0].get("mobileconfig_url")))
+    if card:
+        caption = f"{html.escape(summary)}\n\n🔗 لینک اشتراک:\n{html.escape(order['sub_url'])}\n\n{details}"
+        try:
+            await context.bot.send_photo(chat_id, card, caption=caption, parse_mode="HTML")
+            return
+        except Exception as e:
+            log.warning("send delivery card failed for %s: %s", chat_id, e)
+
+    await context.bot.send_message(chat_id, summary)
+    if order["sub_url"] and not await send_order_qr(context, chat_id, order):
+        await context.bot.send_message(chat_id, order["sub_url"])
+    await context.bot.send_message(chat_id, details, parse_mode="HTML", disable_web_page_preview=True)
 
 
 # ---------- تمدید ----------
@@ -1428,7 +1572,7 @@ async def show_service_detail(query, uid, oid):
             pass
 
     creds = (f"👤 یوزرنیم: `{o['username']}`\n"
-             f"🆔 شناسه: `{app_code_text(o, panel)}`\n"
+             f"🆔 شناسه: `{app_code_text(o)}`\n"
              f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`\n"
              f"📲 اندروید: {APP_ANDROID_URL}")
     text = (f"{md(service_name(o['protocol']))} — #{o['id']}\n"
@@ -1652,7 +1796,7 @@ async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
             f"✅ سرویس `{new_o['username']}` تمدید شد!\n\n"
             f"📦 پلن جدید: {vol_text(new_o['volume_gb'])} — {new_o['days']} روز\n"
             f"👤 یوزرنیم: `{new_o['username']}`\n"
-            f"🆔 شناسه: `{app_code_text(new_o, panel)}`\n"
+            f"🆔 شناسه: `{app_code_text(new_o)}`\n"
             f"🔗 لینک اشتراک: `{new_o['sub_url'] or '-'}`\n"
             f"⏳ اعتبار جدید: تا {dt}",
             parse_mode="Markdown")

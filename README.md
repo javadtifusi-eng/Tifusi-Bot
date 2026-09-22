@@ -60,7 +60,7 @@ The bot knows every service, but **only offers a service to customers when the p
 |---|---|
 | 🛍️ **Plan store** | Each service (Xray, IKEv2, L2TP, …) has its own plans with their own data, duration, price and simultaneous device limit; customers only see the plans of the service they picked |
 | 📡 **Protocols from the panel** | Only protocols that have hosts on the panel are sold; panel changes apply automatically |
-| 📱 **Full delivery** | QR code with the subscription link beneath it, the iPhone profile, access code, IKEv2/L2TP username, password, address, remote ID and secret, and the Tifusi VPN Android link |
+| 📱 **Full delivery** | An image card with the Tifusi mark, data and expiry, subscription QR, access code and install tiles; beneath it the subscription link, the iPhone profile and the Android app (manual credentials only for L2TP) |
 | 🔑 **Test account** | Once per user; off by default and enabled from General settings |
 | 🖥️ **Multiple panels** | Several servers with custom capacity; when one panel is full, new purchases move to the next |
 | 🔄 **Smart renewal** | Always renews the same user on the same panel; code, link and QR stay the same |
