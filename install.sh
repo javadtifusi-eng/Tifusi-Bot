@@ -7,6 +7,7 @@
 REPO_URL="https://raw.githubusercontent.com/javadtifusi-eng/Tifusi-Bot/main"
 
 BOT_FILE="/root/bot.py"
+ASSET_DIR="/root/tifusi-bot-assets"
 SERVICE="bot"
 
 # ---------- Colors ----------
@@ -61,8 +62,9 @@ install_deps() {
     info "Installing dependencies... (this may take a few minutes)"
     apt update -y >/dev/null 2>&1
     apt install -y python3 python3-pip curl >/dev/null 2>&1
-    pip3 install python-telegram-bot "python-telegram-bot[job-queue]" requests qrcode pillow --break-system-packages >/dev/null 2>&1 \
-        || pip3 install python-telegram-bot "python-telegram-bot[job-queue]" requests qrcode pillow >/dev/null 2>&1
+    # arabic-reshaper و python-bidi برای متن فارسی کارت تصویری تحویل لازم‌اند
+    PKGS=(python-telegram-bot "python-telegram-bot[job-queue]" requests qrcode pillow arabic-reshaper python-bidi)
+    pip3 install "${PKGS[@]}" --break-system-packages >/dev/null 2>&1 || pip3 install "${PKGS[@]}" >/dev/null 2>&1
     if python3 -c "import telegram, requests, qrcode, PIL" 2>/dev/null; then
         ok "Dependencies installed"
     else
@@ -80,6 +82,24 @@ download_bot() {
         exit 1
     fi
     ok "Bot downloaded"
+    download_assets
+}
+
+# ---------- Download card assets (font + marks) ----------
+# The delivery card is drawn with Pillow, which needs a real Persian font and the
+# logo files on disk. Missing assets are not fatal: bot.py falls back to the plain
+# text delivery, so an install that cannot reach GitHub still sells services.
+download_assets() {
+    mkdir -p "$ASSET_DIR"
+    for f in Vazirmatn-Bold.ttf Vazirmatn-Regular.ttf tifusi-mark.png app-icon.png apple-mark.png; do
+        curl -Ls "$REPO_URL/assets/$f" -o "$ASSET_DIR/$f.tmp" && [ -s "$ASSET_DIR/$f.tmp" ] \
+            && mv -f "$ASSET_DIR/$f.tmp" "$ASSET_DIR/$f" || rm -f "$ASSET_DIR/$f.tmp"
+    done
+    if [ -s "$ASSET_DIR/Vazirmatn-Bold.ttf" ]; then
+        ok "Delivery card assets ready"
+    else
+        warn "Card assets not downloaded — delivery falls back to plain text"
+    fi
 }
 
 # ---------- Create systemd service ----------
@@ -308,6 +328,7 @@ uninstall_bot() {
         systemctl stop $SERVICE 2>/dev/null
         systemctl disable $SERVICE 2>/dev/null
         rm -f /etc/systemd/system/bot.service "$BOT_FILE" /root/bot.py.bak
+        rm -rf "$ASSET_DIR"
         rm -f /usr/local/bin/tifusi-bot /usr/local/bin/qashang
         # The launcher is shared with Tifusi Panel, so it stays while the panel is installed.
         [ -e /usr/local/bin/tifusi-panel ] || rm -f /usr/local/bin/tifusi
