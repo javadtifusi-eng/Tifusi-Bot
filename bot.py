@@ -2542,12 +2542,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             o = db.get_order(oid)
             if not o or o["user_id"] != uid or o["status"] != "active":
                 return
-            p = db.get_plan(pid) if pid else db.get_plan(o["plan_id"])
-            # پلن سرویس دیگری (با قیمت دیگر) نباید با دکمه‌ی دست‌کاری‌شده برای این سرویس خریده شود
-            if pid and (not p or not plan_fits(p, o["protocol"])):
+            # قیمت همیشه از یک پلن واقعی، فعال و مال همین سرویس می‌آید. قبلاً دکمه‌ی دست‌ساز بدون
+            # شماره‌ی پلن قیمت را از خود سفارش برمی‌داشت، و اکانت تست (قیمت صفر) بی‌نهایت مجانی تمدید می‌شد.
+            p = db.get_plan(pid) if pid else None
+            if not p or not p["active"] or not plan_fits(p, o["protocol"]):
                 return
-            price = p["price"] if p else o["price"]
-            plan_id = pid or o["plan_id"]
+            price = p["price"]
+            plan_id = pid
             if parts[1] == "w":
                 bal_before = db.get_balance(uid)
                 if not db.try_spend(uid, price):
