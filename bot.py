@@ -690,7 +690,8 @@ class DB:
             where.append("service IN (?, '')")
             args.append(service)
         sql = "SELECT * FROM plans" + (" WHERE " + " AND ".join(where) if where else "")
-        return self.q(sql + " ORDER BY volume_gb", tuple(args))
+        # حجمی‌ها از کم به زیاد، نامحدودها (حجم 0) ته لیست
+        return self.q(sql + " ORDER BY volume_gb = 0, volume_gb, user_limit, price", tuple(args))
 
     def get_plan(self, pid):
         return self.one("SELECT * FROM plans WHERE id=?", (pid,))
@@ -955,7 +956,7 @@ def plan_line(p):
     except Exception:
         t = ""
     if t:
-        return f"🛍️ {t} — {fmt(p['price'])} تومان"
+        return f"🛍️ {t} | {fmt(p['price'])} تومان"
     return f"🛍️ {plan_label(p)}"
 
 
