@@ -1065,16 +1065,32 @@ def back_kb():
 def admin_menu_kb():
     return InlineKeyboardMarkup([
         [btn("📊 آمار ربات", "admin:stats")],
-        [pbtn("💵 رسیدهای تایید نشده", "admin:receipts"), pbtn("🎫 لیست تیکت‌ها", "admin:tickets")],
-        [btn("🗑 درخواست‌های حذف", "admin:delreqs")],
-        [btn("🖥 مدیریت پنل‌ها", "admin:panels")],
-        [pbtn("📦 مدیریت پلن‌ها", "admin:plans"), pbtn("💸 قیمت سرویس", "admin:plans_view")],
-        [pbtn("👤 مدیریت کاربر", "admin:users"), pbtn("👑 مدیریت ادمین‌ها", "admin:admins")],
-        [btn("⚙️ تنظیمات عمومی", "admin:settings")],
-        [pbtn("📢 کانال/گروه گزارش", "admin:channel"), pbtn("📈 گزارش", "admin:report")],
-        [pbtn("📣 پیام همگانی", "admin:broadcast"), pbtn("💾 بکاپ", "admin:backup")],
-        [pbtn("🔧 قابلیت‌های پنل", "admin:panels_cap"), pbtn("🆕 نسخه و آپدیت", "admin:update")],
+        [pbtn("🚀 پنل نمایندگی", "admin:soon"), pbtn("🎫 لیست تیکت ها", "admin:tickets")],
+        [pbtn("✏️ مدیریت پنل", "admin:panels"), pbtn("🖥 اضافه کردن پنل", "pb:add")],
+        [btn("💸 قیمت سرویس دلخواه", "admin:g:price")],
+        [pbtn("👤 مدیریت کاربر", "admin:g:users"), pbtn("🏬 تنظیمات فروشگاه", "admin:g:shop")],
+        [btn("💎 مالی", "admin:report")],
+        [pbtn("🆕 آپدیت ربات", "admin:g:update"), pbtn("🛠 قابلیت های پنل", "admin:panels_cap")],
+        [pbtn("⚙️ تنظیمات عمومی", "admin:settings"), pbtn("💵 رسید های تایید نشده", "admin:receipts")],
+        [pbtn("⚙️ تنظیمات مینی اپ", "admin:soon"), pbtn("📚 بخش آموزش", "admin:soon")],
+        [btn("🏠 بازگشت به منوی اصلی", "menu:back")],
     ])
+
+
+# زیرمنوهای پنل مدیریت: کلید ← (عنوان، دکمه‌های داخلش)
+ADMIN_GROUPS = {
+    "price": ("💸 قیمت سرویس دلخواه", [("💸 قیمت سرویس", "admin:plans_view"), ("📦 مدیریت پلن‌ها", "admin:plans")]),
+    "users": ("👤 مدیریت کاربر", [("👤 جستجوی کاربر", "admin:users"), ("👑 مدیریت ادمین‌ها", "admin:admins"),
+                                 ("🗑 درخواست‌های حذف", "admin:delreqs")]),
+    "shop": ("🏬 تنظیمات فروشگاه", [("📣 پیام همگانی", "admin:broadcast"), ("📢 کانال/گروه گزارش", "admin:channel")]),
+    "update": ("🆕 آپدیت ربات", [("🆕 نسخه و آپدیت", "admin:update"), ("💾 بکاپ", "admin:backup")]),
+}
+
+
+def admin_group_kb(key):
+    rows = [[btn(label, data)] for label, data in ADMIN_GROUPS[key][1]]
+    rows.append([btn("🔙 بازگشت", "admin:menu")])
+    return InlineKeyboardMarkup(rows)
 
 
 # ---------- شروع ----------
@@ -2647,6 +2663,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             what = parts[1]
             if what == "menu":
                 await safe_edit(query, f"🧑‍💼 پنل مدیریت:", reply_markup=admin_menu_kb())
+            elif what == "g" and len(parts) > 2 and parts[2] in ADMIN_GROUPS:
+                await safe_edit(query, ADMIN_GROUPS[parts[2]][0] + ":", reply_markup=admin_group_kb(parts[2]))
+            elif what == "soon":
+                await safe_edit(query, "🔜 این بخش به‌زودی اضافه می‌شود.",
+                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
             elif what == "stats":
                 await admin_stats(query)
             elif what == "receipts":
