@@ -1129,8 +1129,8 @@ def admin_menu_kb():
 # زیرمنوهای پنل مدیریت: کلید ← (عنوان، دکمه‌های داخلش)
 ADMIN_GROUPS = {
     "price": ("💸 قیمت سرویس دلخواه", [("💸 قیمت سرویس", "admin:plans_view"), ("📦 مدیریت پلن‌ها", "admin:plans")]),
-    "users": ("👤 مدیریت کاربر", [("👤 جستجوی کاربر", "admin:users"), ("👑 مدیریت ادمین‌ها", "admin:admins"),
-                                 ("🗑 درخواست‌های حذف", "admin:delreqs")]),
+    "users": ("👤 مدیریت کاربر", [("👥 لیست کاربران", "au:list:0"), ("🔍 جستجوی کاربر", "admin:users"),
+                                 ("👑 مدیریت ادمین‌ها", "admin:admins"), ("🗑 درخواست‌های حذف", "admin:delreqs")]),
     "shop": ("🏬 تنظیمات فروشگاه", [("📣 پیام همگانی", "admin:broadcast"), ("📢 کانال/گروه گزارش", "admin:channel")]),
     "update": ("🆕 آپدیت ربات", [("🆕 نسخه و آپدیت", "admin:update"), ("💾 بکاپ", "admin:backup")]),
 }
@@ -2116,20 +2116,56 @@ async def admin_admins(query):
 
 
 # ---------- مدیریت کاربر ----------
+USERS_PER_PAGE = 8
+
+
+async def admin_users_list(query, pg=0):
+    total = db.one("SELECT COUNT(*) c FROM users")["c"]
+    wallets = db.one("SELECT COALESCE(SUM(balance),0) c FROM users")["c"]
+    pages = max((total + USERS_PER_PAGE - 1) // USERS_PER_PAGE, 1)
+    pg = min(max(pg, 0), pages - 1)
+    users = db.q("SELECT * FROM users ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                 (USERS_PER_PAGE, pg * USERS_PER_PAGE))
+    rows = []
+    for u in users:
+        name = (u["full_name"] or u["username"] or str(u["id"]))[:18]
+        lock = "⛔ " if u["is_blocked"] else ""
+        rows.append([btn(f"{lock}👤 {name}  ·  💰 {fmt(u['balance'])}", f"au:panel:{u['id']}")])
+    nav = []
+    if pg < pages - 1:
+        nav.append(btn("بعدی ⬅️", f"au:list:{pg + 1}"))
+    if pages > 1:
+        nav.append(btn(f"📄 {pg + 1} از {pages}", "au:noop"))
+    if pg > 0:
+        nav.append(btn("➡️ قبلی", f"au:list:{pg - 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([btn("🔍 جستجوی کاربر", "admin:users")])
+    rows.append(back_row("admin:g:users"))
+    await page(query, card("👥 لیست کاربران",
+                           [f"👤 تعداد کاربران: <b>{total}</b>", f"💰 موجودی کل کیف پول‌ها: <b>{fmt(wallets)}</b> تومان"],
+                           note="جدیدترین کاربران اول هستند؛ برای مدیریت روی کاربر بزنید."), rows)
+
+
 async def admin_user_panel(query, uid_target):
     u = db.get_user(uid_target)
     if not u:
-        await page(query, card("👤 مدیریت کاربر", ["❌ کاربر یافت نشد."]), [back_row("admin:g:users")])
+        await page(query, card("👤 مدیریت کاربر", ["❌ کاربر یافت نشد."]), [back_row("au:list:0")])
         return
     services = db.get_user_orders(uid_target, active_only=False)
+    active = len([o for o in services if o["status"] == "active"])
     uname = f"@{h(u['username'])}" if u["username"] else NOT_SET
+    joined = datetime.datetime.fromtimestamp(u["created_at"]).strftime("%Y-%m-%d") if u["created_at"] else "—"
     text = card(f"👤 {h(u['full_name'] or 'کاربر')}",
-                [f"🆔 آیدی: <code>{u['id']}</code>", f"🔗 یوزرنیم: {uname}"],
-                [f"💰 موجودی: <b>{fmt(u['balance'])}</b> تومان",
-                 f"🛍 سرویس‌ها: <b>{len(services)}</b>  ·  👥 زیرمجموعه: <b>{db.referral_count(u['id'])}</b>"])
+                [f"💰 موجودی فعلی: <b>{fmt(u['balance'])}</b> تومان"],
+                [f"🆔 آیدی: <code>{u['id']}</code>", f"🔗 یوزرنیم: {uname}", f"📅 عضویت: <b>{joined}</b>"],
+                [f"🛍 سرویس‌ها: <b>{active}</b> فعال از <b>{len(services)}</b>",
+                 f"👥 زیرمجموعه: <b>{db.referral_count(u['id'])}</b>"
+                 + ("  ·  ⛔ <b>مسدود</b>" if u["is_blocked"] else "")])
     await page(query, text, [
-        [btn("🛍 سرویس‌ها", f"au:svcs:{u['id']}"), btn("➕ شارژ کیف پول", f"au:charge:{u['id']}")],
-        back_row("admin:g:users"),
+        [btn("➖ کسر موجودی", f"au:deduct:{u['id']}"), btn("➕ افزایش موجودی", f"au:charge:{u['id']}")],
+        [btn("🛍 سرویس‌های کاربر", f"au:svcs:{u['id']}")],
+        back_row("au:list:0"),
     ])
 
 
@@ -2963,19 +2999,28 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if cmd == "au":
-            if parts[1] == "charge":
-                db.set_state(uid, "au_amount", {"target": int(parts[2])})
-                await safe_edit(query, "💰 مبلغ شارژ دستی را به تومان وارد کنید:")
+            if parts[1] in ("charge", "deduct"):
+                target = int(parts[2])
+                u = db.get_user(target)
+                if not u:
+                    return
+                db.set_state(uid, "au_amount", {"target": target, "mode": parts[1]})
+                title = "➕ افزایش موجودی" if parts[1] == "charge" else "➖ کسر موجودی"
+                await page(query, card(title, [f"👤 {h(u['full_name'] or target)}",
+                                               f"💰 موجودی فعلی: <b>{fmt(u['balance'])}</b> تومان"],
+                                       note="مبلغ را به تومان بفرستید (مثلاً 50000)."),
+                           [[btn("🔙 انصراف", f"au:panel:{target}")]])
+            elif parts[1] == "list":
+                await admin_users_list(query, int(parts[2]) if len(parts) > 2 else 0)
             elif parts[1] == "panel":
                 await admin_user_panel(query, int(parts[2]))
             elif parts[1] == "svcs":
-                services = db.get_user_orders(int(parts[2]), active_only=False)
-                text = f"🛍 سرویس‌های کاربر {parts[2]}:\n\n"
-                for o in services:
-                    text += (f"#{o['id']} — {o['username']} — {order_name(o)} — "
-                             f"{'✅' if o['status'] == 'active' else o['status']}\n")
-                await safe_edit(query, text or "سرویسی ندارد.",
-                                reply_markup=InlineKeyboardMarkup([[btn("🔙", "admin:menu")]]))
+                target = int(parts[2])
+                services = db.get_user_orders(target, active_only=False)
+                lines = [f"{'🟢' if o['status'] == 'active' else '⚪'} <b>#{o['id']}</b>  ·  {h(o['username'])}  ·  "
+                         f"{h(order_name(o))}" for o in services]
+                await page(query, card(f"🛍 سرویس‌های کاربر ({len(services)})", lines or ["این کاربر سرویسی ندارد."]),
+                           [back_row(f"au:panel:{target}")])
             return
 
         if cmd == "set":
@@ -3305,31 +3350,32 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         if not u:
             await msg.reply_text("❌ کاربر یافت نشد.")
             return True
-        services = db.get_user_orders(u["id"], active_only=False)
-        kb = InlineKeyboardMarkup([
-            [btn("➕ شارژ دستی کیف پول", f"au:charge:{u['id']}")],
-            [btn("🛍 مشاهده سرویس‌ها", f"au:svcs:{u['id']}"), btn("🔙 بازگشت", "admin:menu")]])
-        await msg.reply_text(
-            f"👤 {u['full_name']} (@{u['username'] or '-'})\n🆔 {u['id']}\n"
-            f"💰 موجودی: {fmt(u['balance'])} تومان\n🛍 سرویس‌ها: {len(services)}",
-            reply_markup=kb)
+        await admin_user_panel(FakeQuery(msg), u["id"])
         return True
 
     if state == "au_amount" and is_admin(uid):
-        try:
-            amount = int(text.replace(",", ""))
-        except ValueError:
-            await msg.reply_text("❌ فقط عدد وارد کنید:")
+        digits = text.replace(",", "").replace("،", "").translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+        if not digits.isdigit() or int(digits) <= 0:
+            await msg.reply_text("❌ فقط یک عدد بزرگ‌تر از صفر بفرستید (مثلاً 50000):")
             return True
+        amount = int(digits)
         target = sd["target"]
-        db.add_balance(target, amount)
-        db.set_state(uid, "none")
-        await msg.reply_text(f"✅ {fmt(amount)} تومان به کاربر {target} شارژ شد.")
-        try:
-            await context.bot.send_message(target, f"💰 کیف پول شما {fmt(amount)} تومان شارژ شد (شارژ دستی).")
-        except Exception:
-            pass
-        await offer_pending_buy(context.bot, target)
+        if sd.get("mode") == "deduct":
+            if not db.try_spend(target, amount):
+                await msg.reply_text(f"❌ موجودی کاربر کمتر از {fmt(amount)} تومان است؛ مبلغ کمتری بفرستید:")
+                return True
+            db.set_state(uid, "none")
+            await msg.reply_text(f"✅ {fmt(amount)} تومان از کیف پول کاربر کم شد.")
+        else:
+            db.add_balance(target, amount)
+            db.set_state(uid, "none")
+            await msg.reply_text(f"✅ {fmt(amount)} تومان به کیف پول کاربر اضافه شد.")
+            try:
+                await context.bot.send_message(target, f"💰 کیف پول شما {fmt(amount)} تومان شارژ شد (شارژ دستی).")
+            except Exception:
+                pass
+            await offer_pending_buy(context.bot, target)
+        await admin_user_panel(FakeQuery(msg), target)
         return True
 
     # ---------- ادمین: تنظیمات ----------
@@ -3339,7 +3385,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             return True
         db.set_setting(sd["key"], text)
         db.set_state(uid, "none")
-        await msg.reply_text(f"✅ تنظیم «{sd['key']}» ذخیره شد.")
+        await msg.reply_text(f"✅ «{dict(SETTING_KEYS).get(sd['key'], sd['key'])}» ذخیره شد.")
         return True
 
     # ---------- ادمین: پاسخ تیکت ----------
