@@ -1066,14 +1066,14 @@ def back_kb():
 def admin_menu_kb():
     return InlineKeyboardMarkup([
         [btn("📊 آمار ربات", "admin:stats")],
-        [pbtn("🚀 پنل نمایندگی", "admin:soon"), pbtn("🎫 لیست تیکت ها", "admin:tickets")],
-        [pbtn("✏️ مدیریت پنل", "admin:panels"), pbtn("🖥 اضافه کردن پنل", "pb:add")],
+        [btn("🚀 پنل نمایندگی", "admin:soon"), btn("🎫 لیست تیکت ها", "admin:tickets")],
+        [btn("✏️ مدیریت پنل", "admin:panels"), btn("🖥 اضافه کردن پنل", "pb:add")],
         [btn("💸 قیمت سرویس دلخواه", "admin:g:price")],
-        [pbtn("👤 مدیریت کاربر", "admin:g:users"), pbtn("🏬 تنظیمات فروشگاه", "admin:g:shop")],
+        [btn("👤 مدیریت کاربر", "admin:g:users"), btn("🏬 تنظیمات فروشگاه", "admin:g:shop")],
         [btn("💎 مالی", "admin:report")],
-        [pbtn("🆕 آپدیت ربات", "admin:g:update"), pbtn("🛠 قابلیت های پنل", "admin:panels_cap")],
-        [pbtn("⚙️ تنظیمات عمومی", "admin:settings"), pbtn("💵 رسید های تایید نشده", "admin:receipts")],
-        [pbtn("⚙️ تنظیمات مینی اپ", "admin:soon"), pbtn("📚 بخش آموزش", "admin:soon")],
+        [btn("🆕 آپدیت ربات", "admin:g:update"), btn("🛠 قابلیت های پنل", "admin:panels_cap")],
+        [btn("⚙️ تنظیمات عمومی", "admin:settings"), btn("💵 رسید های تایید نشده", "admin:receipts")],
+        [btn("⚙️ تنظیمات مینی اپ", "admin:soon"), btn("📚 بخش آموزش", "admin:soon")],
         [btn("🏠 بازگشت به منوی اصلی", "menu:back")],
     ])
 
