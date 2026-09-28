@@ -1747,6 +1747,54 @@ def card_info_text(amount):
             f"⏳ بعد از تایید ادمین، سفارش انجام می‌شود.")
 
 
+# خرید نیمه‌کاره: وقتی موجودی کم است، اطلاعات خرید نگه داشته می‌شود تا بعد از شارژ کیف پول
+# کاربر با یک دکمه ادامه بدهد (مرحله‌ی شارژ، جلسه‌ی خرید را پاک می‌کند)
+PENDING_BUY_TTL = 24 * 3600
+
+
+def save_pending_buy(uid, data):
+    keep = {k: data.get(k) for k in ("plan_id", "protocol", "username", "panel_id", "ipsec_password")}
+    db.set_setting(f"pending_buy:{uid}", json.dumps({**keep, "saved_at": now()}))
+
+
+def load_pending_buy(uid):
+    try:
+        data = json.loads(db.setting(f"pending_buy:{uid}") or "null")
+    except ValueError:
+        return None
+    if not data or now() - data.get("saved_at", 0) > PENDING_BUY_TTL:
+        return None
+    return data
+
+
+def clear_pending_buy(uid):
+    if db.setting(f"pending_buy:{uid}"):
+        db.set_setting(f"pending_buy:{uid}", "")
+
+
+async def offer_pending_buy(bot, uid):
+    """بعد از شارژ کیف پول: اگر خرید نیمه‌کاره‌ای هست، پیشنهاد ادامه‌اش را بفرست."""
+    data = load_pending_buy(uid)
+    plan = db.get_plan(data["plan_id"]) if data else None
+    if not plan or not plan["active"]:
+        clear_pending_buy(uid)
+        return
+    bal = db.get_balance(uid)
+    text = (f"🛒 خرید نیمه‌کاره‌ی شما آماده است\n\n"
+            f"📦 {plan_label(plan)}\n🧩 سرویس: {SERVICES.get(data['protocol'], data['protocol'])}\n"
+            f"👤 یوزرنیم: {data['username']}\n💰 مبلغ: {fmt(plan['price'])} تومان\n"
+            f"💎 موجودی شما: {fmt(bal)} تومان")
+    if bal >= plan["price"]:
+        kb = [[btn("✅ تکمیل خرید", "resume:buy")], [btn("❌ لغو این خرید", "resume:cancel")]]
+    else:
+        text += f"\n\n⚠️ هنوز {fmt(plan['price'] - bal)} تومان کم دارید."
+        kb = [[btn("➕ شارژ کیف پول", "wallet:charge")], [btn("❌ لغو این خرید", "resume:cancel")]]
+    try:
+        await bot.send_message(uid, text, reply_markup=InlineKeyboardMarkup(kb))
+    except Exception as e:
+        log.warning("offer_pending_buy %s failed: %s", uid, e)
+
+
 async def finalize_wallet_purchase(query, context, uid, data):
     plan = db.get_plan(data["plan_id"])
     if not plan:
@@ -1754,10 +1802,17 @@ async def finalize_wallet_purchase(query, context, uid, data):
         return
     bal_before = db.get_balance(uid)
     if not db.try_spend(uid, plan["price"]):
-        await safe_edit(query, "❌ موجودی کیف پول کافی نیست. لطفاً ابتدا شارژ کنید.",
-                        reply_markup=InlineKeyboardMarkup([[btn("➕ شارژ کیف پول", "wallet:charge")],
-                                                           [btn("🔙 بازگشت", "menu:back")]]))
+        save_pending_buy(uid, data)
+        await safe_edit(query,
+            f"❌ موجودی کیف پول کافی نیست.\n\n"
+            f"💸 مبلغ پلن: {fmt(plan['price'])} تومان\n"
+            f"💎 موجودی شما: {fmt(bal_before)} تومان\n"
+            f"➕ کمبود: {fmt(plan['price'] - bal_before)} تومان\n\n"
+            f"✅ خریدتان ذخیره شد؛ بعد از شارژ کیف پول، با یک دکمه ادامه می‌دهید و لازم نیست از اول شروع کنید.",
+            reply_markup=InlineKeyboardMarkup([[btn("➕ شارژ کیف پول", "wallet:charge")],
+                                               [btn("🔙 بازگشت", "menu:back")]]))
         return
+    clear_pending_buy(uid)
     # جلسه‌ی خرید همین‌جا بسته می‌شود تا زدن دوباره‌ی دکمه‌ی پرداخت سرویس دوم نسازد
     db.set_state(uid, "none")
     await safe_edit(query, "♻️ در حال ساخت سرویس... لطفاً چند ثانیه صبر کنید.")
@@ -1984,6 +2039,7 @@ async def rc_approve(query, context, rid):
             f"💎 کاربر گرامی مبلغ {fmt(r['amount'])} تومان به کیف پول شما واریز گردید. با تشکر از پرداخت شما 🙏\n\n"
             f"🛒 کد پیگیری شما: R{r['id']}\n"
             f"💰 موجودی فعلی: {fmt(db.get_balance(r['user_id']))} تومان")
+        await offer_pending_buy(context.bot, r["user_id"])
         await query.message.reply_text(f"✅ رسید #{rid} تایید شد — کیف پول کاربر شارژ شد.",
             reply_markup=InlineKeyboardMarkup([[btn("⚙️ مدیریت کاربر", f"au:panel:{r['user_id']}")]]))
     elif r["rtype"] == "purchase":
@@ -2780,6 +2836,23 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", back)]]))
             return
 
+        if cmd == "resume":
+            data = load_pending_buy(uid)
+            if parts[1] != "buy" or not data:
+                clear_pending_buy(uid)
+                await safe_edit(query, "❌ خرید نیمه‌کاره لغو شد." if data else
+                                "⌛ این خرید دیگر معتبر نیست؛ دوباره از «🔐 خرید اشتراک» شروع کنید.",
+                                reply_markup=back_kb())
+                return
+            plan = db.get_plan(data.get("plan_id"))
+            if not plan or not plan["active"] or data.get("protocol") not in SERVICES:
+                clear_pending_buy(uid)
+                await safe_edit(query, "❌ این پلن دیگر فعال نیست؛ دوباره از «🔐 خرید اشتراک» انتخاب کنید.",
+                                reply_markup=back_kb())
+                return
+            await finalize_wallet_purchase(query, context, uid, data)
+            return
+
         # ---------- ادمین ----------
         if not is_admin(uid):
             return
@@ -3256,6 +3329,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             await context.bot.send_message(target, f"💰 کیف پول شما {fmt(amount)} تومان شارژ شد (شارژ دستی).")
         except Exception:
             pass
+        await offer_pending_buy(context.bot, target)
         return True
 
     # ---------- ادمین: تنظیمات ----------
