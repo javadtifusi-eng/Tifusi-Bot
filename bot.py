@@ -1063,19 +1063,25 @@ def back_kb():
     return InlineKeyboardMarkup([[btn("🔙 بازگشت", "menu:back")]])
 
 
+# پنل مدیریت: کیبورد پایین صفحه (تمام‌عرض، مثل منوی اصلی) — متن دکمه ← کار ادمین
+ADMIN_MENU_ROWS = [
+    [("📊 آمار ربات", "stats")],
+    [("🚀 پنل نمایندگی", "soon"), ("🎫 لیست تیکت ها", "tickets")],
+    [("✏️ مدیریت پنل", "panels"), ("🖥 اضافه کردن پنل", "addpanel")],
+    [("💸 قیمت سرویس دلخواه", "g:price")],
+    [("👤 مدیریت کاربر", "g:users"), ("🏬 تنظیمات فروشگاه", "g:shop")],
+    [("💎 مالی", "report")],
+    [("🆕 آپدیت ربات", "g:update"), ("🛠 قابلیت های پنل", "panels_cap")],
+    [("⚙️ تنظیمات عمومی", "settings"), ("💵 رسید های تایید نشده", "receipts")],
+    [("⚙️ تنظیمات مینی اپ", "soon"), ("📚 بخش آموزش", "soon")],
+]
+ADMIN_MENU_ACTIONS = {label: what for row in ADMIN_MENU_ROWS for label, what in row}
+ADMIN_HOME = "🏠 بازگشت به منوی اصلی"
+
+
 def admin_menu_kb():
-    return InlineKeyboardMarkup([
-        [btn("📊 آمار ربات", "admin:stats")],
-        [btn("🚀 پنل نمایندگی", "admin:soon"), btn("🎫 لیست تیکت ها", "admin:tickets")],
-        [btn("✏️ مدیریت پنل", "admin:panels"), btn("🖥 اضافه کردن پنل", "pb:add")],
-        [btn("💸 قیمت سرویس دلخواه", "admin:g:price")],
-        [btn("👤 مدیریت کاربر", "admin:g:users"), btn("🏬 تنظیمات فروشگاه", "admin:g:shop")],
-        [btn("💎 مالی", "admin:report")],
-        [btn("🆕 آپدیت ربات", "admin:g:update"), btn("🛠 قابلیت های پنل", "admin:panels_cap")],
-        [btn("⚙️ تنظیمات عمومی", "admin:settings"), btn("💵 رسید های تایید نشده", "admin:receipts")],
-        [btn("⚙️ تنظیمات مینی اپ", "admin:soon"), btn("📚 بخش آموزش", "admin:soon")],
-        [btn("🏠 بازگشت به منوی اصلی", "menu:back")],
-    ])
+    rows = [[label for label, _ in row] for row in ADMIN_MENU_ROWS] + [[ADMIN_HOME]]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 # زیرمنوهای پنل مدیریت: کلید ← (عنوان، دکمه‌های داخلش)
@@ -2446,6 +2452,69 @@ async def run_broadcast(bot, admin_id, payload):
 
 
 # =================== مسیریاب Callback ===================
+async def admin_dispatch(query, uid, parts):
+    """کارهای پنل مدیریت؛ parts مثل ['admin', 'stats'] — هم از دکمه‌ی شیشه‌ای و هم از کیبورد پایین."""
+    what = parts[1]
+    if what == "menu":
+        await safe_edit(query, "🧑‍💼 پنل مدیریت: از منوی پایین صفحه انتخاب کنید.")
+    elif what == "addpanel":
+        db.set_state(uid, "ap_name", {})
+        await safe_edit(query, "➕ افزودن Tifusi Panel\n\n۱) نام پنل را وارد کنید (مثلاً «سرور آلمان ۱»):",
+                        reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:panels")]]))
+    elif what == "g" and len(parts) > 2 and parts[2] in ADMIN_GROUPS:
+        await safe_edit(query, ADMIN_GROUPS[parts[2]][0] + ":", reply_markup=admin_group_kb(parts[2]))
+    elif what == "soon":
+        await safe_edit(query, "🔜 این بخش به‌زودی اضافه می‌شود.",
+                        reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+    elif what == "stats":
+        await admin_stats(query)
+    elif what == "receipts":
+        await admin_receipts(query)
+    elif what == "delreqs":
+        await admin_delete_requests(query)
+    elif what == "users":
+        db.set_state(uid, "au_search")
+        await safe_edit(query, "👤 آیدی عددی یا یوزرنیم کاربر را ارسال کنید:",
+                        reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:menu")]]))
+    elif what == "plans_view":
+        await show_tariff(query)
+    elif what == "settings":
+        await admin_settings(query)
+    elif what == "tickets":
+        await admin_tickets(query)
+    elif what == "panels_cap":
+        await admin_panels_cap(query)
+    elif what == "update":
+        await safe_edit(query,
+            f"🆕 نسخه ربات: {BOT_VERSION}\n📅 تاریخ نسخه: {BOT_VERSION_DATE}\n\n"
+            f"برای آپدیت، روی سرور ربات بزنید:\n tifusi bot\n"
+            f"و گزینه‌ی «Update bot» را انتخاب کنید. تنظیمات و دیتابیس حفظ می‌شوند؛\n"
+            f"برای اطمینان قبلش از «💾 بکاپ» یک نسخه بگیرید.",
+            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+    elif what == "backup":
+        await admin_backup_menu(query)
+    elif what == "broadcast":
+        db.set_state(uid, "broadcast_msg")
+        await safe_edit(query,
+            f"📣 پیام همگانی\n\nمتن پیام (یا یک عکس با کپشن) را بفرستید.\n"
+            f"👥 گیرندگان: {len(db.all_user_ids())} کاربر غیرمسدود",
+            reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:menu")]]))
+    elif what == "channel":
+        await admin_channel(query)
+    elif what == "report":
+        await admin_report_menu(query)
+    elif what == "panels":
+        await admin_panels(query)
+    elif what == "plans":
+        await admin_plans(query)
+    elif what == "admins":
+        if uid != ADMIN_ID:
+            await safe_edit(query, "⛔ فقط ادمین اصلی می‌تواند ادمین اضافه یا حذف کند.",
+                            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        else:
+            await admin_admins(query)
+
+
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = update.effective_user.id
@@ -2661,61 +2730,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if cmd == "admin":
-            what = parts[1]
-            if what == "menu":
-                await safe_edit(query, f"🧑‍💼 پنل مدیریت:", reply_markup=admin_menu_kb())
-            elif what == "g" and len(parts) > 2 and parts[2] in ADMIN_GROUPS:
-                await safe_edit(query, ADMIN_GROUPS[parts[2]][0] + ":", reply_markup=admin_group_kb(parts[2]))
-            elif what == "soon":
-                await safe_edit(query, "🔜 این بخش به‌زودی اضافه می‌شود.",
-                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
-            elif what == "stats":
-                await admin_stats(query)
-            elif what == "receipts":
-                await admin_receipts(query)
-            elif what == "delreqs":
-                await admin_delete_requests(query)
-            elif what == "users":
-                db.set_state(uid, "au_search")
-                await safe_edit(query, "👤 آیدی عددی یا یوزرنیم کاربر را ارسال کنید:",
-                                reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:menu")]]))
-            elif what == "plans_view":
-                await show_tariff(query)
-            elif what == "settings":
-                await admin_settings(query)
-            elif what == "tickets":
-                await admin_tickets(query)
-            elif what == "panels_cap":
-                await admin_panels_cap(query)
-            elif what == "update":
-                await safe_edit(query,
-                    f"🆕 نسخه ربات: {BOT_VERSION}\n📅 تاریخ نسخه: {BOT_VERSION_DATE}\n\n"
-                    f"برای آپدیت، روی سرور ربات بزنید:\n tifusi bot\n"
-                    f"و گزینه‌ی «Update bot» را انتخاب کنید. تنظیمات و دیتابیس حفظ می‌شوند؛\n"
-                    f"برای اطمینان قبلش از «💾 بکاپ» یک نسخه بگیرید.",
-                    reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
-            elif what == "backup":
-                await admin_backup_menu(query)
-            elif what == "broadcast":
-                db.set_state(uid, "broadcast_msg")
-                await safe_edit(query,
-                    f"📣 پیام همگانی\n\nمتن پیام (یا یک عکس با کپشن) را بفرستید.\n"
-                    f"👥 گیرندگان: {len(db.all_user_ids())} کاربر غیرمسدود",
-                    reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:menu")]]))
-            elif what == "channel":
-                await admin_channel(query)
-            elif what == "report":
-                await admin_report_menu(query)
-            elif what == "panels":
-                await admin_panels(query)
-            elif what == "plans":
-                await admin_plans(query)
-            elif what == "admins":
-                if uid != ADMIN_ID:
-                    await safe_edit(query, "⛔ فقط ادمین اصلی می‌تواند ادمین اضافه یا حذف کند.",
-                                    reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
-                else:
-                    await admin_admins(query)
+            await admin_dispatch(query, uid, parts)
             return
 
         if cmd == "bk":
@@ -3408,6 +3423,15 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     state, sd = db.get_state(uid)
 
+    text = (msg.text or "").strip()
+    if is_admin(uid) and (text in ADMIN_MENU_ACTIONS or text == ADMIN_HOME):
+        db.set_state(uid, "none")
+        if text == ADMIN_HOME:
+            await msg.reply_text("🏠 منوی اصلی\n\nاز منوی زیر انتخاب کنید:", reply_markup=main_menu_kb(uid))
+        else:
+            await admin_dispatch(FakeQuery(msg), uid, ["admin", *ADMIN_MENU_ACTIONS[text].split(":")])
+        return
+
     # خروج خودکار از هر بخش با زدن هر دکمه منوی اصلی (انصراف سراسری)
     menu_hit = MENU_ACTIONS.get((msg.text or "").strip())
     if menu_hit and state != "none":
@@ -3456,7 +3480,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_referral(fq, context, uid)
     elif action == "admin":
         if is_admin(uid):
-            await msg.reply_text(f"🧑‍💼 پنل مدیریت:", reply_markup=admin_menu_kb())
+            await msg.reply_text("🧑‍💼 پنل مدیریت:\n\nاز منوی پایین صفحه انتخاب کنید.", reply_markup=admin_menu_kb())
     return
 
 
