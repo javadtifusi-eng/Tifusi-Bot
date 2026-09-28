@@ -970,6 +970,48 @@ async def safe_edit(query, text, reply_markup=None, parse_mode=None):
             pass
 
 
+# ---------- ظاهر صفحه‌های مدیریت ----------
+# همه‌ی صفحه‌های پنل مدیریت با HTML ساخته می‌شوند: عنوان پررنگ، هر دسته اطلاعات داخل یک کادر (blockquote)
+NOT_SET = "<i>تنظیم نشده</i>"
+
+
+def h(v):
+    return html.escape(str(v))
+
+
+def val(v):
+    """مقدار کاربر/دیتابیس برای نمایش؛ خالی = «تنظیم نشده»."""
+    return f"<b>{h(v)}</b>" if v not in (None, "", "—", "-") else NOT_SET
+
+
+def card(title, *blocks, note=None):
+    """title: متن ثابت خود ربات (escape نمی‌شود). blocks: لیست خط‌ها، هر لیست یک کادر."""
+    parts = [f"<b>{title}</b>"]
+    for b in blocks:
+        b = [x for x in (b or []) if x]
+        if b:
+            parts.append("<blockquote>" + "\n".join(b) + "</blockquote>")
+    if note:
+        parts.append(f"<i>{note}</i>")
+    return "\n\n".join(parts)
+
+
+def bar(n, total, width=10):
+    """نوار پر شدن ظرفیت: ▰▰▰▱▱▱▱▱▱▱ ۳۰٪"""
+    total = max(int(total or 0), 1)
+    frac = min(max(n / total, 0), 1)
+    full = round(frac * width)
+    return "▰" * full + "▱" * (width - full) + f" {round(frac * 100)}٪"
+
+
+def back_row(data="admin:menu", label="🔙 بازگشت"):
+    return [btn(label, data)]
+
+
+async def page(query, text, rows):
+    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows), parse_mode="HTML")
+
+
 async def notify_admin(bot, text, reply_markup=None):
     for aid in {ADMIN_ID, *get_admins()}:
         try:
@@ -1095,7 +1137,8 @@ ADMIN_GROUPS = {
 
 
 def admin_group_kb(key):
-    rows = [[btn(label, data)] for label, data in ADMIN_GROUPS[key][1]]
+    items = [btn(label, data) for label, data in ADMIN_GROUPS[key][1]]
+    rows = [items[i:i + 2][::-1] for i in range(0, len(items), 2)]  # دو ستونه، اولی سمت راست
     rows.append([btn("🔙 بازگشت", "admin:menu")])
     return InlineKeyboardMarkup(rows)
 
@@ -1840,47 +1883,34 @@ async def admin_stats(query):
     day = db.stats_since(now() - 86400)
     week = db.stats_since(now() - 7 * 86400)
     month = db.stats_since(now() - 30 * 86400)
-    blocked = db.one("SELECT COUNT(*) c FROM users WHERE is_blocked=1")["c"]
-    wallets = db.one("SELECT COALESCE(SUM(balance),0) s FROM users")["s"]
-    vol_sold = db.one("SELECT COALESCE(SUM(volume_gb),0) s FROM orders")["s"]
-    refs = db.one("SELECT COUNT(*) c FROM users WHERE referred_by IS NOT NULL")["c"]
-    tests = db.one("SELECT COUNT(*) c FROM orders WHERE price=0")["c"]
-    rc_ok = db.one("SELECT COUNT(*) c FROM receipts WHERE status='approved'")["c"]
-    rc_no = db.one("SELECT COUNT(*) c FROM receipts WHERE status='rejected'")["c"]
-    tk_closed = db.one("SELECT COUNT(*) c FROM tickets WHERE status='closed'")["c"]
+    one = lambda sql: db.one(sql)["c"]
+    blocked = one("SELECT COUNT(*) c FROM users WHERE is_blocked=1")
+    wallets = one("SELECT COALESCE(SUM(balance),0) c FROM users")
+    vol_sold = one("SELECT COALESCE(SUM(volume_gb),0) c FROM orders")
+    refs = one("SELECT COUNT(*) c FROM users WHERE referred_by IS NOT NULL")
+    tests = one("SELECT COUNT(*) c FROM orders WHERE price=0")
+    rc_ok = one("SELECT COUNT(*) c FROM receipts WHERE status='approved'")
+    rc_no = one("SELECT COUNT(*) c FROM receipts WHERE status='rejected'")
+    tk_closed = one("SELECT COUNT(*) c FROM tickets WHERE status='closed'")
     panels = db.get_panels()
-    p_on = len([p for p in panels if p["status"] == "active"])
-    p_off = len([p for p in panels if p["status"] == "offline"])
-    p_ina = len([p for p in panels if p["status"] == "inactive"])
-    text = (f"📊 آمار کامل ربات\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"👥 کاربران\n"
-            f"👤 کل کاربران: {t['users']}\n"
-            f"⛔ بلاک‌شده: {blocked}\n"
-            f"🤝 عضوشده با دعوت: {refs}\n"
-            f"💎 موجودی کل کیف‌پول‌ها: {fmt(wallets)} تومان\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"🛍 سفارش‌ها\n"
-            f"🧾 کل سفارشات: {t['orders']}\n"
-            f"✅ سرویس‌های فعال: {t['active']}\n"
-            f"🔑 اکانت‌های تست: {tests}\n"
-            f"📦 حجم کل فروخته‌شده: {fmt(vol_sold)} گیگ\n"
-            f"💰 درآمد کل: {fmt(t['revenue'])} تومان\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"🖥 پنل‌ها\n"
-            f"🟢 فعال: {p_on} | 🔴 آفلاین: {p_off} | ⚪ غیرفعال: {p_ina} | مجموع: {len(panels)}\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"💵 رسیدها\n"
-            f"⏳ در انتظار: {t['pending_receipts']} | ✅ تاییدشده: {rc_ok} | ❌ ردشده: {rc_no}\n"
-            f"🎫 تیکت‌ها → باز: {t['tickets_open']} | بسته: {tk_closed}\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"📅 ۲۴ ساعت گذشته:\n"
-            f"👤 کاربر جدید: {day['new_users']} | 🛍 سفارش: {day['new_orders']} | 💰 {fmt(day['revenue'])} تومان\n"
-            f"📅 ۷ روز گذشته:\n"
-            f"👤 کاربر جدید: {week['new_users']} | 🛍 سفارش: {week['new_orders']} | 💰 {fmt(week['revenue'])} تومان\n"
-            f"📅 ۳۰ روز گذشته:\n"
-            f"👤 کاربر جدید: {month['new_users']} | 🛍 سفارش: {month['new_orders']} | 💰 {fmt(month['revenue'])} تومان")
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+    by = lambda st: len([p for p in panels if p["status"] == st])
+    period = lambda name, x: f"{name}: 👤 {x['new_users']}  ·  🛍 {x['new_orders']}  ·  💰 <b>{fmt(x['revenue'])}</b>"
+    text = card("📊 آمار ربات",
+        ["👥 <b>کاربران</b>",
+         f"کل کاربران: <b>{t['users']}</b>",
+         f"عضو با دعوت: <b>{refs}</b>  ·  مسدود: <b>{blocked}</b>",
+         f"موجودی کیف پول‌ها: <b>{fmt(wallets)}</b> تومان"],
+        ["🛍 <b>فروش</b>",
+         f"سرویس فعال: <b>{t['active']}</b> از <b>{t['orders']}</b> سفارش",
+         f"اکانت تست: <b>{tests}</b>  ·  حجم فروخته‌شده: <b>{fmt(vol_sold)}</b> گیگ",
+         f"درآمد کل: <b>{fmt(t['revenue'])}</b> تومان"],
+        ["📅 <b>بازه‌ها</b>  (کاربر جدید · سفارش · درآمد)",
+         period("۲۴ ساعت", day), period("۷ روز", week), period("۳۰ روز", month)],
+        ["🖥 <b>پنل‌ها و پشتیبانی</b>",
+         f"پنل: 🟢 {by('active')}  ·  🔴 {by('offline')}  ·  ⚪ {by('inactive')}",
+         f"رسید: ⏳ {t['pending_receipts']}  ·  ✅ {rc_ok}  ·  ❌ {rc_no}",
+         f"تیکت: 📬 باز {t['tickets_open']}  ·  📪 بسته {tk_closed}"])
+    await page(query, text, [back_row()])
 
 
 async def admin_delete_requests(query):
@@ -1889,33 +1919,32 @@ async def admin_delete_requests(query):
     «درخواست حذف» می‌ماند — نه تمدید می‌شود و نه دوباره می‌شود درخواست داد."""
     orders = db.pending_delete_requests()
     if not orders:
-        await safe_edit(query, "✅ درخواست حذف بررسی‌نشده‌ای وجود ندارد.",
-                        reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        await page(query, card("🗑 درخواست‌های حذف", ["✅ درخواست بررسی‌نشده‌ای وجود ندارد."]), [back_row("admin:g:users")])
         return
     rows = []
-    text = "🗑 درخواست‌های حذف بررسی‌نشده:\n\n"
+    blocks = []
     for o in orders:
-        text += f"#{o['id']} — {o['username']} — {service_name(o['protocol'])} — کاربر {o['user_id']}\n"
-        rows.append([btn(f"✅ تایید حذف #{o['id']}", f"dq:ok:{o['id']}"),
-                     btn(f"❌ رد #{o['id']}", f"dq:no:{o['id']}")])
-    rows.append([btn("🔙 بازگشت", "admin:menu")])
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
+        blocks.append([f"<b>#{o['id']}</b>  ·  {h(o['username'])}",
+                       f"🧩 {h(service_name(o['protocol']))}  ·  👤 <code>{o['user_id']}</code>"])
+        rows.append([btn(f"❌ رد #{o['id']}", f"dq:no:{o['id']}"), btn(f"✅ حذف #{o['id']}", f"dq:ok:{o['id']}")])
+    rows.append(back_row("admin:g:users"))
+    await page(query, card(f"🗑 درخواست‌های حذف ({len(orders)})", *blocks), rows)
 
 
 async def admin_receipts(query):
     receipts = db.pending_receipts()
     if not receipts:
-        await safe_edit(query, "✅ رسید تایید نشده‌ای وجود ندارد.",
-                        reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        await page(query, card("💵 رسیدهای تایید نشده", ["✅ رسید در انتظاری وجود ندارد."]), [back_row()])
         return
     names = {"wallet_charge": "➕ شارژ کیف پول", "purchase": "🛍 خرید سرویس", "renew": "♻️ تمدید"}
     rows = []
-    text = f"💵 رسیدهای تایید نشده:\n\n"
+    lines = []
     for r in receipts:
-        text += f"#{r['id']} — {names.get(r['rtype'], r['rtype'])} — {fmt(r['amount'])} تومان — کاربر {r['user_id']}\n"
-        rows.append([btn(f"#{r['id']} | {names.get(r['rtype'])} | {fmt(r['amount'])}", f"rc:{r['id']}")])
-    rows.append([btn("🔙 بازگشت", "admin:menu")])
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
+        kind = names.get(r["rtype"], r["rtype"])
+        lines.append(f"<b>#{r['id']}</b>  ·  {kind}  ·  <b>{fmt(r['amount'])}</b> تومان  ·  👤 <code>{r['user_id']}</code>")
+        rows.append([btn(f"#{r['id']}  ·  {kind}  ·  {fmt(r['amount'])}", f"rc:{r['id']}")])
+    rows.append(back_row())
+    await page(query, card(f"💵 رسیدهای تایید نشده ({len(receipts)})", lines, note="برای بررسی روی رسید بزنید."), rows)
 
 
 async def admin_receipt_detail(query, rid):
@@ -2022,44 +2051,43 @@ async def rc_reject(query, context, rid):
 # ---------- مدیریت ادمین‌ها ----------
 async def admin_admins(query):
     ads = get_admins()
-    text = f"👑 مدیریت ادمین‌ها\n\n👑 ادمین اصلی: {ADMIN_ID}\n"
-    for a in ads:
-        text += f"👤 ادمین: {a}\n"
-    text += "\nℹ️ ادمین‌ها دسترسی کامل دارند: تایید پرداخت، تنظیمات و همه بخش‌ها."
+    lines = [f"👑 ادمین اصلی: <code>{ADMIN_ID}</code>"] + [f"👤 ادمین: <code>{h(a)}</code>" for a in ads]
     rows = [[btn("➕ افزودن ادمین", "adm:add")]]
-    for a in ads:
-        rows.append([btn(f"🗑 حذف {a}", f"adm:del:{a}")])
-    rows.append([btn("🔙 بازگشت", "admin:menu")])
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
+    rows += [[btn(f"🗑 حذف {a}", f"adm:del:{a}")] for a in ads]
+    rows.append(back_row("admin:g:users"))
+    await page(query, card("👑 مدیریت ادمین‌ها", lines,
+                           note="ادمین‌ها به همه‌ی بخش‌ها دسترسی دارند: تایید پرداخت، تنظیمات و بقیه."), rows)
 
 
 # ---------- مدیریت کاربر ----------
 async def admin_user_panel(query, uid_target):
     u = db.get_user(uid_target)
     if not u:
-        await safe_edit(query, "❌ کاربر یافت نشد.")
+        await page(query, card("👤 مدیریت کاربر", ["❌ کاربر یافت نشد."]), [back_row("admin:g:users")])
         return
     services = db.get_user_orders(uid_target, active_only=False)
-    text = (f"👤 کاربر: {u['full_name']} (@{u['username'] or '-'})\n"
-            f"🆔 {u['id']}\n💰 موجودی: {fmt(u['balance'])} تومان\n"
-            f"🛍 سرویس‌ها: {len(services)} عدد\n"
-            f"👥 زیرمجموعه: {db.referral_count(u['id'])} نفر")
-    kb = InlineKeyboardMarkup([
-        [btn("➕ شارژ دستی کیف پول", f"au:charge:{u['id']}")],
-        [btn("🛍 مشاهده سرویس‌ها", f"au:svcs:{u['id']}"), btn("🔙 بازگشت", "admin:menu")],
+    uname = f"@{h(u['username'])}" if u["username"] else NOT_SET
+    text = card(f"👤 {h(u['full_name'] or 'کاربر')}",
+                [f"🆔 آیدی: <code>{u['id']}</code>", f"🔗 یوزرنیم: {uname}"],
+                [f"💰 موجودی: <b>{fmt(u['balance'])}</b> تومان",
+                 f"🛍 سرویس‌ها: <b>{len(services)}</b>  ·  👥 زیرمجموعه: <b>{db.referral_count(u['id'])}</b>"])
+    await page(query, text, [
+        [btn("🛍 سرویس‌ها", f"au:svcs:{u['id']}"), btn("➕ شارژ کیف پول", f"au:charge:{u['id']}")],
+        back_row("admin:g:users"),
     ])
-    await safe_edit(query, text, reply_markup=kb)
 
 
 # ---------- تنظیمات ----------
 SETTING_KEYS = [
-    ("backup_chat_id", "💾 آیدی کانال بکاپ"),
-    ("card_number", "🏦 شماره کارت"),
+    ("backup_chat_id", "💾 کانال بکاپ"),
+    ("card_number", "💳 شماره کارت"),
     ("card_name", "👤 صاحب حساب"),
     ("support_id", "☎️ پشتیبانی"),
-    ("test_volume_gb", "🔑 حجم تست"),
-    ("test_days", "🔑 مدت تست"),
+    ("test_volume_gb", "📦 حجم تست"),
+    ("test_days", "⏳ مدت تست"),
     ("faq_text", "❓ سوالات متداول"),
+    ("channel_id", "📢 کانال گزارش"),
+    ("group_id", "👥 گروه گزارش"),
 ]
 # چیدمان دکمه‌ها در صفحه تنظیمات (یک ردیف کامل یا دو دکمه کنار هم)
 SETTING_LAYOUT = [
@@ -2072,49 +2100,57 @@ SETTING_LAYOUT = [
 
 async def admin_settings(query):
     # اکانت تست پیش‌فرض خاموش است؛ کلید روشن/خاموش کنار حجم و مدت تست نمایش داده می‌شود
-    test_label = f"🔑 اکانت تست: {'فعال' if db.setting('test_enabled', '0') == '1' else 'غیرفعال'}"
-    text = f"⚙️ تنظیمات عمومی\n"
-    labels = dict(SETTING_KEYS)
-    for key, label in SETTING_KEYS:
-        if key == "test_volume_gb":
-            text += test_label + "\n"
-        val = db.setting(key, "—")
-        if key == "faq_text" and val != "—":
-            val = "✅ تنظیم شده"
-        text += f"{label}: {val}\n"
-    rows = [[btn(test_label, "tgl:test_enabled")]]
-    for line in SETTING_LAYOUT:
-        rows.append([btn(f"✏️ {labels[k]}", f"set:{k}") for k in line])
-    rows.append([btn("🔙 بازگشت", "admin:menu")])
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
+    test_on = db.setting("test_enabled", "0") == "1"
+    st = db.setting
+    vol, days = st("test_volume_gb"), st("test_days")
+    faq = "<b>✅ نوشته شده</b>" if st("faq_text") else NOT_SET
+    text = card("⚙️ تنظیمات عمومی",
+        ["🎁 <b>اکانت تست</b>",
+         f"وضعیت: <b>{'🟢 روشن' if test_on else '🔴 خاموش'}</b>",
+         f"📦 حجم: {val(f'{vol} گیگ' if vol else '')}  ·  ⏳ مدت: {val(f'{days} روز' if days else '')}"],
+        ["💳 <b>پرداخت کارت به کارت</b>",
+         f"شماره کارت: " + (f"<code>{h(st('card_number'))}</code>" if st("card_number") else NOT_SET),
+         f"صاحب حساب: {val(st('card_name'))}"],
+        ["🧰 <b>پشتیبانی و بکاپ</b>",
+         f"☎️ پشتیبانی: {val(st('support_id'))}",
+         f"❓ سوالات متداول: {faq}",
+         f"💾 کانال بکاپ: {val(st('backup_chat_id'))}"],
+        note="برای تغییر هر مورد، دکمه‌ی آن را بزنید.")
+    await page(query, text, [
+        [btn(f"🎁 اکانت تست: {'روشن ✅' if test_on else 'خاموش ❌'}", "tgl:test_enabled")],
+        [btn("⏳ مدت تست", "set:test_days"), btn("📦 حجم تست", "set:test_volume_gb")],
+        [btn("👤 صاحب حساب", "set:card_name"), btn("💳 شماره کارت", "set:card_number")],
+        [btn("❓ سوالات متداول", "set:faq_text"), btn("☎️ پشتیبانی", "set:support_id")],
+        [btn("💾 کانال بکاپ", "set:backup_chat_id")],
+        back_row(),
+    ])
 
 
 async def admin_channel(query):
-    text = (f"📢 تنظیم کانال/گروه گزارش\n\n"
-            f"کانال: {db.setting('channel_id', '—')}\nگروه: {db.setting('group_id', '—')}\n\n"
-            f"آیدی را با @ یا عدد -100 وارد کنید. ربات باید در کانال/گروه ادمین باشد.")
-    kb = InlineKeyboardMarkup([
-        [btn("✏️ آیدی کانال", "set:channel_id"), btn("✏️ آیدی گروه", "set:group_id")],
-        [btn("🔙 بازگشت", "admin:menu")],
+    text = card("📢 کانال و گروه گزارش",
+                [f"📢 کانال: {val(db.setting('channel_id'))}", f"👥 گروه: {val(db.setting('group_id'))}"],
+                note="آیدی را با @ یا عدد -100 وارد کنید. ربات باید در کانال/گروه ادمین باشد.")
+    await page(query, text, [
+        [btn("👥 آیدی گروه", "set:group_id"), btn("📢 آیدی کانال", "set:channel_id")],
+        back_row("admin:g:shop"),
     ])
-    await safe_edit(query, text, reply_markup=kb)
 
 
 # ---------- تیکت‌ها ----------
 async def admin_tickets(query):
     tickets = db.open_tickets()
     if not tickets:
-        await safe_edit(query, "✅ تیکت بازی وجود ندارد.",
-                        reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        await page(query, card("🎫 تیکت‌ها", ["✅ تیکت بازی وجود ندارد."]), [back_row()])
         return
+    lines = []
     rows = []
-    text = f"🎫 تیکت‌های باز:\n\n"
     for t in tickets:
-        preview = (t["message"] or "")[:40]
-        text += f"#{t['id']} — کاربر {t['user_id']}: {preview}\n"
-        rows.append([btn(f"🎫 #{t['id']} — کاربر {t['user_id']}", f"tk:{t['id']}")])
-    rows.append([btn("🔙 بازگشت", "admin:menu")])
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
+        preview = (t["message"] or "📷 عکس").replace("\n", " ")
+        preview = preview[:38] + ("…" if len(preview) > 38 else "")
+        lines.append(f"<b>#{t['id']}</b>  ·  👤 <code>{t['user_id']}</code>\n💬 {h(preview)}")
+        rows.append([btn(f"🎫 تیکت #{t['id']}  ·  کاربر {t['user_id']}", f"tk:{t['id']}")])
+    rows.append(back_row())
+    await page(query, card(f"🎫 تیکت‌های باز ({len(tickets)})", *[[x] for x in lines]), rows)
 
 
 async def admin_ticket_detail(query, tid):
@@ -2139,9 +2175,18 @@ async def admin_ticket_detail(query, tid):
 
 
 # ---------- گزارش ----------
-def report_text(title, ts):
+def report_text(title, ts, rich=False):
     s = db.stats_since(ts)
     t = db.totals()
+    if rich:
+        return card(f"📈 {title}",
+                    [f"👤 کاربر جدید: <b>{s['new_users']}</b>",
+                     f"🛍 سفارش جدید: <b>{s['new_orders']}</b>",
+                     f"💰 درآمد: <b>{fmt(s['revenue'])}</b> تومان"],
+                    ["📊 <b>کل ربات</b>",
+                     f"👤 کاربران: <b>{t['users']}</b>  ·  🛍 سفارش‌ها: <b>{t['orders']}</b>",
+                     f"✅ سرویس فعال: <b>{t['active']}</b>",
+                     f"💰 درآمد کل: <b>{fmt(t['revenue'])}</b> تومان"])
     return (f"📅 {title}\n"
             f"👤 کاربران جدید: {s['new_users']}\n"
             f"🛍 سفارشات جدید: {s['new_orders']}\n"
@@ -2154,29 +2199,36 @@ def report_text(title, ts):
 
 
 async def admin_report_menu(query):
-    kb = InlineKeyboardMarkup([
+    t = db.totals()
+    text = card("💎 مالی",
+                [f"💰 درآمد کل: <b>{fmt(t['revenue'])}</b> تومان",
+                 f"✅ سرویس فعال: <b>{t['active']}</b>  ·  ⏳ رسید در انتظار: <b>{t['pending_receipts']}</b>"],
+                note="بازه‌ی گزارش را انتخاب کنید.")
+    await page(query, text, [
         [btn("📅 امروز", "report:day")],
-        [btn("📅 هفتگی", "report:week"), btn("📅 ماهانه", "report:month")],
-        [btn("🔙 بازگشت", "admin:menu")],
+        [btn("🗓 ماهانه", "report:month"), btn("📆 هفتگی", "report:week")],
+        [btn("💵 رسیدهای تایید نشده", "admin:receipts")],
+        back_row(),
     ])
-    await safe_edit(query, f"📈 گزارش\n\nبازه گزارش را انتخاب کنید:", reply_markup=kb)
 
 
 # ---------- مدیریت پلن‌ها ----------
 async def admin_plans(query):
     plans = db.get_plans()
     rows = [[btn("➕ افزودن پلن جدید", "pl:add")]]
-    text = f"📦 مدیریت پلن‌ها (هر سرویس پلن‌ها و قیمت‌های خودش):\n🧺 فعال | 🔴 غیرفعال\n"
     for service in [*SERVICES, ""]:
         group = [p for p in plans if plan_service(p) == service]
         if not group:
             continue
-        rows.append([btn(f"── {SERVICES.get(service, 'همه‌ی سرویس‌ها (پلن قدیمی)')} ──", "pl:noop")])
+        rows.append([btn(f"〰️ {SERVICES.get(service, 'پلن‌های قدیمی')} 〰️", "pl:noop")])
         for p in group:
-            st = "🧺" if p["active"] else "🔴"
-            rows.append([btn(f"{st} #{p['id']} | {plan_label(p)} — {fmt(p['price'])} تومان", f"pl:{p['id']}")])
-    rows.append([btn("🔙 بازگشت", "admin:menu")])
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
+            st = "🟢" if p["active"] else "🔴"
+            rows.append([btn(f"{st} {plan_label(p)} | {fmt(p['price'])}", f"pl:{p['id']}")])
+    rows.append(back_row("admin:g:price"))
+    active = len([p for p in plans if p["active"]])
+    await page(query, card("📦 مدیریت پلن‌ها",
+                           [f"🟢 فعال: <b>{active}</b>  ·  🔴 غیرفعال: <b>{len(plans) - active}</b>"],
+                           note="هر سرویس پلن‌ها و قیمت‌های خودش را دارد. برای ویرایش روی پلن بزنید."), rows)
 
 
 def plan_service_kb(prefix, back):
@@ -2188,24 +2240,25 @@ def plan_service_kb(prefix, back):
 async def admin_plan_detail(query, pid):
     p = db.get_plan(pid)
     if not p:
-        await safe_edit(query, "❌ پلن یافت نشد.")
+        await page(query, card("📦 پلن", ["❌ پلن یافت نشد."]), [back_row("admin:plans")])
         return
-    st = "فعال 🟢" if p["active"] else "غیرفعال 🔴"
     try:
         ul = int(p["user_limit"] or 0)
     except (IndexError, KeyError, TypeError, ValueError):
         ul = 0
-    ul_text = f"{ul} دستگاه همزمان" if ul else "بدون محدودیت دستگاه"
-    text = (f"📦 پلن #{p['id']}\n🧩 سرویس: {plan_service_name(p)}\n🛍️ {plan_label(p)}\n"
-            f"💰 قیمت: {fmt(p['price'])} تومان\n👥 لیمت دستگاه همزمان: {ul_text}\n📌 وضعیت: {st}")
-    kb = InlineKeyboardMarkup([
-        [btn("✏️ عنوان", f"ple:{pid}:title"), btn("🧩 سرویس", f"pl:svc:{pid}")],
-        [btn("✏️ حجم (گیگ)", f"ple:{pid}:volume_gb"), btn("✏️ مدت (روز)", f"ple:{pid}:days")],
-        [btn("✏️ قیمت (تومان)", f"ple:{pid}:price"), btn("👥 تعداد کاربر (0 تا 5)", f"ple:{pid}:user_limit")],
-        [btn("🔁 فعال / غیرفعال", f"pl:toggle:{pid}"), btn("🗑 حذف پلن", f"pl:del:{pid}")],
-        [btn("🔙 بازگشت", "admin:plans")],
+    text = card(f"📦 {h(plan_label(p))}",
+                [f"🧩 سرویس: <b>{h(plan_service_name(p))}</b>",
+                 f"📊 حجم: <b>{h(vol_text(p['volume_gb']))}</b>  ·  ⏳ مدت: <b>{p['days']}</b> روز",
+                 f"👥 دستگاه همزمان: <b>{ul if ul else 'بدون محدودیت'}</b>",
+                 f"💰 قیمت: <b>{fmt(p['price'])}</b> تومان"],
+                [f"وضعیت: <b>{'🟢 فعال' if p['active'] else '🔴 غیرفعال'}</b>"])
+    await page(query, text, [
+        [btn("🧩 سرویس", f"pl:svc:{pid}"), btn("✏️ عنوان", f"ple:{pid}:title")],
+        [btn("⏳ مدت (روز)", f"ple:{pid}:days"), btn("📊 حجم (گیگ)", f"ple:{pid}:volume_gb")],
+        [btn("👥 تعداد کاربر", f"ple:{pid}:user_limit"), btn("💰 قیمت", f"ple:{pid}:price")],
+        [btn("🗑 حذف پلن", f"pl:del:{pid}"), btn("⏯ فعال / غیرفعال", f"pl:toggle:{pid}")],
+        back_row("admin:plans"),
     ])
-    await safe_edit(query, text, reply_markup=kb)
 
 
 # ---------- مدیریت پنل‌ها ----------
@@ -2266,45 +2319,46 @@ def mappable_services(protocols):
 
 async def admin_panels(query):
     panels = db.get_panels()
-    pbtns = []
-    text = "🖥 مدیریت پنل‌های Tifusi Panel:\n\n"
+    blocks, rows = [], []
     for p in panels:
         cnt = db.count_panel_active_orders(p["id"])
         sold = [SERVICES[k] for k in db.get_service_map(p["id"]) if service_protocols_on(p, k)]
-        text += (f"{panel_status_icon(p)} #{p['id']} {p['name']} — {p['location']} — {cnt}/{p['max_users']} کاربر "
-                 f"{'، '.join(sold)}\n")
-        pbtns.append(btn(f"#{p['id']} {p['name']} ({cnt}/{p['max_users']})", f"pb:{p['id']}"))
-    rows = [[btn("➕ افزودن پنل", "pb:add")]] + [pbtns[i:i + 2] for i in range(0, len(pbtns), 2)]
+        icon = {"offline": "🔴", "inactive": "⚪"}.get(p["status"], "🟢")
+        blocks.append([f"{icon} <b>{h(p['name'])}</b>  ·  📍 {h(p['location'] or '—')}",
+                       f"👥 {cnt}/{p['max_users']}  {bar(cnt, p['max_users'])}",
+                       f"🧩 {h('، '.join(sold)) if sold else NOT_SET}"])
+        rows.append([btn(f"{icon} {p['name']}  ·  {cnt}/{p['max_users']}", f"pb:{p['id']}")])
     if not panels:
-        text += "پنلی ثبت نشده.\n"
-    rows.append([btn("🔙 بازگشت", "admin:menu")])
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
+        blocks.append(["هنوز پنلی ثبت نشده. از «➕ افزودن پنل» شروع کنید."])
+    rows.append([btn("➕ افزودن پنل", "pb:add")])
+    rows.append(back_row())
+    await page(query, card(f"✏️ پنل‌های متصل ({len(panels)})", *blocks), rows)
 
 
 async def admin_panel_detail(query, pid):
     p = db.get_panel(pid)
     if not p:
-        await safe_edit(query, "❌ پنل یافت نشد.")
+        await page(query, card("🖥 پنل", ["❌ پنل یافت نشد."]), [back_row("admin:panels")])
         return
     cnt = db.count_panel_active_orders(pid)
-    icons = {"active": "🟢 فعال", "inactive": "⚪ غیرفعال", "offline": "🔴 Offline"}
+    icons = {"active": "🟢 فعال", "inactive": "⚪ غیرفعال", "offline": "🔴 آفلاین"}
     checked = datetime.datetime.fromtimestamp(p["checked_at"]).strftime("%Y-%m-%d %H:%M") if p["checked_at"] else "هرگز"
-    tls = "\n⚠️ گواهی SSL پنل معتبر نیست (self-signed)؛ اتصال رمزنگاری شده ولی هویت پنل تایید نمی‌شود." if p["tls_insecure"] else ""
-    text = (f"🖥 پنل #{p['id']}: {p['name']} (Tifusi Panel)\n\n"
-            f"🌐 آدرس: {p['url']}\n👤 یوزر: {p['username']}\n"
-            f"📍 موقعیت: {p['location'] or '—'}\n"
-            f"📌 وضعیت: {icons.get(p['status'], p['status'])}\n"
-            f"👥 کاربران فعال ربات: {cnt}/{p['max_users']}\n"
-            f"🕓 آخرین بررسی: {checked}{tls}\n\n"
-            f"📡 پروتکل‌های روی پنل:\n{protocols_text(p)}\n\n"
-            f"🧩 سرویس‌ها:\n{service_map_text(p)}")
-    kb = InlineKeyboardMarkup([
-        [btn("🔄 بررسی اتصال و به‌روزرسانی پروتکل‌ها", f"pb:test:{pid}")],
-        [btn("🔁 فعال / غیرفعال", f"pb:toggle:{pid}"), btn("✏️ ویرایش پنل", f"pb:edit:{pid}")],
-        [btn("🧩 انتخاب گروه سرویس‌ها", f"pbm:{pid}")],
+    text = card(f"🖥 {h(p['name'])}",
+                [f"📌 وضعیت: <b>{icons.get(p['status'], h(p['status']))}</b>",
+                 f"🌐 آدرس: <code>{h(p['url'])}</code>",
+                 f"👤 یوزر: <code>{h(p['username'])}</code>  ·  📍 {val(p['location'])}",
+                 f"🕓 آخرین بررسی: <b>{checked}</b>"],
+                [f"👥 کاربران فعال: <b>{cnt}</b> از <b>{p['max_users']}</b>", bar(cnt, p["max_users"], 14)],
+                ["📡 <b>پروتکل‌های روی پنل</b>", h(protocols_text(p))],
+                ["🧩 <b>سرویس‌ها</b>", h(service_map_text(p))],
+                note=("⚠️ گواهی SSL پنل معتبر نیست (self-signed)؛ اتصال رمزنگاری شده ولی هویت پنل تایید نمی‌شود."
+                      if p["tls_insecure"] else None))
+    await page(query, text, [
+        [btn("🔄 بررسی اتصال و پروتکل‌ها", f"pb:test:{pid}")],
+        [btn("✏️ ویرایش", f"pb:edit:{pid}"), btn("⏯ فعال / غیرفعال", f"pb:toggle:{pid}")],
+        [btn("🧩 گروه سرویس‌ها", f"pbm:{pid}")],
         [btn("🗑 حذف پنل", f"pb:del:{pid}"), btn("🔙 بازگشت", "admin:panels")],
     ])
-    await safe_edit(query, text, reply_markup=kb)
 
 
 async def admin_panel_test(query, pid):
@@ -2337,14 +2391,13 @@ async def admin_panel_test(query, pid):
 
 
 async def admin_panel_edit(query, pid):
-    kb = InlineKeyboardMarkup([
-        [btn("✏️ نام", f"pbe:{pid}:name"), btn("✏️ آدرس", f"pbe:{pid}:url")],
-        [btn("✏️ یوزرنیم", f"pbe:{pid}:username"), btn("✏️ پسورد", f"pbe:{pid}:password")],
-        [btn("✏️ موقعیت", f"pbe:{pid}:location"), btn("✏️ سقف کاربر", f"pbe:{pid}:max_users")],
-        [btn("🧩 انتخاب گروه سرویس‌ها", f"pbm:{pid}")],
-        [btn("🔙 بازگشت", f"pb:{pid}")],
+    await page(query, card("✏️ ویرایش پنل", note="کدام مورد را تغییر می‌دهید؟"), [
+        [btn("🌐 آدرس", f"pbe:{pid}:url"), btn("🏷 نام", f"pbe:{pid}:name")],
+        [btn("🔑 پسورد", f"pbe:{pid}:password"), btn("👤 یوزرنیم", f"pbe:{pid}:username")],
+        [btn("👥 سقف کاربر", f"pbe:{pid}:max_users"), btn("📍 موقعیت", f"pbe:{pid}:location")],
+        [btn("🧩 گروه سرویس‌ها", f"pbm:{pid}")],
+        back_row(f"pb:{pid}"),
     ])
-    await safe_edit(query, "✏️ کدام مورد را ویرایش می‌کنید؟", reply_markup=kb)
 
 
 async def finish_panel_wizard(message, uid, draft):
@@ -2366,18 +2419,19 @@ async def finish_panel_wizard(message, uid, draft):
 async def admin_panels_cap(query):
     panels = db.get_panels()
     if not panels:
-        await safe_edit(query, "پنلی ثبت نشده است.",
-                        reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        await page(query, card("🛠 قابلیت‌های پنل", ["هنوز پنلی ثبت نشده."]), [back_row()])
         return
-    text = "🔧 قابلیت‌ها و ظرفیت پنل‌ها:\n\n"
     icons = {"active": "🟢", "inactive": "⚪", "offline": "🔴"}
+    blocks = []
     for p in panels:
         cnt = db.count_panel_active_orders(p["id"])
         sold = [SERVICES[k] for k in SERVICES if k in db.get_service_map(p["id"]) and service_protocols_on(p, k)]
-        text += (f"{icons.get(p['status'], '⚪')} {p['name']} — {cnt}/{p['max_users']} کاربر\n"
-                 f"   📡 {', '.join(panel_protocols(p)) or '—'}\n"
-                 f"   🧩 {', '.join(sold) if sold else '—'}\n")
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        protos = ", ".join(panel_protocols(p))
+        blocks.append([f"{icons.get(p['status'], '⚪')} <b>{h(p['name'])}</b>",
+                       f"👥 {cnt}/{p['max_users']}  {bar(cnt, p['max_users'])}",
+                       f"📡 پروتکل‌ها: {val(protos)}",
+                       f"🧩 فروش: {val('، '.join(sold))}"])
+    await page(query, card("🛠 قابلیت‌ها و ظرفیت پنل‌ها", *blocks), [[btn("✏️ مدیریت پنل‌ها", "admin:panels")], back_row()])
 
 
 # ---------- بکاپ ----------
@@ -2403,16 +2457,16 @@ async def send_backup(bot, chat_id, note="💾 بکاپ دیتابیس ربات"
 
 async def admin_backup_menu(query):
     auto = db.setting("backup_auto", "1") == "1"
-    await safe_edit(query,
-        "💾 بکاپ ربات\n\n"
-        "بکاپ شامل همه‌چیز است: کاربران، موجودی کیف پول‌ها، سفارش‌ها، رسیدها، پنل‌ها، پلن‌ها و تنظیمات.\n\n"
-        f"🕓 بکاپ خودکار روزانه (ساعت ۳ بامداد به ادمین اصلی): {'فعال ✅' if auto else 'غیرفعال ❌'}\n"
-        "📢 اگر «آیدی کانال بکاپ» را در تنظیمات عمومی وارد کنید، بکاپ روزانه آنجا هم فرستاده می‌شود.",
-        reply_markup=InlineKeyboardMarkup([
-            [btn("📥 دریافت بکاپ الان", "bk:now")],
-            [btn("♻️ بازگردانی از فایل بکاپ", "bk:restore"), btn("🔁 بکاپ خودکار: روشن/خاموش", "bk:auto")],
-            [btn("🔙 بازگشت", "admin:menu")],
-        ]))
+    text = card("💾 بکاپ ربات",
+                ["📦 شامل همه‌چیز: کاربران، کیف پول‌ها، سفارش‌ها، رسیدها، پنل‌ها، پلن‌ها و تنظیمات"],
+                [f"🕓 بکاپ خودکار روزانه (۳ بامداد): <b>{'🟢 روشن' if auto else '🔴 خاموش'}</b>",
+                 f"📢 کانال بکاپ: {val(db.setting('backup_chat_id'))}"],
+                note="کانال بکاپ را از «⚙️ تنظیمات عمومی» تنظیم کنید.")
+    await page(query, text, [
+        [btn("📥 دریافت بکاپ الان", "bk:now")],
+        [btn(f"🔁 خودکار: {'روشن ✅' if auto else 'خاموش ❌'}", "bk:auto"), btn("♻️ بازگردانی", "bk:restore")],
+        back_row("admin:g:update"),
+    ])
 
 
 # ---------- پیام همگانی ----------
@@ -2455,6 +2509,7 @@ async def run_broadcast(bot, admin_id, payload):
 async def admin_dispatch(query, uid, parts):
     """کارهای پنل مدیریت؛ parts مثل ['admin', 'stats'] — هم از دکمه‌ی شیشه‌ای و هم از کیبورد پایین."""
     what = parts[1]
+    db.set_state(uid, "none")  # رفتن به هر صفحه‌ی مدیریت، ورودی نیمه‌کاره (مثلاً «مقدار جدید») را لغو می‌کند
     if what == "menu":
         await safe_edit(query, "🧑‍💼 پنل مدیریت: از منوی پایین صفحه انتخاب کنید.")
     elif what == "addpanel":
@@ -2462,10 +2517,10 @@ async def admin_dispatch(query, uid, parts):
         await safe_edit(query, "➕ افزودن Tifusi Panel\n\n۱) نام پنل را وارد کنید (مثلاً «سرور آلمان ۱»):",
                         reply_markup=InlineKeyboardMarkup([[btn("🔙 انصراف", "admin:panels")]]))
     elif what == "g" and len(parts) > 2 and parts[2] in ADMIN_GROUPS:
-        await safe_edit(query, ADMIN_GROUPS[parts[2]][0] + ":", reply_markup=admin_group_kb(parts[2]))
+        await safe_edit(query, card(ADMIN_GROUPS[parts[2]][0], note="یکی از گزینه‌ها را انتخاب کنید."),
+                        reply_markup=admin_group_kb(parts[2]), parse_mode="HTML")
     elif what == "soon":
-        await safe_edit(query, "🔜 این بخش به‌زودی اضافه می‌شود.",
-                        reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        await page(query, card("🔜 به‌زودی", ["این بخش در نسخه‌ی بعدی ربات اضافه می‌شود."]), [back_row()])
     elif what == "stats":
         await admin_stats(query)
     elif what == "receipts":
@@ -2485,12 +2540,12 @@ async def admin_dispatch(query, uid, parts):
     elif what == "panels_cap":
         await admin_panels_cap(query)
     elif what == "update":
-        await safe_edit(query,
-            f"🆕 نسخه ربات: {BOT_VERSION}\n📅 تاریخ نسخه: {BOT_VERSION_DATE}\n\n"
-            f"برای آپدیت، روی سرور ربات بزنید:\n tifusi bot\n"
-            f"و گزینه‌ی «Update bot» را انتخاب کنید. تنظیمات و دیتابیس حفظ می‌شوند؛\n"
-            f"برای اطمینان قبلش از «💾 بکاپ» یک نسخه بگیرید.",
-            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:menu")]]))
+        await page(query, card("🆕 نسخه‌ی ربات",
+                               [f"🏷 نسخه: <b>{BOT_VERSION}</b>", f"📅 تاریخ: <b>{BOT_VERSION_DATE}</b>"],
+                               ["برای آپدیت، روی سرور ربات بزنید:", "<code>tifusi bot</code>",
+                                "و گزینه‌ی «Update bot» را انتخاب کنید."],
+                               note="تنظیمات و دیتابیس حفظ می‌شوند؛ برای اطمینان قبلش از «💾 بکاپ» یک نسخه بگیرید."),
+                   [[btn("💾 بکاپ", "admin:backup")], back_row("admin:g:update")])
     elif what == "backup":
         await admin_backup_menu(query)
     elif what == "broadcast":
@@ -2807,8 +2862,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             spans = {"day": ("گزارش امروز", 86400), "week": ("گزارش هفتگی", 7 * 86400),
                      "month": ("گزارش ماهانه", 30 * 86400)}
             title, span = spans[parts[1]]
-            await safe_edit(query, report_text(title, now() - span),
-                            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:report")]]))
+            await page(query, report_text(title, now() - span, rich=True), [back_row("admin:report")])
             return
 
         if cmd == "rc":
@@ -2854,7 +2908,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cmd == "set":
             key = parts[1]
             db.set_state(uid, "set_value", {"key": key})
-            await safe_edit(query, f"✏️ مقدار جدید برای «{key}» را ارسال کنید:")
+            label = dict(SETTING_KEYS).get(key, key)
+            await page(query, card(f"✏️ {label}", [f"مقدار فعلی: {val(db.setting(key))}"],
+                                   note="مقدار جدید را بفرستید."),
+                       [[btn("🔙 انصراف", "admin:channel" if key in ("channel_id", "group_id") else "admin:settings")]])
             return
 
         if cmd == "tk":
