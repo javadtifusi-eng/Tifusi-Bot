@@ -1444,10 +1444,12 @@ async def send_order_qr(context, chat_id, order):
 
 
 def apple_profile_url(order, links):
-    """لینک نصب یک‌لمسی پروفایل آیفون برای همین سرویس (IKEv2 یا L2TP)؛ None اگر پنل نداد."""
+    """لینک نصب یک‌لمسی پروفایل آیفون برای همین سرویس (IKEv2 یا L2TP)؛ None اگر پنل نداد.
+    install_url صفحه‌ای است که مشتری را از مرورگر تلگرام به Safari می‌برد (آیفون پروفایل را فقط
+    در Safari نصب می‌کند)؛ پنل قدیمی‌تر فقط mobileconfig_url را می‌دهد."""
     key = "l2tp_configs" if order["protocol"] == "l2tp" else "ikev2_configs"
     cfgs = (links or {}).get(key) or []
-    return cfgs[0].get("mobileconfig_url") if cfgs else None
+    return (cfgs[0].get("install_url") or cfgs[0].get("mobileconfig_url")) if cfgs else None
 
 
 def l2tp_manual_lines(links, fallback_order=None, code=lambda v: f"<code>{html.escape(v)}</code>", text=html.escape):
