@@ -50,7 +50,7 @@ The bot knows every service, but **only offers a service to customers when the p
 
 **Service → group mapping:** a panel group decides which servers a user can reach; a server that is in no group is available to everyone. The mapping can be changed at any time from the panel details → "🧩 Choose service groups".
 
-> ♻️ **Upgrading from older versions:** on first start, non-Tifusi panels from very old versions (vpn-ui and others) are removed from the bot and their orders are archived (they stay in the statistics). Users, wallets, plans and Tifusi Panel orders are untouched. Take a copy from "💾 Backup" before upgrading.
+> ♻️ **Upgrading from older versions:** on first start, panels from very old versions that are not Tifusi Panel are removed from the bot and their orders are archived (they stay in the statistics). Users, wallets, plans and Tifusi Panel orders are untouched. Take a copy from "💾 Backup" before upgrading.
 
 ---
 
