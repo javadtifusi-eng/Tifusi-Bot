@@ -26,9 +26,9 @@
 
 **Tifusi Bot** is a complete Telegram storefront for selling VPN subscriptions. It works only with **[Tifusi Panel](https://github.com/javadtifusi-eng/Tifusi-Panel)**.
 
-The customer taps "Buy subscription", picks a service (protocol), then a plan, and sends the username they want. The bot does the rest: payment, creating the user on the least busy panel, delivering the **access code**, **subscription link** and **QR code**, expiry reminders, renewals and refunds, all automatically. ⚡
+The customer taps "Buy subscription", picks a service (protocol), then a plan, and sends the username they want. The bot does the rest: payment, creating the user on the least busy panel, delivering the **connection details**, **subscription link** and **QR code**, expiry reminders, renewals and refunds, all automatically. ⚡
 
-> 🔑 **Passwords only where they matter.** The panel issues each user a subscription link and an access code (like `javad7KQ4MP9X@panel-address`). In the **[Tifusi VPN](https://github.com/javadtifusi-eng/Tifusi-VPN)** app for Android the code is entered on the "Servers" tab, or the QR is scanned with "Scan QR"; on iPhone the subscription link opens in Safari. Only IKEv2 and L2TP buyers are asked for a password, right after the username — they can type their own or tap "Random password". Renewing keeps the code, link, QR and password unchanged.
+> 🔑 **No app to install.** IKEv2 and L2TP customers connect with the phone's own VPN settings: the bot sends the connection type, server, username, password (and the shared secret for L2TP), and its "Connection guide" menu walks through the steps; on iPhone a profile installs in one tap. IKEv2 and L2TP buyers type their own password right after the username or tap "Random password". Xray uses the subscription link in v2rayNG or Streisand. Renewing keeps the link, QR and password unchanged.
 
 ### 📡 Protocols come straight from the panel
 
@@ -60,10 +60,10 @@ The bot knows every service, but **only offers a service to customers when the p
 |---|---|
 | 🛍️ **Plan store** | Each service (Xray, IKEv2, L2TP, …) has its own plans with their own data, duration, price and simultaneous device limit; customers only see the plans of the service they picked |
 | 📡 **Protocols from the panel** | Only protocols that have hosts on the panel are sold; panel changes apply automatically |
-| 📱 **Full delivery** | An image card with the Tifusi mark, data and expiry, subscription QR, access code and install tiles; beneath it the subscription link, the iPhone profile and the Android app (manual credentials only for L2TP) |
+| 📱 **Full delivery** | An image card with the Tifusi mark, data and expiry and the subscription QR; buttons to install the iPhone profile and copy the subscription link; and for IKEv2 and L2TP a message with the manual connection details |
 | 🔑 **Test account** | Once per user; off by default and enabled from General settings |
 | 🖥️ **Multiple panels** | Several servers with custom capacity; when one panel is full, new purchases move to the next |
-| 🔄 **Smart renewal** | Always renews the same user on the same panel; code, link and QR stay the same |
+| 🔄 **Smart renewal** | Always renews the same user on the same panel; link, QR and password stay the same |
 | 📊 **Wallet and receipts** | Top up by sending a receipt, approved or rejected by the admin; atomic balance deduction (double tap = one purchase) |
 | ⏰ **Expiry reminders** | Automatic messages 3 days and 1 day before expiry and on expiry, with a renew button |
 | 📢 **Broadcast** | Text or photo to all users at a Telegram-safe rate, with a result report |
@@ -107,7 +107,7 @@ The installer starts with a colored interface and does the following automatical
 
 ### 📖 Installer management menu
 
-After installing, type `tifusi bot` in the terminal to bring this menu back (`tifusi panel` opens the Tifusi Panel menu and `tifusi app` shows the latest Tifusi VPN release):
+After installing, type `tifusi bot` in the terminal to bring this menu back (`tifusi panel` opens the Tifusi Panel menu):
 
 ```
 1) Install / Reinstall bot

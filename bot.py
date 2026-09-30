@@ -70,7 +70,6 @@ TEST_SERVICE_ORDER = ["ikev2", "xray", "hysteria2", "l2tp", "wireguard"]
 # سفارش‌های نسخه‌ی ۴.۰ که یک سرویس کلی Tifusi بودند (بدون محدودیت پروتکل)
 GENERIC_ORDER_KEY = "tifusi"
 
-APP_ANDROID_URL = "https://github.com/javadtifusi-eng/Tifusi-VPN/releases/latest/download/tifusi-vpn.apk"
 
 # فونت و نشان‌های کارت تحویل؛ نصب‌کننده آن‌ها را کنار bot.py از همین مخزن می‌گیرد.
 ASSET_DIR = "/root/tifusi-bot-assets"
@@ -93,19 +92,39 @@ IPSEC_PASSWORD_RULES = "۶ تا ۳۲ کاراکتر؛ فقط حروف انگلی
 TUT_OS = [("android", "🤖 اندروید"), ("ios", "🍎 آیفون")]
 
 TRAININGS = {
-    "app": {
-        "title": "📱 اپ Tifusi VPN (اندروید)",
-        "android": f"""🤖 اندروید:
+    "ikev2": {
+        "title": "🤖 اندروید: IKEv2 (بدون نصب اپ)",
+        "android": """🤖 اندروید — IKEv2، با خود تنظیمات گوشی:
 
-1️⃣ اپ Tifusi VPN را دانلود و نصب کنید:
-{APP_ANDROID_URL}
-2️⃣ اپ را باز کنید و به تب «سرورها» بروید
-3️⃣ «🆔 شناسه»ای که ربات فرستاده را در کادر «شناسه یا لینک اشتراک» بچسبانید و «دریافت سرورها» را بزنید
-   📷 یا به‌جای آن «اسکن بارکد» را بزنید و QR code ارسالی ربات را اسکن کنید
-4️⃣ به تب «خانه» برگردید، سرور را انتخاب کنید و دکمه‌ی اتصال را بزنید
+1️⃣ تنظیمات ← اتصالات ← تنظیمات بیشتر اتصال ← VPN
+   (در گوشی‌های غیرسامسونگ: تنظیمات ← شبکه و اینترنت ← VPN)
+2️⃣ «➕ افزودن نمایه‌ی VPN» را بزنید
+3️⃣ نام: Tifusi (هر اسمی)
+4️⃣ نوع: IKEv2/IPSec MSCHAPv2
+5️⃣ نشانی سرور: همان «🌐 سرور» که ربات فرستاده
+6️⃣ شناسه‌ی IPSec: نام کاربری خودتان
+7️⃣ گواهی CA: «استفاده از گواهی‌های سیستم» — گواهی سرور: «دریافت از سرور»
+8️⃣ نام کاربری و رمز عبوری که ربات فرستاده را وارد و ذخیره کنید
+9️⃣ روی نمایه بزنید و «اتصال» را بزنید ✅
 
-💡 لینک اشتراک هم در همان کادر کار می‌کند. با تمدید سرویس، شناسه، لینک و QR عوض نمی‌شوند؛
-اگر تغییری در سرورها دادیم، در تب «سرورها» دکمه‌ی «به‌روزرسانی» را بزنید.""",
+💡 اگر گزینه‌ی IKEv2 در گوشی‌تان نیست (اندروید ۱۰ و قدیمی‌تر)، از آموزش L2TP استفاده کنید.""",
+    },
+    "l2tp": {
+        "title": "📶 L2TP (گوشی‌های قدیمی‌تر)",
+        "android": """🤖 اندروید — L2TP:
+
+1️⃣ تنظیمات ← اتصالات ← تنظیمات بیشتر اتصال ← VPN ← «➕ افزودن نمایه‌ی VPN»
+2️⃣ نوع: L2TP/IPSec PSK
+3️⃣ نشانی سرور: «🌐 سرور» که ربات فرستاده
+4️⃣ کلید از پیش مشترک IPSec: «🔐 سکرت» که ربات فرستاده
+5️⃣ نام کاربری و رمز عبور را وارد و ذخیره کنید، بعد «اتصال» را بزنید ✅""",
+        "ios": """🍎 آیفون — L2TP:
+
+ساده‌ترین راه: دکمه‌ی « نصب پروفایل آیفون» را بزنید، در Safari باز کنید و از Settings پروفایل را Install کنید.
+
+یا دستی: Settings ← General ← VPN & Device Management ← VPN ← Add VPN Configuration
+نوع: L2TP — Server: سرور، Account: نام کاربری، Password: رمز، Secret: سکرت
+«Send All Traffic» را روشن بگذارید و Done را بزنید ✅""",
     },
     "iphone": {
         "title": "🍎 آیفون / مک",
@@ -113,7 +132,7 @@ TRAININGS = {
 
 1️⃣ «🔗 لینک اشتراک» را لمس کنید تا در Safari باز شود
 2️⃣ برای IKEv2: در صفحه‌ی باز شده «نصب مستقیم روی iOS/macOS» را بزنید و اجازه‌ی دانلود پروفایل را بدهید
-3️⃣ Settings ← General ← VPN & Device Management ← پروفایل Tifusi را باز کنید و Install را بزنید
+3️⃣ Settings ← General ← VPN & Device Management ← پروفایل را باز کنید و Install را بزنید
 4️⃣ از Settings ← VPN اتصال را روشن کنید
 
 🌐 برای Xray روی آیفون: اپ Streisand یا V2Box را نصب کنید، ➕ را بزنید و لینک اشتراک را به‌عنوان Subscription اضافه کنید.
@@ -126,9 +145,7 @@ TRAININGS = {
 1️⃣ اپ v2rayNG را نصب کنید
 2️⃣ لینک اشتراک را کپی کنید
 3️⃣ منوی ☰ ← Subscription group setting ← ➕ و لینک را اضافه کنید
-4️⃣ منوی ⋮ ← Update subscription، یک کانفیگ را انتخاب و ▶️ را بزنید
-
-💡 ساده‌ترین راه همان اپ Tifusi VPN با «🆔 شناسه» است.""",
+4️⃣ منوی ⋮ ← Update subscription، یک کانفیگ را انتخاب و ▶️ را بزنید""",
         "ios": """🍎 آیفون (Streisand / V2Box):
 
 1️⃣ اپ Streisand یا V2Box را از اپ‌استور نصب کنید
@@ -146,8 +163,7 @@ class PanelError(Exception):
 
 
 class TifusiPanelAPI:
-    """کلاینت API پنل Tifusi Panel. هر کاربر یک لینک اشتراک و یک «شناسه» می‌گیرد که مستقیم در اپ Tifusi VPN
-    وارد می‌شود؛ رمز کاربر را خود پنل مدیریت می‌کند.
+    """کلاینت API پنل Tifusi Panel. هر کاربر یک لینک اشتراک می‌گیرد و رمز IKEv2/L2TP او را خود پنل مدیریت می‌کند.
 
     یک نمونه برای هر پنل نگه داشته می‌شود (panel_client): توکن ورود ۲۴ ساعت معتبر است، پس به‌جای ورود دوباره
     برای هر خرید یک بار وارد می‌شود و فقط وقتی پنل 401 داد دوباره لاگین می‌کند. درخواست‌های یک پنل با قفل
@@ -807,7 +823,7 @@ def service_name(key):
     if key in SERVICES:
         return SERVICES[key]
     if key == GENERIC_ORDER_KEY:
-        return "📱 Tifusi VPN"
+        return "📱 سرویس Tifusi"
     return f"🗄 سرویس بایگانی‌شده ({key})"
 
 
@@ -842,13 +858,6 @@ def service_access_protocols(panel, service):
     return [p for p in SERVICE_PROTOCOLS.get(service, []) if p in PANEL_KNOWN_PROTOCOLS or available.get(p)]
 
 
-def app_code_text(order):
-    """شناسه دقیقاً همان‌طور که پنل می‌دهد — لخت و بدون @دامنه. دامنه‌ی پنل از قبل داخل خود شناسه
-    (بخش base32 بعد از خط تیره) است، پس چسباندن دوباره‌ی آن هم اضافی است و هم شناسه را در پیامک
-    شبیه نشانی وب و در معرض فیلتر می‌کند."""
-    return order["app_code"] or "-"
-
-
 def md(s):
     """فرار از کاراکترهای Markdown قدیمی تلگرام برای متن آزاد (نام پنل، عنوان پلن و ...)."""
     return re.sub(r"([_*`\[])", r"\\\1", str(s or ""))
@@ -880,12 +889,12 @@ def btn(text, data):
     return InlineKeyboardButton(text, callback_data=data)
 
 
-def copy_code_button(code):
-    """دکمه‌ای که با یک لمس شناسه را کپی می‌کند (Bot API 8.0). روی نسخه‌های قدیمی‌تر
-    python-telegram-bot وجود ندارد، آن‌وقت None برمی‌گردد و شناسه در کپشن می‌آید."""
+def copy_text_button(label, value):
+    """دکمه‌ای که با یک لمس متن را کپی می‌کند (Bot API 8.0). روی نسخه‌های قدیمی‌تر
+    python-telegram-bot وجود ندارد، آن‌وقت None برمی‌گردد."""
     try:
         from telegram import CopyTextButton
-        return InlineKeyboardButton("کپی شناسه", copy_text=CopyTextButton(code))
+        return InlineKeyboardButton(label, copy_text=CopyTextButton(value))
     except Exception:
         return None
 
@@ -1084,7 +1093,7 @@ def main_menu_kb(uid):
 FAQ_DEFAULT = """💡 سوالات متداول ⁉️
 
 1️⃣ فیلترشکن شما از چه نوعیه؟
-✅ سرویس‌های ما روی Tifusi Panel هستند: Xray (VLESS/VMess/Trojan)، IKEv2 و L2TP — با اپ Tifusi VPN روی اندروید و با لینک اشتراک روی آیفون.
+✅ سرویس‌های ما روی Tifusi Panel هستند: IKEv2 و L2TP (بدون نصب اپ، با خود تنظیمات گوشی) و Xray (VLESS/VMess/Trojan با v2rayNG یا Streisand). روی آیفون پروفایل با یک لمس نصب می‌شود.
 
 2️⃣ اگر قبل از منقضی شدن اکانت تمدید کنم، روزهای باقی‌مانده می‌سوزد؟
 ✅ خیر، روزهای باقی‌مانده محاسبه و به تمدید اضافه می‌شود.
@@ -1447,55 +1456,63 @@ def apple_profile_url(order, links):
     """لینک نصب یک‌لمسی پروفایل آیفون برای همین سرویس (IKEv2 یا L2TP)؛ None اگر پنل نداد.
     install_url صفحه‌ای است که مشتری را از مرورگر تلگرام به Safari می‌برد (آیفون پروفایل را فقط
     در Safari نصب می‌کند)؛ پنل قدیمی‌تر فقط mobileconfig_url را می‌دهد."""
-    key = "l2tp_configs" if order["protocol"] == "l2tp" else "ikev2_configs"
-    cfgs = (links or {}).get(key) or []
+    if order["protocol"] not in IPSEC_SERVICES:
+        return None
+    cfgs = (links or {}).get(f"{order['protocol']}_configs") or []
     return (cfgs[0].get("install_url") or cfgs[0].get("mobileconfig_url")) if cfgs else None
 
 
-def l2tp_manual_lines(links, fallback_order=None, code=lambda v: f"<code>{html.escape(v)}</code>", text=html.escape):
-    """اطلاعات ورود دستی L2TP (نام کاربری، رمز، آدرس، سکرت)؛ لیست خالی اگر L2TP نیست.
+# نوع اتصال همان‌طور که در منوی VPN خود گوشی نوشته شده، تا مشتری همان را انتخاب کند
+MANUAL_TYPE = {"ikev2": "IKEv2/IPSec MSCHAPv2", "l2tp": "L2TP/IPSec PSK"}
+
+
+def ipsec_manual_lines(links, order, code=lambda v: f"<code>{html.escape(v)}</code>", text=html.escape):
+    """اطلاعات ورود دستی IKEv2 یا L2TP (نوع، سرور، نام کاربری، رمز و برای L2TP سکرت) برای وارد کردن
+    در تنظیمات VPN خود گوشی؛ لیست خالی اگر سرویس IPsec نیست.
     code/text: قالب مقدارها و متن ساده — HTML برای تحویل، Markdown برای «سرویس‌های من»."""
-    l2tp = (links or {}).get("l2tp_configs") or []
-    if l2tp:
-        lines = [f"👤 نام کاربری: {code(l2tp[0]['username'])}",
-                 f"🔑 رمز عبور: {code(l2tp[0]['password'])}"]
-        for cfg in l2tp:
-            if len(l2tp) > 1:
+    proto = order["protocol"]
+    if proto not in MANUAL_TYPE:
+        return []
+    cfgs = (links or {}).get(f"{proto}_configs") or []
+    if cfgs:
+        lines = [f"🧩 نوع: {code(MANUAL_TYPE[proto])}",
+                 f"👤 نام کاربری: {code(cfgs[0]['username'])}",
+                 f"🔑 رمز عبور: {code(cfgs[0]['password'])}"]
+        for cfg in cfgs:
+            if len(cfgs) > 1:
                 lines.append(f"\n📍 {text(cfg.get('remark') or cfg['server'])}")
-            lines.append(f"🌐 آدرس: {code(cfg['server'])}")
-            if cfg.get("psk"):
+            lines.append(f"🌐 سرور: {code(cfg['server'])}")
+            if proto == "l2tp" and cfg.get("psk"):
                 lines.append(f"🔐 سکرت: {code(cfg['psk'])}")
         return lines
-    if fallback_order is not None and fallback_order["protocol"] == "l2tp" and fallback_order["password"]:
+    if order["password"]:
         # پنل جواب نداد: دست‌کم نام کاربری و رمزی که با آن ساخته شد
-        return [f"👤 نام کاربری: {code(fallback_order['username'])}",
-                f"🔑 رمز عبور: {code(fallback_order['password'])}"]
+        return [f"👤 نام کاربری: {code(order['username'])}",
+                f"🔑 رمز عبور: {code(order['password'])}"]
     return []
 
 
 def delivery_details_html(order, panel, links):
-    """بعد از بارکد به همین ترتیب: پروفایل آیفون، شناسه، اطلاعات ورود IKEv2/L2TP و لینک اپ — بدون متن آموزشی.
-    رمز از خود پنل خوانده می‌شود نه از سفارش، تا همیشه همانی باشد که نود واقعاً چک می‌کند."""
+    """بعد از بارکد: اطلاعات ورود دستی IKEv2/L2TP (اندروید با خود تنظیمات گوشی وصل می‌شود)، پروفایل
+    آیفون و برای Xray لینک اشتراک. رمز از خود پنل خوانده می‌شود نه از سفارش، تا همیشه همانی باشد
+    که نود واقعاً چک می‌کند."""
     esc = html.escape
     parts = []
+    manual = ipsec_manual_lines(links, order)
+    if manual:
+        parts.append("🔧 <b>اطلاعات اتصال</b> (برای اندروید و ویندوز):\n" + "\n".join(manual))
+        parts.append("📖 آموزش وارد کردن: منوی «آموزش اتصال» ربات")
     apple_url = apple_profile_url(order, links)
     if apple_url:
         parts.append(f"🍎 نصب پروفایل آیفون:\n{esc(apple_url)}")
-    parts.append(f"🆔 شناسه: <code>{esc(app_code_text(order))}</code>")
-
-    # فقط L2TP: IKEv2 را فقط با پروفایل یا اپ نصب می‌کنند و آدرس و رمزش جز سردرگمی چیزی ندارد.
-    # L2TP را خیلی‌ها (ویندوز، اندرویدهای قدیمی، مودم) دستی وارد می‌کنند، پس با پروفایل آیفون هم می‌آید.
-    manual = l2tp_manual_lines(links, order)
-    if manual:
-        parts.append("\n".join(manual))
-
-    parts.append(f"📲 Tifusi VPN:\n{esc(APP_ANDROID_URL)}")
+    if order["protocol"] not in IPSEC_SERVICES and order["sub_url"]:
+        parts.append(f"🔗 لینک اشتراک:\n<code>{esc(order['sub_url'])}</code>")
     return "\n\n".join(parts)
 
 
 async def deliver_service(context, chat_id, order, panel):
-    """تحویل سرویس: کارتی با نشان و بارکد، نام و حجم و انقضا در کپشن، و زیرش دکمه‌های واقعی
-    (کپی شناسه، نصب پروفایل آیفون، دانلود اپ، صفحه‌ی اشتراک). اگر کارت ساخته نشد، همان
+    """تحویل سرویس: کارتی با نشان و بارکد، نام و حجم و انقضا در کپشن و زیرش دکمه‌های واقعی
+    (نصب پروفایل آیفون، کپی لینک اشتراک)، بعد پیام اطلاعات اتصال. اگر کارت ساخته نشد، همان
     تحویل متنی قبلی (خلاصه، بارکد، جزئیات) فرستاده می‌شود."""
     dt = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")
     summary = f"✅ {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — تا {dt}"
@@ -1512,22 +1529,20 @@ async def deliver_service(context, chat_id, order, panel):
     if card:
         # داخل تصویر فقط نشان و بارکد است: تلگرام هیچ نقطه‌ای از یک عکس را قابل لمس نمی‌کند،
         # پس نام و حجم و انقضا در کپشن و بقیه روی دکمه‌های واقعی زیر عکس می‌نشینند.
-        code = app_code_text(order)
         caption = (f"✅ <b>{html.escape(order['username'])}</b> — {html.escape(service_name(order['protocol']))}\n"
                    f"📦 حجم: {html.escape(vol_text(order['volume_gb']))}\n"
                    f"📅 انقضا: {dt}")
-        copy_btn = copy_code_button(code)
-        rows = [[copy_btn]] if copy_btn else []
-        if not copy_btn:
-            caption += f"\n\nشناسه: <code>{html.escape(code)}</code>"
+        rows = []
         if apple_url:
             # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
             rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
-        rows.append([InlineKeyboardButton("📲 دانلود اپ اندروید", url=APP_ANDROID_URL)])
+        copy_btn = copy_text_button("🔗 کپی لینک اشتراک", order["sub_url"]) if order["sub_url"] else None
+        if copy_btn:
+            rows.append([copy_btn])
         try:
             await context.bot.send_photo(chat_id, card, caption=caption, parse_mode="HTML",
-                                         reply_markup=InlineKeyboardMarkup(rows))
-            if order["protocol"] == "l2tp":
+                                         reply_markup=InlineKeyboardMarkup(rows) if rows else None)
+            if details:
                 await context.bot.send_message(chat_id, details, parse_mode="HTML",
                                                disable_web_page_preview=True)
             return
@@ -1537,7 +1552,8 @@ async def deliver_service(context, chat_id, order, panel):
     await context.bot.send_message(chat_id, summary)
     if order["sub_url"] and not await send_order_qr(context, chat_id, order):
         await context.bot.send_message(chat_id, order["sub_url"])
-    await context.bot.send_message(chat_id, details, parse_mode="HTML", disable_web_page_preview=True)
+    if details:
+        await context.bot.send_message(chat_id, details, parse_mode="HTML", disable_web_page_preview=True)
 
 
 # ---------- تمدید ----------
@@ -1625,13 +1641,11 @@ async def show_service_detail(query, uid, oid):
             pass
 
     creds = (f"👤 یوزرنیم: `{o['username']}`\n"
-             f"🆔 شناسه: `{app_code_text(o)}`\n"
-             f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`\n"
-             f"📲 اندروید: {APP_ANDROID_URL}")
+             f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`")
     # رمز و سکرت از خود پنل، تا همیشه همانی باشد که نود واقعاً چک می‌کند
-    manual = l2tp_manual_lines(fresh, o, code=lambda v: f"`{v}`", text=md)
+    manual = ipsec_manual_lines(fresh, o, code=lambda v: f"`{v}`", text=md)
     if manual:
-        creds += "\n\n🔧 اتصال دستی L2TP:\n" + "\n".join(manual)
+        creds += "\n\n🔧 اطلاعات اتصال (اندروید و ویندوز):\n" + "\n".join(manual)
     apple_url = apple_profile_url(o, fresh) if o["protocol"] in IPSEC_SERVICES else None
     text = (f"{md(service_name(o['protocol']))} — #{o['id']}\n"
             f"🖥 پنل: {md(pname)}\n\n{creds}\n\n{usage_line}\n"
@@ -1911,7 +1925,6 @@ async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
             f"✅ سرویس `{new_o['username']}` تمدید شد!\n\n"
             f"📦 پلن جدید: {vol_text(new_o['volume_gb'])} — {new_o['days']} روز\n"
             f"👤 یوزرنیم: `{new_o['username']}`\n"
-            f"🆔 شناسه: `{app_code_text(new_o)}`\n"
             f"🔗 لینک اشتراک: `{new_o['sub_url'] or '-'}`\n"
             f"⏳ اعتبار جدید: تا {dt}",
             parse_mode="Markdown")
