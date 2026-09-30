@@ -55,6 +55,7 @@ SERVICES = {
     "hysteria2": "Hysteria2",
     "ikev2": "IKEv2",
     "l2tp": "L2TP",
+    "pptp": "PPTP",
     "wireguard": "WireGuard",
 }
 # پروتکل‌های پنل برای هر سرویس — کاربر ساخته‌شده فقط به همین پروتکل‌ها دسترسی می‌گیرد
@@ -63,10 +64,11 @@ SERVICE_PROTOCOLS = {
     "hysteria2": ["hysteria2"],
     "ikev2": ["ikev2"],
     "l2tp": ["l2tp"],
+    "pptp": ["pptp"],
     "wireguard": ["wireguard"],
 }
 # اکانت تست روی اولین سرویسِ در دسترس به همین ترتیب ساخته می‌شود
-TEST_SERVICE_ORDER = ["ikev2", "xray", "hysteria2", "l2tp", "wireguard"]
+TEST_SERVICE_ORDER = ["ikev2", "xray", "hysteria2", "l2tp", "pptp", "wireguard"]
 # سفارش‌های نسخه‌ی ۴.۰ که یک سرویس کلی Tifusi بودند (بدون محدودیت پروتکل)
 GENERIC_ORDER_KEY = "tifusi"
 
@@ -79,7 +81,7 @@ CARD_GROUND, CARD_PANEL, CARD_HAIR = "#0a0a0a", "#141414", "#232323"
 CARD_ACCENT, CARD_TEXT, CARD_MUTED, CARD_DIM = "#f97316", "#f5f5f5", "#8b8b8b", "#d4d4d4"
 
 # سرویس‌هایی که مشتری با نام کاربری و رمز به آن‌ها وصل می‌شود و موقع خرید رمز دلخواه می‌گیرند
-IPSEC_SERVICES = {"ikev2", "l2tp"}
+IPSEC_SERVICES = {"ikev2", "l2tp", "pptp"}
 # همان قاعده‌ی پنل (IPSEC_PASSWORD_PATTERN): نود رمز را داخل گیومه در swanctl.conf و chap-secrets
 # می‌نویسد، پس گیومه، بک‌اسلش و فاصله باعث می‌شوند IKEv2/L2TP رمز دیگری را چک کنند
 IPSEC_PASSWORD_RE = re.compile(r"[A-Za-z0-9@#$%&*._+=!-]{6,32}")
@@ -125,6 +127,18 @@ TRAININGS = {
 یا دستی: Settings ← General ← VPN & Device Management ← VPN ← Add VPN Configuration
 نوع: L2TP — Server: سرور، Account: نام کاربری، Password: رمز، Secret: سکرت
 «Send All Traffic» را روشن بگذارید و Done را بزنید ✅""",
+    },
+    "pptp": {
+        "title": "📟 PPTP (قدیمی‌ترین گوشی‌ها)",
+        "android": """🤖 اندروید قدیمی — PPTP:
+
+1️⃣ تنظیمات ← اتصالات ← تنظیمات بیشتر اتصال ← VPN ← «➕ افزودن نمایه‌ی VPN»
+2️⃣ نوع: PPTP
+3️⃣ نشانی سرور: «🌐 سرور» که ربات فرستاده
+4️⃣ «رمزگذاری PPP (MPPE)» را روشن بگذارید
+5️⃣ نام کاربری و رمز عبور را وارد و ذخیره کنید، بعد «اتصال» را بزنید ✅
+
+💡 فقط برای گوشی‌هایی که IKEv2 و L2TP ندارند. آیفون PPTP ندارد.""",
     },
     "iphone": {
         "title": "🍎 آیفون / مک",
@@ -293,7 +307,8 @@ class TifusiPanelAPI:
         return {"user": user, "subscription_url": links.get("subscription_url", ""),
                 "app_code": links.get("app_code", ""),
                 "ikev2_configs": links.get("ikev2_configs") or [],
-                "l2tp_configs": links.get("l2tp_configs") or []}
+                "l2tp_configs": links.get("l2tp_configs") or [],
+                "pptp_configs": links.get("pptp_configs") or []}
 
     def links(self, username):
         """لینک‌ها و اطلاعات اتصال IKEv2/L2TP کاربر همان‌طور که پنل الان می‌دهد؛ None اگر کاربر روی پنل نبود."""
@@ -842,7 +857,7 @@ def panel_protocols(panel):
 
 # پروتکل‌هایی که پنل امروز در فیلد protocols کاربر قبول می‌کند؛ پروتکل تازه‌ی پنل (مثلاً wireguard)
 # به‌محض اینکه روی پنل هاست بگیرد هم پذیرفته می‌شود.
-PANEL_KNOWN_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks", "hysteria2", "ikev2", "l2tp"}
+PANEL_KNOWN_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks", "hysteria2", "ikev2", "l2tp", "pptp"}
 
 
 def service_protocols_on(panel, service):
@@ -1463,7 +1478,7 @@ def apple_profile_url(order, links):
 
 
 # نوع اتصال همان‌طور که در منوی VPN خود گوشی نوشته شده، تا مشتری همان را انتخاب کند
-MANUAL_TYPE = {"ikev2": "IKEv2/IPSec MSCHAPv2", "l2tp": "L2TP/IPSec PSK"}
+MANUAL_TYPE = {"ikev2": "IKEv2/IPSec MSCHAPv2", "l2tp": "L2TP/IPSec PSK", "pptp": "PPTP"}
 
 
 def ipsec_manual_lines(links, order, code=lambda v: f"<code>{html.escape(v)}</code>", text=html.escape):
