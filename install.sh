@@ -144,24 +144,9 @@ make_shortcut() {
 # Tifusi launcher, written identically by the Tifusi Panel and Tifusi Bot installers.
 #   tifusi panel [action]   Tifusi Panel operations menu (/usr/local/bin/tifusi-panel)
 #   tifusi bot              Tifusi Bot installer menu (/usr/local/bin/tifusi-bot)
-#   tifusi app              Latest Tifusi VPN Android release
 # Without one of these, the only installed component opens directly, so `tifusi update` keeps working.
 
 BIN=/usr/local/bin
-APP_REPO="javadtifusi-eng/Tifusi-VPN"
-# tifusi.versionBase in the app's gradle.properties: release vN is shown in the app as 1.(N - base).
-APP_VERSION_BASE=26
-
-app_info() {
-  local tag
-  tag=$(curl -fsSL "https://api.github.com/repos/$APP_REPO/releases/latest" 2>/dev/null | grep -m1 '"tag_name"' | cut -d'"' -f4)
-  if [[ ! "$tag" =~ ^v[0-9]+$ ]]; then
-    echo "Could not read the latest Tifusi VPN release from GitHub."
-    return 1
-  fi
-  echo "Tifusi VPN for Android, latest version: 1.$(( ${tag#v} - APP_VERSION_BASE ))"
-  echo "Download: https://github.com/$APP_REPO/releases/latest/download/tifusi-vpn.apk"
-}
 
 open_component() {
   local name=$1
@@ -175,7 +160,6 @@ open_component() {
 
 case "${1:-}" in
   panel|bot) open_component "$@" ;;
-  app) app_info; exit $? ;;
 esac
 
 installed=()
@@ -189,24 +173,22 @@ fi
 
 if [ -n "${1:-}" ]; then
   echo "Unknown command: $1"
-  echo "Usage: tifusi panel [action] | tifusi bot | tifusi app"
+  echo "Usage: tifusi panel [action] | tifusi bot"
   exit 1
 fi
 
 echo "1) Tifusi Panel"
 echo "2) Tifusi Bot"
-echo "3) Tifusi VPN app"
 read -r -p "Choose: " choice < /dev/tty
 case "$choice" in
   1) open_component panel ;;
   2) open_component bot ;;
-  3) app_info ;;
   *) echo "Invalid choice."; exit 1 ;;
 esac
 TIFUSI_LAUNCHER
     place_command "$tmp" "$bin/tifusi"
     rm -f "$tmp" "$bin/qashang"
-    ok "Commands ready: 'tifusi bot' opens this menu, 'tifusi app' shows the latest Tifusi VPN app"
+    ok "Commands ready: 'tifusi bot' opens this menu"
 }
 
 # ---------- Full install ----------
