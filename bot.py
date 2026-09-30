@@ -1443,33 +1443,49 @@ async def send_order_qr(context, chat_id, order):
         return False
 
 
+def apple_profile_url(order, links):
+    """لینک نصب یک‌لمسی پروفایل آیفون برای همین سرویس (IKEv2 یا L2TP)؛ None اگر پنل نداد."""
+    key = "l2tp_configs" if order["protocol"] == "l2tp" else "ikev2_configs"
+    cfgs = (links or {}).get(key) or []
+    return cfgs[0].get("mobileconfig_url") if cfgs else None
+
+
+def l2tp_manual_lines(links, fallback_order=None, code=lambda v: f"<code>{html.escape(v)}</code>", text=html.escape):
+    """اطلاعات ورود دستی L2TP (نام کاربری، رمز، آدرس، سکرت)؛ لیست خالی اگر L2TP نیست.
+    code/text: قالب مقدارها و متن ساده — HTML برای تحویل، Markdown برای «سرویس‌های من»."""
+    l2tp = (links or {}).get("l2tp_configs") or []
+    if l2tp:
+        lines = [f"👤 نام کاربری: {code(l2tp[0]['username'])}",
+                 f"🔑 رمز عبور: {code(l2tp[0]['password'])}"]
+        for cfg in l2tp:
+            if len(l2tp) > 1:
+                lines.append(f"\n📍 {text(cfg.get('remark') or cfg['server'])}")
+            lines.append(f"🌐 آدرس: {code(cfg['server'])}")
+            if cfg.get("psk"):
+                lines.append(f"🔐 سکرت: {code(cfg['psk'])}")
+        return lines
+    if fallback_order is not None and fallback_order["protocol"] == "l2tp" and fallback_order["password"]:
+        # پنل جواب نداد: دست‌کم نام کاربری و رمزی که با آن ساخته شد
+        return [f"👤 نام کاربری: {code(fallback_order['username'])}",
+                f"🔑 رمز عبور: {code(fallback_order['password'])}"]
+    return []
+
+
 def delivery_details_html(order, panel, links):
     """بعد از بارکد به همین ترتیب: پروفایل آیفون، شناسه، اطلاعات ورود IKEv2/L2TP و لینک اپ — بدون متن آموزشی.
     رمز از خود پنل خوانده می‌شود نه از سفارش، تا همیشه همانی باشد که نود واقعاً چک می‌کند."""
     esc = html.escape
-    ikev2 = (links or {}).get("ikev2_configs") or []
-    l2tp = (links or {}).get("l2tp_configs") or []
     parts = []
-    if ikev2 and ikev2[0].get("mobileconfig_url"):
-        parts.append(f"🍎 نصب پروفایل آیفون:\n{esc(ikev2[0]['mobileconfig_url'])}")
+    apple_url = apple_profile_url(order, links)
+    if apple_url:
+        parts.append(f"🍎 نصب پروفایل آیفون:\n{esc(apple_url)}")
     parts.append(f"🆔 شناسه: <code>{esc(app_code_text(order))}</code>")
 
-    # فقط L2TP: IKEv2 با یک لمس پروفایل نصب می‌شود، پس مشتری هیچ‌وقت آدرس و رمز را دستی وارد
-    # نمی‌کند و فرستادنشان جز سردرگمی چیزی ندارد. L2TP نصب‌کننده‌ی یک‌لمسی ندارد و بدون این‌ها وصل نمی‌شود.
-    if l2tp:
-        lines = [f"👤 نام کاربری: <code>{esc(l2tp[0]['username'])}</code>",
-                 f"🔑 رمز عبور: <code>{esc(l2tp[0]['password'])}</code>"]
-        for cfg in l2tp:
-            if len(l2tp) > 1:
-                lines.append(f"\n📍 {esc(cfg.get('remark') or cfg['server'])}")
-            lines.append(f"🌐 آدرس: <code>{esc(cfg['server'])}</code>")
-            if cfg.get("psk"):
-                lines.append(f"🔐 سکرت: <code>{esc(cfg['psk'])}</code>")
-        parts.append("\n".join(lines))
-    elif order["protocol"] == "l2tp" and order["password"]:
-        # پنل جواب نداد: دست‌کم نام کاربری و رمزی که با آن ساخته شد
-        parts.append(f"👤 نام کاربری: <code>{esc(order['username'])}</code>\n"
-                     f"🔑 رمز عبور: <code>{esc(order['password'])}</code>")
+    # فقط L2TP: IKEv2 را فقط با پروفایل یا اپ نصب می‌کنند و آدرس و رمزش جز سردرگمی چیزی ندارد.
+    # L2TP را خیلی‌ها (ویندوز، اندرویدهای قدیمی، مودم) دستی وارد می‌کنند، پس با پروفایل آیفون هم می‌آید.
+    manual = l2tp_manual_lines(links, order)
+    if manual:
+        parts.append("\n".join(manual))
 
     parts.append(f"📲 Tifusi VPN:\n{esc(APP_ANDROID_URL)}")
     return "\n\n".join(parts)
@@ -1489,8 +1505,7 @@ async def deliver_service(context, chat_id, order, panel):
             log.warning("fetching IPsec details for %s failed: %s", order["username"], e)
 
     details = delivery_details_html(order, panel, links)
-    ikev2 = (links or {}).get("ikev2_configs") or []
-    apple_url = ikev2[0].get("mobileconfig_url") if ikev2 else None
+    apple_url = apple_profile_url(order, links)
     card = await asyncio.to_thread(delivery_card_png, order)
     if card:
         # داخل تصویر فقط نشان و بارکد است: تلگرام هیچ نقطه‌ای از یک عکس را قابل لمس نمی‌کند،
@@ -1580,6 +1595,7 @@ async def show_service_detail(query, uid, oid):
 
     # لینک و شناسه از پنل خوانده می‌شوند نه از سفارش: اگر آدرس عمومی پنل عوض شده
     # باشد (مثلاً پورت داشبورد تغییر کرده)، مقدار ذخیره‌شده‌ی قدیمی دیگر باز نمی‌شود.
+    fresh = None
     if panel:
         try:
             fresh = await asyncio.to_thread(panel_client(panel).links, o["username"])
@@ -1610,11 +1626,18 @@ async def show_service_detail(query, uid, oid):
              f"🆔 شناسه: `{app_code_text(o)}`\n"
              f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`\n"
              f"📲 اندروید: {APP_ANDROID_URL}")
+    # رمز و سکرت از خود پنل، تا همیشه همانی باشد که نود واقعاً چک می‌کند
+    manual = l2tp_manual_lines(fresh, o, code=lambda v: f"`{v}`", text=md)
+    if manual:
+        creds += "\n\n🔧 اتصال دستی L2TP:\n" + "\n".join(manual)
+    apple_url = apple_profile_url(o, fresh) if o["protocol"] in IPSEC_SERVICES else None
     text = (f"{md(service_name(o['protocol']))} — #{o['id']}\n"
             f"🖥 پنل: {md(pname)}\n\n{creds}\n\n{usage_line}\n"
             f"⏳ {remaining_text(o['expire_at'])} | 🕓 {dt}")
     rows = []
     if o["status"] == "active":
+        if apple_url:
+            rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
         rows.append([btn("♻️ تمدید سرویس", f"renew:{o['id']}")])
         refresh = btn("🔄 بروزرسانی اطلاعات", f"svc:{o['id']}")
         rows.append([btn("📷 QR code", f"qr:{o['id']}"), refresh] if o["sub_url"] else [refresh])
