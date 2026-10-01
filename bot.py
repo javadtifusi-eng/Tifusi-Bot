@@ -1524,15 +1524,17 @@ def ipsec_manual_lines(links, order, code=lambda v: f"<code>{html.escape(v)}</co
 # ---------- راهنمای اتصال با دکمه (بعد از خرید) ----------
 # به‌جای ریختن همه‌ی روش‌ها زیر کارت سرویس، مشتری دکمه‌ی گوشی خودش را می‌زند و فقط همان روش را
 # می‌بیند؛ دکمه‌های زیر راهنما همان پیام را عوض می‌کنند تا صفحه شلوغ نشود.
-GUIDE_LABELS = {"ikev2": "🤖 اندروید جدید (IKEv2)", "l2tp": "🤖 اندروید قدیمی (L2TP)", "which": "❓ نمی‌دانم گوشی‌ام کدام است"}
+GUIDE_LABELS = {"ikev2": "🤖 اندروید جدید (IKEv2)", "l2tp": "🤖 اندروید قدیمی (L2TP)",
+                "pptp": "🦖 گوشی خیلی قدیمی (PPTP)", "which": "❓ نمی‌دانم گوشی‌ام کدام است"}
 
 
 def guide_kinds(order, links):
     """روش‌هایی که این سفارش واقعاً دارد: IKEv2 و/یا L2TP، به‌اضافه‌ی «کدام؟» وقتی هر دو هست."""
-    have = [k for k in ("ikev2", "l2tp") if (links or {}).get(f"{k}_configs")]
-    if not have and order["protocol"] in ("ikev2", "l2tp"):
+    # PPTP comes last: weak encryption, kept for phones where nothing else connects.
+    have = [k for k in ("ikev2", "l2tp", "pptp") if (links or {}).get(f"{k}_configs")]
+    if not have and order["protocol"] in ("ikev2", "l2tp", "pptp"):
         have = [order["protocol"]]
-    return have + (["which"] if len(have) == 2 else [])
+    return have + (["which"] if len(have) >= 2 else [])
 
 
 def guide_markup(oid, kinds, current=None):
@@ -1549,6 +1551,7 @@ def guide_html(order, links, kind):
                 "تنظیمات گوشی ← <b>VPN</b> ← <b>افزودن</b> ← روی <b>«نوع»</b> بزنید:\n\n"
                 f"• اگر <b>{esc(MANUAL_TYPE['ikev2'])}</b> را دیدید ← دکمه‌ی «اندروید جدید (IKEv2)»\n"
                 f"• اگر نبود ← دکمه‌ی «اندروید قدیمی (L2TP)»\n\n"
+                "• اگر هیچ‌کدام وصل نشد ← دکمه‌ی «گوشی خیلی قدیمی (PPTP)»\n\n"
                 "💡 IKEv2های «بدون نام کاربری» (PSK و RSA) به کار ما نمی‌آیند؛ آن گوشی‌ها L2TP دارند.\n"
                 "💡 اگر گزینه‌ها خاکستری و قفل بود، اول برای گوشی قفل صفحه (پین یا الگو) بگذارید.")
     cfgs = (links or {}).get(f"{kind}_configs") or []
@@ -1561,6 +1564,16 @@ def guide_html(order, links, kind):
                 f"🆔 شناسه‌ی IPSec: {code(cfg['username'])}\n"
                 f"🔒 گواهی IPSec CA: «استفاده از گواهی‌های سیستم»\n"
                 f"📜 مجوز سرور IPSec: «از سرور دریافت شود»\n"
+                f"👤 نام کاربری: {code(cfg['username'])}\n"
+                f"🔑 رمز عبور: {code(cfg['password'])}\n\n"
+                f"ذخیره ← روی VPN بزنید ← اتصال ✅")
+    if kind == "pptp":
+        return (f"🦖 <b>گوشی خیلی قدیمی — PPTP</b>\n"
+                f"(آخرین راه: رمزنگاری‌اش ضعیف است؛ فقط اگر IKEv2 و L2TP وصل نشد)\n\n"
+                f"تنظیمات ← VPN ← افزودن، و این‌ها را بزنید (روی هر مقدار بزنید کپی می‌شود):\n\n"
+                f"🧩 نوع: {code(MANUAL_TYPE['pptp'])}\n"
+                f"🌐 آدرس سرور: {code(cfg['server'])}\n"
+                f"🔒 رمزگذاری PPP (MPPE): روشن\n"
                 f"👤 نام کاربری: {code(cfg['username'])}\n"
                 f"🔑 رمز عبور: {code(cfg['password'])}\n\n"
                 f"ذخیره ← روی VPN بزنید ← اتصال ✅")
@@ -1617,7 +1630,7 @@ async def deliver_service(context, chat_id, order, panel):
                    f"📦 حجم: {html.escape(vol_text(order['volume_gb']))}\n"
                    f"📅 انقضا: {dt}")
         rows = []
-        guide = order["protocol"] in ("ikev2", "l2tp")
+        guide = order["protocol"] in ("ikev2", "l2tp", "pptp")
         if guide:
             for k in guide_kinds(order, links):
                 rows.append([InlineKeyboardButton(GUIDE_LABELS[k], callback_data=f"how:{k}:{order['id']}")])
@@ -1732,7 +1745,7 @@ async def show_service_detail(query, uid, oid):
     creds = (f"👤 یوزرنیم: `{o['username']}`\n"
              f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`")
     # رمز و سکرت از خود پنل، تا همیشه همانی باشد که نود واقعاً چک می‌کند
-    guide = o["protocol"] in ("ikev2", "l2tp")
+    guide = o["protocol"] in ("ikev2", "l2tp", "pptp")
     manual = [] if guide else ipsec_manual_lines(fresh, o, code=lambda v: f"`{v}`", text=md)
     if manual:
         creds += "\n\n🔧 اطلاعات اتصال (اندروید و ویندوز):\n" + "\n".join(manual)
