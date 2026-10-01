@@ -987,6 +987,15 @@ def plan_line(p):
 
 
 async def safe_edit(query, text, reply_markup=None, parse_mode=None):
+    msg = query.message
+    if msg and msg.photo and (msg.caption or "").startswith("🛍"):
+        # «My services» picture: Telegram cannot turn a photo into text, so send the text and drop the photo.
+        try:
+            await msg.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+            await msg.delete()
+            return
+        except Exception:
+            pass
     try:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     except Exception:
@@ -1464,14 +1473,134 @@ def phone_card_details(img, d, order, y, font, fa, width):
             d.line([L + 30, yy + row_h, R - 30, yy + row_h], fill=PC_HAIR, width=2)
         yy += row_h
     y = bottom + 34
-    pill = fa("فعال")
+    # what to do next, pointing down at the buttons under the photo
+    hint = fa("برای اتصال، دکمه‌ی گوشی خود را بزنید")
     f_p = font("Bold", 30)
-    pw = width(pill, f_p) + 76
+    pw = width(hint, f_p) + 100
     px = (CARD_W - pw) // 2
-    d.rounded_rectangle([px, y, px + pw, y + 58], radius=29, fill="#3ddc84")
-    d.ellipse([px + pw - 36, y + 23, px + pw - 24, y + 35], fill="#0b3b20")
-    d.text((px + 24, y + 8), pill, font=f_p, fill="#0b3b20")
-    return y + 58
+    d.rounded_rectangle([px, y, px + pw, y + 62], radius=31, fill="#3ddc84")
+    ax = px + 40
+    d.polygon([(ax - 13, y + 24), (ax + 13, y + 24), (ax, y + 40)], fill="#0b3b20")
+    d.text((px + 66, y + 10), hint, font=f_p, fill="#0b3b20")
+    return y + 62
+
+
+def service_status_png(order, used_gb=None):
+    """کارت «سرویس‌های من» برای سرویس گوشی: هر بار با مصرف همان لحظه ساخته می‌شود.
+    used_gb: گیگ مصرف‌شده از پنل؛ None یعنی پنل جواب نداد. None برمی‌گرداند اگر ساختن عکس ممکن نبود."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont, features
+        if not features.check("raqm"):
+            return None
+        def font(name, size):
+            return ImageFont.truetype(os.path.join(ASSET_DIR, f"Vazirmatn-{name}.ttf"), size)
+        img = phone_card_ground(Image.new("RGB", (CARD_W, 1500), CARD_GROUND))
+        d = ImageDraw.Draw(img)
+        width = lambda text, f: d.textbbox((0, 0), text, font=f)[2]
+        center = lambda y, text, f, fill: d.text(((CARD_W - width(text, f)) // 2, y), text, font=f, fill=fill)
+        L, R = 60, CARD_W - 60
+
+        # header: smaller mark and title
+        mark = Image.open(os.path.join(ASSET_DIR, "tifusi-mark.png")).convert("RGBA")
+        mark = mark.resize((160, int(160 * mark.height / mark.width)), Image.LANCZOS)
+        img.paste(mark, ((CARD_W - mark.width) // 2, 44), mark)
+        y = 44 + mark.height + 10
+        center(y, "Tifusi VPN", font("Bold", 40), "#f5f7fb")
+        y += 56
+        center(y, "وضعیت سرویس", font("Regular", 26), "#9aa3b8")
+        y += 62
+
+        now = time.time()
+        active = order["status"] == "active" and order["expire_at"] > now
+        # usage panel
+        top = y
+        total = order["volume_gb"]
+        ph = 250 if total and used_gb is not None else 190 if not total and used_gb is not None else 130
+        d.rounded_rectangle([L, top, R, top + ph], radius=30, fill=PC_PANEL, outline=PC_EDGE, width=2)
+        f_lab = font("Regular", 29)
+        _pc_icon(d, "volume", R - 62, top + 62, PC_ROW["volume"])
+        lab = "مصرف"
+        d.text((R - 110 - width(lab, f_lab), top + 40), lab, font=f_lab, fill="#9aa3b8")
+        if not total:
+            big = "نامحدود ∞"
+            d.text((L + 34, top + 34), big, font=font("Bold", 44), fill="#3ddc84")
+            used_line = f"{used_gb:g} گیگ مصرف شده" if used_gb is not None else ""
+            if used_line:
+                d.text((R - 40 - width(used_line, font("Regular", 28)), top + 116), used_line, font=font("Regular", 28), fill="#c9d1e3")
+        elif used_gb is None:
+            d.text((L + 34, top + 40), "در دسترس نیست", font=font("Bold", 34), fill="#9aa3b8")
+        else:
+            frac = max(0.0, min(1.0, used_gb / total))
+            color = "#3ddc84" if frac < 0.6 else "#f97316" if frac < 0.85 else "#ff5a5f"
+            left = max(0.0, round(total - used_gb, 2))
+            num = f"{used_gb:g} / {total:g}"
+            fn = font("Bold", 46)
+            d.text((L + 34, top + 28), num, font=fn, fill="#f5f7fb")
+            d.text((L + 34 + width(num, fn) + 12, top + 44), "GB", font=font("Bold", 28), fill="#9aa3b8")
+            # the bar
+            by = top + 128
+            d.rounded_rectangle([L + 34, by, R - 34, by + 30], radius=15, fill="#232a40")
+            if frac > 0:
+                d.rounded_rectangle([L + 34, by, L + 34 + max(30, int((R - L - 68) * frac)), by + 30], radius=15, fill=color)
+            pct = f"{round(frac * 100)}%"
+            d.text((L + 34, by + 46), pct, font=font("Bold", 30), fill=color)
+            rem = f"{left:g} گیگ باقی‌مانده"
+            fr = font("Regular", 29)
+            d.text((R - 34 - width(rem, fr), by + 46), rem, font=fr, fill="#c9d1e3")
+        y = top + ph + 26
+
+        # details panel
+        rows = [("name", "نام سرویس", order["username"]), ("service", "سرویس", None),
+                ("expire", "انقضا", datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d"))]
+        row_h = 104
+        top = y
+        bottom = top + row_h * len(rows) + 16
+        d.rounded_rectangle([L, top, R, bottom], radius=30, fill=PC_PANEL, outline=PC_EDGE, width=2)
+        yy = top + 8
+        for i, (kind, label, value) in enumerate(rows):
+            cy = yy + row_h // 2
+            _pc_icon(d, kind, R - 62, cy, PC_ROW[kind])
+            d.text((R - 110 - width(label, f_lab), cy - 22), label, font=f_lab, fill="#9aa3b8")
+            if kind == "service":
+                f_c, x = font("Bold", 26), L + 30
+                for name, c in PC_PROTO:
+                    cw = width(name, f_c) + 34
+                    d.rounded_rectangle([x, cy - 23, x + cw, cy + 23], radius=23, outline=c, width=3)
+                    d.text((x + 17, cy - 19), name, font=f_c, fill=c)
+                    x += cw + 10
+            elif kind == "name":
+                try:
+                    fv = ImageFont.truetype(A_MONO_PATH, 36)
+                except OSError:
+                    fv = font("Bold", 34)
+                d.text((L + 34, cy - 22), value, font=fv, fill="#f5f7fb")
+            else:
+                d.text((L + 34, cy - 26), value, font=font("Bold", 34), fill="#f5f7fb")
+            if i < len(rows) - 1:
+                d.line([L + 30, yy + row_h, R - 30, yy + row_h], fill=PC_HAIR, width=2)
+            yy += row_h
+        y = bottom + 34
+
+        # status pill with days left
+        days = max(0, int((order["expire_at"] - now) // 86400))
+        pill = f"فعال · {days} روز مانده" if active else "منقضی شده"
+        bg, ink = ("#3ddc84", "#0b3b20") if active and days > 3 else ("#f97316", "#3b1a05") if active else ("#ff5a5f", "#3b0a0b")
+        f_p = font("Bold", 30)
+        pw = width(pill, f_p) + 76
+        px = (CARD_W - pw) // 2
+        d.rounded_rectangle([px, y, px + pw, y + 58], radius=29, fill=bg)
+        d.ellipse([px + pw - 36, y + 23, px + pw - 24, y + 35], fill=ink)
+        d.text((px + 24, y + 8), pill, font=f_p, fill=ink)
+        y += 58
+
+        buf = io.BytesIO()
+        img.crop((0, 0, CARD_W, y + 50)).save(buf, format="PNG", optimize=True)
+        buf.seek(0)
+        buf.name = "tifusi-status.png"
+        return buf
+    except Exception as e:
+        log.warning("service status card failed: %s", e)
+        return None
 
 
 def delivery_card_png(order):
@@ -1522,11 +1651,22 @@ def delivery_card_png(order):
         y = 60 + mark.height + 16
         d.text(((CARD_W - width("Tifusi VPN", f_title)) // 2, y), "Tifusi VPN", font=f_title, fill=CARD_TEXT)
         y += 62
-        t = fa("اشتراک شما فعال شد")
-        d.text(((CARD_W - width(t, f_sub)) // 2, y), t, font=f_sub, fill=CARD_MUTED)
+        if phone:
+            t, f_s = fa("سرویس شما فعال شد"), font("Bold", 34)
+            tw = width(t, f_s)
+            tx = (CARD_W - tw) // 2 + 26
+            d.text((tx, y - 6), t, font=f_s, fill="#3ddc84")
+            # a green tick disc before the words (on their right)
+            cx, cy = tx + tw + 30, y + 20
+            d.ellipse([cx - 20, cy - 20, cx + 20, cy + 20], fill="#3ddc84")
+            d.line([cx - 9, cy + 1, cx - 2, cy + 8, cx + 10, cy - 7], fill="#0b3b20", width=5)
+        else:
+            t = fa("اشتراک شما فعال شد")
+            d.text(((CARD_W - width(t, f_sub)) // 2, y), t, font=f_sub, fill=CARD_MUTED)
 
         y += 56
         if phone:
+            y += 22  # room between «active» and the panel's colour strip
             y = phone_card_details(img, d, order, y, font, fa, width)
             buf = io.BytesIO()
             img.crop((0, 0, CARD_W, y + 50)).save(buf, format="PNG", optimize=True)
@@ -1841,7 +1981,7 @@ def android_png(info):
     kinds = info["kinds"]
     servers = info.get("servers") or {}
     one_server = len(set(servers.values()) | {info["server"]}) == 1
-    H = 800 + 190 * len(kinds)
+    H = 900 + 190 * len(kinds)
     img = Image.new("RGB", (A_W, H), A_GROUND)
     d = ImageDraw.Draw(img)
     R = A_W - 70  # right edge of the content
@@ -1870,10 +2010,11 @@ def android_png(info):
         d.text((cx - d.textlength(name, font=f_name) / 2, base + 14), name, font=f_name,
                fill=A_DROID if name == "Android" else A_TEXT)
     d.line([A_W // 2, base - 90, A_W // 2, base + 50], fill=A_EDGE, width=2)
-    center(base + 100, "تنظیمات  ‹  VPN  ‹  افزودن", a_font("Regular", 32), A_MUTED)
+    center(base + 88, "اتصال در اندروید", a_font("Bold", 46), A_TEXT)
+    center(base + 156, "تنظیمات  ‹  VPN  ‹  افزودن", a_font("Regular", 32), A_MUTED)
 
     # server, username and password come from the copy buttons under the photo
-    y = base + 150
+    y = base + 220
 
     # type options
     y += 16
@@ -1916,14 +2057,18 @@ def android_png(info):
     y += 6
     center(y, "ذخیره  ‹  روی VPN بزنید  ‹  اتصال", a_font("Bold", 34), A_TEXT)
     y += 70
-    hint = "دکمه‌های کپی، زیر همین عکس"
-    f_h = a_font("Regular", 30)
-    center(y, hint, f_h, A_DROID)
-    tx = (A_W - d.textlength(hint, font=f_h)) / 2 - 34
-    d.polygon([(tx - 12, y + 18), (tx + 12, y + 18), (tx, y + 34)], fill=A_DROID)
-    y += 60
+    # pointing down at the copy buttons under the photo
+    hint = "هر مقدار را با دکمه‌های زیر کپی کنید"
+    f_h = a_font("Bold", 30)
+    pw = d.textlength(hint, font=f_h) + 100
+    px = (A_W - pw) / 2
+    d.rounded_rectangle([px, y, px + pw, y + 62], radius=31, fill=A_DROID)
+    ax = px + 40
+    d.polygon([(ax - 13, y + 24), (ax + 13, y + 24), (ax, y + 40)], fill="#0b3b20")
+    d.text((px + 66, y + 10), hint, font=f_h, fill="#0b3b20")
+    y += 62
 
-    img = img.crop((0, 0, A_W, min(H, y + 30)))
+    img = img.crop((0, 0, A_W, min(H, y + 50)))
     out = io.BytesIO()
     img.save(out, "PNG", optimize=True)
     return out.getvalue()
@@ -2123,8 +2268,8 @@ async def deliver_service(context, chat_id, order, panel):
         rows = []
         guide = order["protocol"] in ("ikev2", "l2tp", "pptp")
         if guide:
-            # The picture already carries name, service, volume and expiry.
-            caption = "✅ <b>سرویس شما فعال شد</b>\n\n👇 برای اتصال، دکمه‌ی گوشی خود را بزنید"
+            # The picture carries everything: «active», name, service, volume, expiry and what to tap.
+            caption = None
             rows.append([InlineKeyboardButton(ANDROID_BTN, callback_data=f"andr:{order['id']}")])
         if apple_url:
             # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
@@ -2222,20 +2367,23 @@ async def show_service_detail(query, uid, oid):
 
     # مصرف از همان پنلی که سرویس روی آن ساخته شده
     usage_line = "📊 وضعیت مصرف: در دسترس نیست (پنل پاسخ نمی‌دهد)"
-    if not o["volume_gb"]:
-        usage_line = "📦 حجم: نامحدود ♾ (بدون محدودیت مصرف)"
-    elif panel:
+    phone = o["protocol"] in ("ikev2", "l2tp", "pptp")
+    used = None
+    # سرویس گوشی مصرف را در عکس نشان می‌دهد، حتی برای نامحدود
+    if panel and (o["volume_gb"] or phone):
         try:
             used_bytes = await asyncio.to_thread(panel_client(panel).usage, o["username"])
             if used_bytes is not None:
                 used = gb(used_bytes)
-                total = o["volume_gb"]
-                left = max(0, round(total - used, 2))
-                usage_line = f"📊 وضعیت مصرف:\n📦 {total} گیگ | 🔻 {used} گیگ | ✅ {left} گیگ باقی"
         except Exception:
             pass
+    if not o["volume_gb"]:
+        usage_line = "📦 حجم: نامحدود ♾ (بدون محدودیت مصرف)"
+    elif used is not None:
+        total = o["volume_gb"]
+        left = max(0, round(total - used, 2))
+        usage_line = f"📊 وضعیت مصرف:\n📦 {total} گیگ | 🔻 {used} گیگ | ✅ {left} گیگ باقی"
 
-    phone = o["protocol"] in ("ikev2", "l2tp", "pptp")
     creds = f"👤 یوزرنیم: `{o['username']}`"
     if not phone:
         creds += f"\n🔗 لینک اشتراک: `{o['sub_url'] or '-'}`"
@@ -2261,7 +2409,40 @@ async def show_service_detail(query, uid, oid):
         rows.append([btn("📷 QR code", f"qr:{o['id']}"), refresh] if o["sub_url"] and not phone else [refresh])
         rows.append([btn("❌ بازگشت وجه / حذف سرویس", f"delreq:{o['id']}")])
     rows.append([btn("🏠 بازگشت به لیست سرویس‌ها", "menu:services")])
-    await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows), parse_mode="Markdown")
+    markup = InlineKeyboardMarkup(rows)
+    if phone:
+        png = await asyncio.to_thread(service_status_png, o, used)
+        if png and await show_status_photo(query, png, o, markup):
+            return
+    await safe_edit(query, text, reply_markup=markup, parse_mode="Markdown")
+
+
+STATUS_MARK = "🛍"  # caption start that marks a «My services» picture (safe_edit replaces it with text)
+
+
+async def show_status_photo(query, png, order, markup):
+    """The service picture: switched in place when the message is already a photo (refresh, or back
+    from the Android picture), otherwise sent fresh and the text message it replaces deleted.
+    False when Telegram refused, so the caller falls back to text."""
+    from telegram import InputMediaPhoto
+    caption = f"{STATUS_MARK} سرویس #{order['id']} · <code>{html.escape(order['username'])}</code>"
+    msg = query.message
+    try:
+        if msg and msg.photo and not (msg.caption or "").startswith("✅"):
+            await query.edit_message_media(InputMediaPhoto(png, caption=caption, parse_mode="HTML"), reply_markup=markup)
+        else:
+            await msg.reply_photo(png, caption=caption, parse_mode="HTML", reply_markup=markup)
+            if msg and not msg.photo:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+        return True
+    except Exception as e:
+        if "not modified" in str(e).lower():
+            return True
+        log.warning("status picture for order %s failed: %s", order["id"], e)
+        return False
 
 
 # ---------- حساب کاربری ----------
@@ -3412,14 +3593,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             png = await asyncio.to_thread(android_png, android_info(o, links))
             if png and msg:
                 # The picture carries the values; the copy buttons under it copy them in one tap.
+                cap = None  # the picture says it: «Android connect», and copy with the buttons below
                 try:
-                    await msg.reply_photo(png, caption="🤖 <b>اتصال در اندروید</b>\n👇 هر مقدار را با دکمه‌های زیر کپی کنید",
-                                          parse_mode="HTML", reply_markup=markup)
+                    if msg.photo and (msg.caption or "").startswith(STATUS_MARK):
+                        # On the «My services» picture: switch it in place; «back» switches it back.
+                        from telegram import InputMediaPhoto
+                        await query.edit_message_media(InputMediaPhoto(png, caption=cap), reply_markup=markup)
+                    else:
+                        await msg.reply_photo(png, caption=cap, reply_markup=markup)
                     return
                 except Exception as e:
                     log.warning("android picture for order %s failed: %s", o["id"], e)
             # No picture: the text version, as a new message under the card or in place on «My services».
-            if msg and msg.photo:
+            if msg and msg.photo and not (msg.caption or "").startswith(STATUS_MARK):
                 await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
             else:
                 await safe_edit(query, text, reply_markup=markup, parse_mode="HTML")
