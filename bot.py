@@ -1649,6 +1649,16 @@ def android_html(order, links):
     return "\n".join(lines)
 
 
+def android_info(order, links):
+    """Values for android_png: the first method's login and, per method, its own server and key."""
+    kinds = [k for k in ("ikev2", "l2tp", "pptp") if (links or {}).get(f"{k}_configs")] or [order["protocol"]]
+    cfgs = {k: guide_cfg(order, links, k) for k in kinds}
+    first = cfgs[kinds[0]]
+    return {"server": first["server"], "username": first["username"], "password": first["password"],
+            "kinds": kinds, "psk": cfgs.get("l2tp", {}).get("psk"),
+            "servers": {k: c["server"] for k, c in cfgs.items()}}
+
+
 def android_copy_rows(order, links):
     """دکمه‌های «کپی» زیر پیام اندروید، دوتا دوتا: سرور، نام کاربری، رمز و کلید L2TP اگر هست.
     روی تلگرام یا کتابخانه‌ی قدیمی که دکمه‌ی کپی ندارد، خالی برمی‌گردد و متن بالا کافی است."""
@@ -1659,6 +1669,151 @@ def android_copy_rows(order, links):
              ("📋 کپی رمز", first["password"]), ("📋 کپی کلید L2TP", l2tp.get("psk"))]
     buttons = [b for b in (copy_text_button(label, str(v)) for label, v in items if v and v != "-") if b]
     return [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+
+
+# ---------- عکس «اتصال در اندروید»: لوگوها و نوع‌ها؛ سرور، یوزر و رمز با دکمه‌های کپی زیر عکس ----------
+MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+A_GROUND, A_PANEL, A_FIELD, A_EDGE = "#0a0a0a", "#141414", "#1c1c1c", "#2c2c2c"
+A_TEXT, A_MUTED, A_DIM = "#f5f5f5", "#9a9a9a", "#5e5e5e"
+A_DROID = "#3ddc84"
+# Traffic-light order: green first choice, yellow if it is missing, red last resort.
+A_TINT = {"ikev2": "#3ddc84", "l2tp": "#f5c518", "pptp": "#ff5a5f"}
+A_TYPE = {"ikev2": "IKEv2/IPSec MSCHAPv2", "l2tp": "L2TP/IPSec PSK", "pptp": "PPTP"}
+A_W = 1080
+
+
+def a_font(name, size):
+    from PIL import ImageFont
+    return ImageFont.truetype(os.path.join(ASSET_DIR, f"Vazirmatn-{name}.ttf"), size)
+
+
+def a_mono(size):
+    from PIL import ImageFont
+    # Mono so a password's l/1 and O/0 can be told apart; Vazirmatn if the system font is missing.
+    try:
+        return ImageFont.truetype(MONO, size)
+    except OSError:
+        return a_font("Bold", size)
+
+
+def a_fit(d, text, make, size, width):
+    """The largest font from make(size) downwards that keeps text within width."""
+    f = make(size)
+    while size > 22 and d.textlength(text, font=f) > width:
+        size -= 2
+        f = make(size)
+    return f
+
+
+def a_droid(d, cx, top, r):
+    d.pieslice([cx - r, top, cx + r, top + 2 * r], 180, 360, fill=A_DROID)
+    ey = top + int(r * 0.55)
+    for dx in (-0.42, 0.42):
+        ex = cx + int(r * dx)
+        d.ellipse([ex - r * 0.1, ey - r * 0.1, ex + r * 0.1, ey + r * 0.1], fill=A_GROUND)
+    for side in (-1, 1):
+        x0, y0 = cx + side * int(r * 0.5), top + int(r * 0.12)
+        d.line([x0, y0, x0 + side * int(r * 0.28), y0 - int(r * 0.42)], fill=A_DROID, width=max(3, r // 10))
+
+
+def android_png(info):
+    """info: server, username, password, kinds (in order), and per kind an optional server/psk:
+    {"server":…, "username":…, "password":…, "kinds":["ikev2","l2tp","pptp"], "psk":…, "servers":{kind: server}}"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont, features
+        if not features.check("raqm"):
+            return None
+    except Exception:
+        return None
+    kinds = info["kinds"]
+    servers = info.get("servers") or {}
+    one_server = len(set(servers.values()) | {info["server"]}) == 1
+    H = 800 + 190 * len(kinds)
+    img = Image.new("RGB", (A_W, H), A_GROUND)
+    d = ImageDraw.Draw(img)
+    R = A_W - 70  # right edge of the content
+    L = 70
+
+    def rtl(x_right, y, text, f, fill):
+        d.text((x_right - d.textlength(text, font=f), y), text, font=f, fill=fill)
+
+    def center(y, text, f, fill):
+        d.text(((A_W - d.textlength(text, font=f)) / 2, y), text, font=f, fill=fill)
+
+    # header
+    # Android and Tifusi side by side, each with its name under it
+    base = 190  # the logos' common bottom line
+    f_name = a_font("Bold", 34)
+    for cx, name in ((A_W // 2 - 220, "Android"), (A_W // 2 + 220, "Tifusi")):
+        if name == "Android":
+            a_droid(d, cx, base - 88, 88)  # same height as the Tifusi mark
+        else:
+            try:
+                mark = Image.open(os.path.join(ASSET_DIR, "tifusi-mark.png")).convert("RGBA")
+                mark = mark.resize((int(mark.width * 1.45), int(mark.height * 1.45)), Image.LANCZOS)
+                img.paste(mark, (cx - mark.width // 2, base - mark.height), mark)
+            except OSError:
+                pass
+        d.text((cx - d.textlength(name, font=f_name) / 2, base + 14), name, font=f_name,
+               fill=A_DROID if name == "Android" else A_TEXT)
+    d.line([A_W // 2, base - 90, A_W // 2, base + 50], fill=A_EDGE, width=2)
+    center(base + 100, "تنظیمات  ‹  VPN  ‹  افزودن", a_font("Regular", 32), A_MUTED)
+
+    # server, username and password come from the copy buttons under the photo
+    y = base + 150
+
+    # type options
+    y += 16
+    rtl(R, y, "روی «نوع» بزنید:" if len(kinds) > 1 else "نوع:", a_font("Bold", 36), A_TEXT)
+    y += 66
+    cond = {0: "اگر در لیست هست", 1: "اگر نبود", 2: "اگر وصل نشد"}
+    for i, k in enumerate(kinds):
+        tint = A_TINT[k]
+        box = [L, y, R, y + 164]
+        d.rounded_rectangle(box, radius=26, fill=A_PANEL, outline=tint, width=3)
+        # number disc on the right
+        cx, cy = R - 58, y + 58
+        d.ellipse([cx - 30, cy - 30, cx + 30, cy + 30], fill=tint)
+        n = "123"[i]
+        fn = a_font("Bold", 34)
+        d.text((cx - d.textlength(n, font=fn) / 2, cy - 26), n, font=fn, fill=A_GROUND)
+        if len(kinds) > 1:
+            rtl(R - 108, y + 30, ("pptp" in k and i > 0 and cond[2]) or cond[min(i, 1)], a_font("Regular", 30), A_MUTED)
+        # the type name, exactly as the phone writes it
+        ft = a_fit(d, A_TYPE[k], lambda s: ImageFont.truetype(MONO, s) if os.path.exists(MONO) else a_font("Bold", s), 40, R - L - 340)
+        d.text((L + 30, y + 26), A_TYPE[k], font=ft, fill=tint)
+        # second line: the one extra field this type needs
+        f_d = a_font("Regular", 30)
+        if k == "ikev2":
+            label, value = "شناسه‌ی IPSec:", "همان نام کاربری"
+        elif k == "l2tp":
+            label, value = "کلید IPSec:", info.get("psk") or "-"
+        else:
+            label, value = "رمزگذاری MPPE:", "روشن"
+        rtl(R - 108, y + 96, label, f_d, A_MUTED)
+        lw = d.textlength(label, font=f_d)
+        if k == "l2tp":
+            fv = a_fit(d, value, a_mono, 36, R - 108 - lw - 30 - L - 30)
+            d.text((R - 108 - lw - 24 - d.textlength(value, font=fv), y + 98), value, font=fv, fill=A_TEXT)
+        else:
+            rtl(R - 108 - lw - 16, y + 96, value, a_font("Bold", 30), A_TEXT)
+        y += 190
+
+    # footer
+    y += 6
+    center(y, "ذخیره  ‹  روی VPN بزنید  ‹  اتصال", a_font("Bold", 34), A_TEXT)
+    y += 70
+    hint = "دکمه‌های کپی، زیر همین عکس"
+    f_h = a_font("Regular", 30)
+    center(y, hint, f_h, A_DROID)
+    tx = (A_W - d.textlength(hint, font=f_h)) / 2 - 34
+    d.polygon([(tx - 12, y + 18), (tx + 12, y + 18), (tx, y + 34)], fill=A_DROID)
+    y += 60
+
+    img = img.crop((0, 0, A_W, min(H, y + 30)))
+    out = io.BytesIO()
+    img.save(out, "PNG", optimize=True)
+    return out.getvalue()
 
 
 # ---------- عکس راهنما: فرم «افزودن VPN» اندروید با مقدارهای خود مشتری ----------
@@ -3140,7 +3295,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             markup = InlineKeyboardMarkup(android_copy_rows(o, links)
                                           + [[InlineKeyboardButton("🔙 بازگشت به سرویس", callback_data=f"svc:{o['id']}")]])
             msg = query.message
-            # Under the delivery card (a photo) the details come as a new message; on «My services» the same message changes.
+            png = await asyncio.to_thread(android_png, android_info(o, links))
+            if png and msg:
+                # The picture carries the values; the copy buttons under it copy them in one tap.
+                try:
+                    await msg.reply_photo(png, caption="🤖 <b>اتصال در اندروید</b>\n👇 هر مقدار را با دکمه‌های زیر کپی کنید",
+                                          parse_mode="HTML", reply_markup=markup)
+                    return
+                except Exception as e:
+                    log.warning("android picture for order %s failed: %s", o["id"], e)
+            # No picture: the text version, as a new message under the card or in place on «My services».
             if msg and msg.photo:
                 await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
             else:
