@@ -1499,12 +1499,81 @@ def ipsec_manual_lines(links, order, code=lambda v: f"<code>{html.escape(v)}</co
             lines.append(f"🌐 سرور: {code(cfg['server'])}")
             if proto == "l2tp" and cfg.get("psk"):
                 lines.append(f"🔐 سکرت: {code(cfg['psk'])}")
+        # اندرویدهای ۱۰ و قدیمی‌تر IKEv2 با نام کاربری ندارند و اندرویدهای جدید L2TP را حذف کرده‌اند؛
+        # همین حساب روی L2TP هم کار می‌کند، پس با همان نام کاربری و رمز، L2TP «اگر نبود» می‌آید
+        # تا مشتری لازم نباشد بداند گوشی‌اش چه دارد.
+        l2tp = ((links or {}).get("l2tp_configs") or []) if proto == "ikev2" else []
+        if l2tp:
+            lines[0] = f"🧩 نوع: {code(MANUAL_TYPE['ikev2'])}"
+            lines.insert(0, f"1️⃣ اگر در «نوع» گزینه‌ی {text(MANUAL_TYPE['ikev2'])} هست:")
+            lines.append("")
+            lines.append(f"2️⃣ اگر نبود (اندروید قدیمی)، نوع {code(MANUAL_TYPE['l2tp'])} را بزنید:")
+            for cfg in l2tp[:1]:
+                lines.append(f"🌐 سرور: {code(cfg['server'])}")
+                if cfg.get("psk"):
+                    lines.append(f"🔐 سکرت (کلید IPsec): {code(cfg['psk'])}")
+            lines.append("👤🔑 نام کاربری و رمز: همان بالا")
         return lines
     if order["password"]:
         # پنل جواب نداد: دست‌کم نام کاربری و رمزی که با آن ساخته شد
         return [f"👤 نام کاربری: {code(order['username'])}",
                 f"🔑 رمز عبور: {code(order['password'])}"]
     return []
+
+
+# ---------- راهنمای اتصال با دکمه (بعد از خرید) ----------
+# به‌جای ریختن همه‌ی روش‌ها زیر کارت سرویس، مشتری دکمه‌ی گوشی خودش را می‌زند و فقط همان روش را
+# می‌بیند؛ دکمه‌های زیر راهنما همان پیام را عوض می‌کنند تا صفحه شلوغ نشود.
+GUIDE_LABELS = {"ikev2": "🤖 اندروید جدید (IKEv2)", "l2tp": "🤖 اندروید قدیمی (L2TP)", "which": "❓ نمی‌دانم گوشی‌ام کدام است"}
+
+
+def guide_kinds(order, links):
+    """روش‌هایی که این سفارش واقعاً دارد: IKEv2 و/یا L2TP، به‌اضافه‌ی «کدام؟» وقتی هر دو هست."""
+    have = [k for k in ("ikev2", "l2tp") if (links or {}).get(f"{k}_configs")]
+    if not have and order["protocol"] in ("ikev2", "l2tp"):
+        have = [order["protocol"]]
+    return have + (["which"] if len(have) == 2 else [])
+
+
+def guide_markup(oid, kinds, current=None):
+    rows = [[InlineKeyboardButton(GUIDE_LABELS[k], callback_data=f"how:{k}:{oid}")] for k in kinds if k != current]
+    rows.append([InlineKeyboardButton("🔙 بازگشت به سرویس", callback_data=f"svc:{oid}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def guide_html(order, links, kind):
+    esc = html.escape
+    code = lambda v: f"<code>{esc(str(v))}</code>"
+    if kind == "which":
+        return ("❓ <b>کدام را بزنم؟</b>\n\n"
+                "تنظیمات گوشی ← <b>VPN</b> ← <b>افزودن</b> ← روی <b>«نوع»</b> بزنید:\n\n"
+                f"• اگر <b>{esc(MANUAL_TYPE['ikev2'])}</b> را دیدید ← دکمه‌ی «اندروید جدید (IKEv2)»\n"
+                f"• اگر نبود ← دکمه‌ی «اندروید قدیمی (L2TP)»\n\n"
+                "💡 IKEv2های «بدون نام کاربری» (PSK و RSA) به کار ما نمی‌آیند؛ آن گوشی‌ها L2TP دارند.\n"
+                "💡 اگر گزینه‌ها خاکستری و قفل بود، اول برای گوشی قفل صفحه (پین یا الگو) بگذارید.")
+    cfgs = (links or {}).get(f"{kind}_configs") or []
+    cfg = cfgs[0] if cfgs else {"server": "-", "username": order["username"], "password": order["password"] or "-"}
+    if kind == "ikev2":
+        return (f"🤖 <b>اندروید ۱۱ به بعد — IKEv2</b>\n\n"
+                f"تنظیمات ← VPN ← افزودن، و این‌ها را بزنید (روی هر مقدار بزنید کپی می‌شود):\n\n"
+                f"🧩 نوع: {code(MANUAL_TYPE['ikev2'])}\n"
+                f"🌐 آدرس سرور: {code(cfg['server'])}\n"
+                f"🆔 شناسه‌ی IPSec: {code(cfg['username'])}\n"
+                f"🔒 گواهی IPSec CA: «استفاده از گواهی‌های سیستم»\n"
+                f"📜 مجوز سرور IPSec: «از سرور دریافت شود»\n"
+                f"👤 نام کاربری: {code(cfg['username'])}\n"
+                f"🔑 رمز عبور: {code(cfg['password'])}\n\n"
+                f"ذخیره ← روی VPN بزنید ← اتصال ✅")
+    psk = cfg.get("psk")
+    return (f"🤖 <b>اندروید قدیمی — L2TP</b>\n\n"
+            f"تنظیمات ← VPN ← افزودن، و این‌ها را بزنید (روی هر مقدار بزنید کپی می‌شود):\n\n"
+            f"🧩 نوع: {code(MANUAL_TYPE['l2tp'])}\n"
+            f"🌐 آدرس سرور: {code(cfg['server'])}\n"
+            + (f"🔐 کلید از پیش مشترک IPSec: {code(psk)}\n" if psk else "")
+            + f"🆔 شناسه‌ی IPSec و رمز L2TP: خالی بماند\n"
+            f"👤 نام کاربری: {code(cfg['username'])}\n"
+            f"🔑 رمز عبور: {code(cfg['password'])}\n\n"
+            f"ذخیره ← روی VPN بزنید ← اتصال ✅")
 
 
 def delivery_details_html(order, panel, links):
@@ -1548,6 +1617,10 @@ async def deliver_service(context, chat_id, order, panel):
                    f"📦 حجم: {html.escape(vol_text(order['volume_gb']))}\n"
                    f"📅 انقضا: {dt}")
         rows = []
+        guide = order["protocol"] in ("ikev2", "l2tp")
+        if guide:
+            for k in guide_kinds(order, links):
+                rows.append([InlineKeyboardButton(GUIDE_LABELS[k], callback_data=f"how:{k}:{order['id']}")])
         if apple_url:
             # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
             rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
@@ -1557,7 +1630,8 @@ async def deliver_service(context, chat_id, order, panel):
         try:
             await context.bot.send_photo(chat_id, card, caption=caption, parse_mode="HTML",
                                          reply_markup=InlineKeyboardMarkup(rows) if rows else None)
-            if details:
+            # IKEv2/L2TP: the guide buttons above carry the connection details, one method at a time.
+            if details and not guide:
                 await context.bot.send_message(chat_id, details, parse_mode="HTML",
                                                disable_web_page_preview=True)
             return
@@ -1658,15 +1732,21 @@ async def show_service_detail(query, uid, oid):
     creds = (f"👤 یوزرنیم: `{o['username']}`\n"
              f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`")
     # رمز و سکرت از خود پنل، تا همیشه همانی باشد که نود واقعاً چک می‌کند
-    manual = ipsec_manual_lines(fresh, o, code=lambda v: f"`{v}`", text=md)
+    guide = o["protocol"] in ("ikev2", "l2tp")
+    manual = [] if guide else ipsec_manual_lines(fresh, o, code=lambda v: f"`{v}`", text=md)
     if manual:
         creds += "\n\n🔧 اطلاعات اتصال (اندروید و ویندوز):\n" + "\n".join(manual)
+    elif guide:
+        creds += "\n\n📱 برای اطلاعات اتصال، دکمه‌ی گوشی خودتان را بزنید:"
     apple_url = apple_profile_url(o, fresh) if o["protocol"] in IPSEC_SERVICES else None
     text = (f"{md(service_name(o['protocol']))} — #{o['id']}\n"
             f"🖥 پنل: {md(pname)}\n\n{creds}\n\n{usage_line}\n"
             f"⏳ {remaining_text(o['expire_at'])} | 🕓 {dt}")
     rows = []
     if o["status"] == "active":
+        if guide:
+            for k in guide_kinds(o, fresh):
+                rows.append([InlineKeyboardButton(GUIDE_LABELS[k], callback_data=f"how:{k}:{o['id']}")])
         if apple_url:
             rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
         rows.append([btn("♻️ تمدید سرویس", f"renew:{o['id']}")])
@@ -2805,6 +2885,27 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "svc":
             await show_service_detail(query, uid, int(parts[1]))
+            return
+
+        if cmd == "how":
+            kind, o = parts[1], db.get_order(int(parts[2]))
+            if not o or o["user_id"] != uid or kind not in GUIDE_LABELS:
+                return
+            links = None
+            panel = db.get_panel(o["panel_id"])
+            if panel:
+                try:
+                    links = await asyncio.to_thread(panel_client(panel).links, o["username"])
+                except PanelError as e:
+                    log.warning("guide links for %s failed: %s", o["username"], e)
+            text = guide_html(o, links, kind)
+            markup = guide_markup(o["id"], guide_kinds(o, links), current=kind)
+            # Pressed under the service card (a photo): open the guide as a new message. Pressed under
+            # a guide: switch that same message, so the chat does not fill up with copies.
+            if query.message and query.message.photo:
+                await query.message.reply_text(text, parse_mode="HTML", reply_markup=markup)
+            else:
+                await safe_edit(query, text, reply_markup=markup, parse_mode="HTML")
             return
 
         if cmd == "qr":
