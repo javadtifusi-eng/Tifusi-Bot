@@ -1543,6 +1543,12 @@ def guide_markup(oid, kinds, current=None):
     return InlineKeyboardMarkup(rows)
 
 
+def guide_cfg(order, links, kind):
+    """The panel's login for one method; the order's own login when the panel did not answer."""
+    cfgs = (links or {}).get(f"{kind}_configs") or []
+    return cfgs[0] if cfgs else {"server": "-", "username": order["username"], "password": order["password"] or "-"}
+
+
 def guide_html(order, links, kind):
     esc = html.escape
     code = lambda v: f"<code>{esc(str(v))}</code>"
@@ -1554,8 +1560,7 @@ def guide_html(order, links, kind):
                 "• اگر هیچ‌کدام وصل نشد ← دکمه‌ی «گوشی خیلی قدیمی (PPTP)»\n\n"
                 "💡 IKEv2های «بدون نام کاربری» (PSK و RSA) به کار ما نمی‌آیند؛ آن گوشی‌ها L2TP دارند.\n"
                 "💡 اگر گزینه‌ها خاکستری و قفل بود، اول برای گوشی قفل صفحه (پین یا الگو) بگذارید.")
-    cfgs = (links or {}).get(f"{kind}_configs") or []
-    cfg = cfgs[0] if cfgs else {"server": "-", "username": order["username"], "password": order["password"] or "-"}
+    cfg = guide_cfg(order, links, kind)
     if kind == "ikev2":
         return (f"🤖 <b>اندروید ۱۱ به بعد — IKEv2</b>\n\n"
                 f"تنظیمات ← VPN ← افزودن، و این‌ها را بزنید (روی هر مقدار بزنید کپی می‌شود):\n\n"
@@ -1587,6 +1592,157 @@ def guide_html(order, links, kind):
             f"👤 نام کاربری: {code(cfg['username'])}\n"
             f"🔑 رمز عبور: {code(cfg['password'])}\n\n"
             f"ذخیره ← روی VPN بزنید ← اتصال ✅")
+
+
+# ---------- عکس راهنما: فرم «افزودن VPN» اندروید با مقدارهای خود مشتری ----------
+G_GROUND, G_PHONE, G_EDGE, G_HAIR = "#0a0a0a", "#121212", "#2a2a2a", "#222222"
+G_TEXT, G_MUTED, G_DIM = "#f5f5f5", "#8b8b8b", "#5c5c5c"
+G_DROID = "#3ddc84"  # Android green
+G_TINT = {"ikev2": "#2fd26f", "l2tp": "#ff4d4f", "pptp": "#e8eaed"}
+
+G_W, G_H = 900, 1560
+
+
+def _gfont(name, size):
+    from PIL import ImageFont
+    return ImageFont.truetype(os.path.join(ASSET_DIR, f"Vazirmatn-{name}.ttf"), size)
+
+
+def _grtl(draw, x_right, y, text, f, fill):
+    """Right-aligned text whose right edge sits at x_right."""
+    w = draw.textlength(text, font=f)
+    draw.text((x_right - w, y), text, font=f, fill=fill)
+
+
+def _gdroid(draw, cx, top, s, color=G_DROID):
+    """The Android robot's head: a half disc with eyes and two antennae."""
+    r = s
+    draw.pieslice([cx - r, top, cx + r, top + 2 * r], 180, 360, fill=color)
+    ey = top + int(r * 0.55)
+    for dx in (-0.42, 0.42):
+        ex = cx + int(r * dx)
+        draw.ellipse([ex - r * 0.1, ey - r * 0.1, ex + r * 0.1, ey + r * 0.1], fill=G_GROUND)
+    for side in (-1, 1):
+        x0 = cx + side * int(r * 0.5)
+        y0 = top + int(r * 0.12)
+        draw.line([x0, y0, x0 + side * int(r * 0.28), y0 - int(r * 0.42)], fill=color, width=max(3, s // 10))
+
+
+def guide_png(kind, cfg):
+    """Picture of Android's Add-VPN form filled with this customer's values; None without libraqm
+    (Persian would come out unjoined), and the caller then sends the text guide alone."""
+    try:
+        from PIL import Image, ImageDraw, features
+        if not features.check("raqm"):
+            return None
+    except Exception:
+        return None
+    if kind == "which":
+        return _which_png()
+    tint = G_TINT[kind]
+    img = Image.new("RGB", (G_W, G_H), G_GROUND)
+    d = ImageDraw.Draw(img)
+    f_title, f_sub = _gfont("Bold", 40), _gfont("Regular", 27)
+    f_lab, f_val, f_small = _gfont("Regular", 25), _gfont("Bold", 31), _gfont("Regular", 24)
+
+    # header: robot + title
+    _gdroid(d, G_W // 2, 52, 46)
+    title = {"ikev2": "اندروید ۱۱ به بعد · IKEv2", "l2tp": "اندروید قدیمی · L2TP", "pptp": "گوشی خیلی قدیمی · PPTP"}[kind]
+    tw = d.textlength(title, font=f_title)
+    d.text(((G_W - tw) / 2, 112), title, font=f_title, fill=G_TEXT)
+    sub = "تنظیمات  ‹  VPN  ‹  افزودن"
+    sw = d.textlength(sub, font=f_sub)
+    d.text(((G_W - sw) / 2, 170), sub, font=f_sub, fill=G_MUTED)
+
+    # phone
+    px0, py0, px1, py1 = 70, 236, G_W - 70, G_H - 96
+    d.rounded_rectangle([px0, py0, px1, py1], radius=58, fill=G_PHONE, outline=G_EDGE, width=6)
+    d.rounded_rectangle([G_W // 2 - 60, py0 + 20, G_W // 2 + 60, py0 + 32], radius=6, fill=G_EDGE)
+    xr, xl = px1 - 52, px0 + 52
+    _grtl(d, xr, py0 + 58, "ویرایش شبکه VPN", _gfont("Bold", 34), G_TEXT)
+
+    rows = {
+        "ikev2": [("نام", "Tifusi"), ("نوع", "IKEv2/IPSec MSCHAPv2", "pick"), ("آدرس سرور", cfg["server"]),
+                  ("شناسه IPSec", cfg["username"]), ("گواهی IPSec CA", "استفاده از گواهی‌های سیستم"),
+                  ("مجوز سرور IPSec", "از سرور دریافت شود"), ("نام کاربری", cfg["username"]), ("رمز عبور", cfg["password"])],
+        "l2tp": [("نام", "Tifusi"), ("نوع", "L2TP/IPSec PSK", "pick"), ("آدرس سرور", cfg["server"]),
+                 ("کلید از پیش مشترک IPSec", cfg.get("psk") or "-"), ("شناسه IPSec", "خالی بماند", "blank"),
+                 ("رمز L2TP", "خالی بماند", "blank"), ("نام کاربری", cfg["username"]), ("رمز عبور", cfg["password"])],
+        "pptp": [("نام", "Tifusi"), ("نوع", "PPTP", "pick"), ("آدرس سرور", cfg["server"]),
+                 ("رمزگذاری PPP (MPPE)", "روشن", "check"), ("نام کاربری", cfg["username"]), ("رمز عبور", cfg["password"])],
+    }[kind]
+
+    y = py0 + 128
+    gap = (py1 - 150 - y) / len(rows)
+    for label, value, *flag in rows:
+        flag = flag[0] if flag else ""
+        _grtl(d, xr, y, label, f_lab, G_MUTED)
+        vy = y + 36
+        if flag == "pick":
+            d.rounded_rectangle([xl, vy - 6, xr, vy + 46], radius=12, fill="#13261c" if kind == "ikev2" else "#2a1414" if kind == "l2tp" else "#1c1c1c", outline=tint, width=3)
+            _grtl(d, xr - 18, vy, value, f_val, tint)
+            d.polygon([(xl + 22, vy + 14), (xl + 44, vy + 14), (xl + 33, vy + 28)], fill=tint)
+        elif flag == "blank":
+            _grtl(d, xr, vy, value, f_val, G_DIM)
+        elif flag == "check":
+            d.rounded_rectangle([xr - 40, vy + 4, xr, vy + 44], radius=8, fill=tint)
+            d.line([xr - 32, vy + 24, xr - 22, vy + 34, xr - 8, vy + 14], fill=G_GROUND, width=5)
+            _grtl(d, xr - 54, vy, value, f_val, G_TEXT)
+        else:
+            _grtl(d, xr, vy, value, f_val, G_TEXT)
+        d.line([xl, y + gap - 14, xr, y + gap - 14], fill=G_HAIR, width=2)
+        y += gap
+
+    # buttons at the bottom of the form
+    by = py1 - 104
+    d.rounded_rectangle([xl, by, G_W // 2 - 14, by + 64], radius=32, fill=tint)
+    sv = "ذخیره"
+    d.text(((xl + G_W // 2 - 14) / 2 - d.textlength(sv, font=_gfont("Bold", 30)) / 2, by + 12), sv, font=_gfont("Bold", 30), fill=G_GROUND)
+    d.rounded_rectangle([G_W // 2 + 14, by, xr, by + 64], radius=32, outline=G_EDGE, width=3)
+    cn = "لغو"
+    d.text(((G_W // 2 + 14 + xr) / 2 - d.textlength(cn, font=f_val) / 2, by + 12), cn, font=f_val, fill=G_MUTED)
+
+    foot = "روی مقدارهای پیام ربات بزنید کپی می‌شوند · Tifusi"
+    fw = d.textlength(foot, font=f_small)
+    d.text(((G_W - fw) / 2, G_H - 70), foot, font=f_small, fill=G_DIM)
+
+    out = io.BytesIO()
+    img.save(out, "PNG", optimize=True)
+    return out.getvalue()
+
+def _which_png():
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (G_W, 1180), G_GROUND)
+    d = ImageDraw.Draw(img)
+    _gdroid(d, G_W // 2, 52, 46)
+    t = "کدام را بزنم؟"
+    d.text(((G_W - d.textlength(t, font=_gfont("Bold", 44))) / 2, 110), t, font=_gfont("Bold", 44), fill=G_TEXT)
+    s = "تنظیمات  ‹  VPN  ‹  افزودن  ‹  روی «نوع» بزنید"
+    d.text(((G_W - d.textlength(s, font=_gfont("Regular", 26))) / 2, 172), s, font=_gfont("Regular", 26), fill=G_MUTED)
+    px0, py0, px1, py1 = 70, 236, G_W - 70, 1100
+    d.rounded_rectangle([px0, py0, px1, py1], radius=58, fill=G_PHONE, outline=G_EDGE, width=6)
+    xr, xl = px1 - 52, px0 + 52
+    _grtl(d, xr, py0 + 52, "نوع", _gfont("Regular", 28), G_MUTED)
+    rows = [("IKEv2/IPSec MSCHAPv2", "دکمه‌ی «اندروید جدید»", G_TINT["ikev2"]),
+            ("IKEv2/IPSec PSK", "به کار ما نمی‌آید", None),
+            ("IKEv2/IPSec RSA", "به کار ما نمی‌آید", None),
+            ("L2TP/IPSec PSK", "دکمه‌ی «اندروید قدیمی»", G_TINT["l2tp"]),
+            ("PPTP", "اگر هیچ‌کدام وصل نشد", G_TINT["pptp"])]
+    y = py0 + 112
+    for name, hint, color in rows:
+        if color:
+            d.rounded_rectangle([xl, y, xr, y + 118], radius=16, outline=color, width=3)
+        d.text((xl + 24, y + 16), name, font=_gfont("Bold", 33), fill=color or G_DIM)
+        if not color:
+            w = d.textlength(name, font=_gfont("Bold", 33))
+            d.line([xl + 24, y + 38, xl + 24 + w, y + 38], fill=G_DIM, width=3)
+        _grtl(d, xr - 24, y + 66, hint, _gfont("Regular", 26), G_TEXT if color else G_DIM)
+        y += 140
+    foot = "اول بالایی را امتحان کنید؛ نبود، پایینی"
+    d.text(((G_W - d.textlength(foot, font=_gfont("Regular", 24))) / 2, 1120), foot, font=_gfont("Regular", 24), fill=G_DIM)
+    out = io.BytesIO()
+    img.save(out, "PNG", optimize=True)
+    return out.getvalue()
 
 
 def delivery_details_html(order, panel, links):
@@ -2913,12 +3069,26 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     log.warning("guide links for %s failed: %s", o["username"], e)
             text = guide_html(o, links, kind)
             markup = guide_markup(o["id"], guide_kinds(o, links), current=kind)
-            # Pressed under the service card (a photo): open the guide as a new message. Pressed under
-            # a guide: switch that same message, so the chat does not fill up with copies.
-            if query.message and query.message.photo:
-                await query.message.reply_text(text, parse_mode="HTML", reply_markup=markup)
-            else:
-                await safe_edit(query, text, reply_markup=markup, parse_mode="HTML")
+            png = await asyncio.to_thread(guide_png, kind, guide_cfg(o, links, kind))
+            msg = query.message
+            # The service card's caption starts with ✅; any other photo here is a guide picture.
+            in_guide = bool(msg and msg.photo and not (msg.caption or "").startswith("✅"))
+            try:
+                if in_guide and png:
+                    # Switch the same message, picture and caption together, so the chat stays tidy.
+                    from telegram import InputMediaPhoto
+                    await query.edit_message_media(InputMediaPhoto(png, caption=text, parse_mode="HTML"), reply_markup=markup)
+                elif png:
+                    await msg.reply_photo(png, caption=text, parse_mode="HTML", reply_markup=markup)
+                elif in_guide:
+                    await query.edit_message_caption(caption=text, parse_mode="HTML", reply_markup=markup)
+                elif msg and msg.photo:
+                    await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
+                else:
+                    await safe_edit(query, text, reply_markup=markup, parse_mode="HTML")
+            except Exception as e:
+                log.warning("guide %s for order %s failed: %s", kind, o["id"], e)
+                await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
             return
 
         if cmd == "qr":
