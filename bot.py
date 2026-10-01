@@ -53,7 +53,7 @@ DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل 
 SERVICES = {
     "xray": "Xray",
     "hysteria2": "Hysteria2",
-    "ikev2": "IKEv2",
+    "ikev2": "IKEv2 · L2TP · PPTP",
     "l2tp": "L2TP",
     "pptp": "PPTP",
     "wireguard": "WireGuard",
@@ -62,7 +62,9 @@ SERVICES = {
 SERVICE_PROTOCOLS = {
     "xray": ["vless", "vmess", "trojan", "shadowsocks"],
     "hysteria2": ["hysteria2"],
-    "ikev2": ["ikev2"],
+    # یک پلن برای هر سه: همان نام کاربری و رمز روی IKEv2 و L2TP و PPTP کار می‌کند،
+    # پس گوشی جدید و قدیم با یک خرید وصل می‌شوند (تمدید هم دسترسی سفارش‌های قبلی را کامل می‌کند).
+    "ikev2": ["ikev2", "l2tp", "pptp"],
     "l2tp": ["l2tp"],
     "pptp": ["pptp"],
     "wireguard": ["wireguard"],
@@ -1200,6 +1202,9 @@ async def show_buy_services(query, uid):
     db.set_state(uid, "none")
     # سرویسی که هنوز پلنی ندارد نشان داده نمی‌شود تا مشتری به صفحه‌ی خالی نرسد
     services = [s for s in available_services() if db.get_plans(active_only=True, service=s)]
+    # L2TP و PPTP جدا فروخته نمی‌شوند: داخل همان پلن IKEv2 هستند. سفارش‌های قبلی‌شان تمدید می‌شوند.
+    if "ikev2" in services:
+        services = [s for s in services if s not in ("l2tp", "pptp")]
     if not services:
         await safe_edit(query, "❌ فعلاً سرویسی برای فروش در دسترس نیست. کمی بعد دوباره امتحان کنید.", reply_markup=back_kb())
         return
@@ -1594,6 +1599,56 @@ def guide_html(order, links, kind):
             f"ذخیره ← روی VPN بزنید ← اتصال ✅")
 
 
+# ---------- دکمه‌ی «اتصال در اندروید»: سرور، نام کاربری، رمز و نوع، همه در یک پیام ----------
+ANDROID_BTN = "🤖 اتصال در اندروید"
+
+
+def android_html(order, links):
+    """اطلاعات ورود در تنظیمات VPN اندروید برای هر روشی که این سرویس دارد؛ یک نام کاربری و رمز برای همه.
+    ترتیب «اگر نبود» همان ترتیب گوشی‌هاست: IKEv2 برای اندروید ۱۱+، L2TP برای قدیمی‌ها، PPTP آخرین راه."""
+    esc = html.escape
+    code = lambda v: f"<code>{esc(str(v))}</code>"
+    kinds = [k for k in ("ikev2", "l2tp", "pptp") if (links or {}).get(f"{k}_configs")]
+    if not kinds:
+        kinds = [order["protocol"]]
+    cfgs = {k: guide_cfg(order, links, k) for k in kinds}
+    first = cfgs[kinds[0]]
+    servers = {c["server"] for c in cfgs.values()}
+    one_server = len(servers) == 1
+    # تلگرام رنگ متن ندارد: برچسب‌ها پررنگ، مقدارها <code> (رنگ و پس‌زمینه‌ی جدا و کپی با یک لمس)
+    # و هر نوع یک دایره‌ی رنگی، تا چیزهای مهم از بقیه جدا شوند.
+    lines = ["🤖 <b>اتصال در اندروید</b>", "",
+             "<b>تنظیمات</b> ← <b>VPN</b> ← <b>افزودن</b>", "<i>(روی هر مقدار بزنید کپی می‌شود)</i>", ""]
+    if one_server:
+        lines.append(f"🌐 <b>آدرس سرور:</b> {code(first['server'])}")
+    lines += [f"👤 <b>نام کاربری:</b> {code(first['username'])}", f"🔑 <b>رمز عبور:</b> {code(first['password'])}", ""]
+    if len(kinds) > 1:
+        lines.append("🧩 روی <b>«نوع»</b> بزنید:")
+    nums = {"ikev2": "🟢", "l2tp": "🟡", "pptp": "🔴"}
+    nums = [nums[k] for k in kinds]
+    for i, k in enumerate(kinds):
+        c = cfgs[k]
+        if len(kinds) == 1:
+            lines.append(f"🧩 <b>نوع:</b> {code(MANUAL_TYPE[k])}")
+        elif i == 0:
+            lines.append(f"{nums[i]} {code(MANUAL_TYPE[k])} <b>(اگر در لیست هست)</b>")
+        else:
+            lines.append(f"{nums[i]} <b>{'اگر وصل نشد' if k == 'pptp' else 'اگر نبود'}:</b> {code(MANUAL_TYPE[k])}")
+        extra = []
+        if not one_server:
+            extra.append(f"سرور: {code(c['server'])}")
+        if k == "ikev2":
+            extra.append("<b>شناسه‌ی IPSec:</b> همان نام کاربری")
+        if k == "l2tp" and c.get("psk"):
+            extra.append(f"🔐 <b>کلید IPSec:</b> {code(c['psk'])}")
+        if k == "pptp":
+            extra.append("<b>رمزگذاری PPP (MPPE):</b> روشن")
+        if extra:
+            lines.append("      " + "  ·  ".join(extra))
+    lines += ["", "<b>ذخیره</b> ← روی VPN بزنید ← <b>اتصال</b> ✅"]
+    return "\n".join(lines)
+
+
 # ---------- عکس راهنما: فرم «افزودن VPN» اندروید با مقدارهای خود مشتری ----------
 G_GROUND, G_PHONE, G_EDGE, G_HAIR = "#0a0a0a", "#121212", "#2a2a2a", "#222222"
 G_TEXT, G_MUTED, G_DIM = "#f5f5f5", "#8b8b8b", "#5c5c5c"
@@ -1788,12 +1843,13 @@ async def deliver_service(context, chat_id, order, panel):
         rows = []
         guide = order["protocol"] in ("ikev2", "l2tp", "pptp")
         if guide:
-            for k in guide_kinds(order, links):
-                rows.append([InlineKeyboardButton(GUIDE_LABELS[k], callback_data=f"how:{k}:{order['id']}")])
+            caption += "\n\n👇 برای اتصال، دکمه‌ی گوشی خود را بزنید"
+            rows.append([InlineKeyboardButton(ANDROID_BTN, callback_data=f"andr:{order['id']}")])
         if apple_url:
             # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
             rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
-        copy_btn = copy_text_button("🔗 کپی لینک اشتراک", order["sub_url"]) if order["sub_url"] else None
+        # لینک اشتراک فعلاً فقط برای Xray (سرویس‌های گوشی با تنظیمات خود گوشی وصل می‌شوند)
+        copy_btn = copy_text_button("🔗 کپی لینک اشتراک", order["sub_url"]) if order["sub_url"] and not guide else None
         if copy_btn:
             rows.append([copy_btn])
         try:
@@ -1898,15 +1954,17 @@ async def show_service_detail(query, uid, oid):
         except Exception:
             pass
 
-    creds = (f"👤 یوزرنیم: `{o['username']}`\n"
-             f"🔗 لینک اشتراک: `{o['sub_url'] or '-'}`")
+    phone = o["protocol"] in ("ikev2", "l2tp", "pptp")
+    creds = f"👤 یوزرنیم: `{o['username']}`"
+    if not phone:
+        creds += f"\n🔗 لینک اشتراک: `{o['sub_url'] or '-'}`"
     # رمز و سکرت از خود پنل، تا همیشه همانی باشد که نود واقعاً چک می‌کند
     guide = o["protocol"] in ("ikev2", "l2tp", "pptp")
     manual = [] if guide else ipsec_manual_lines(fresh, o, code=lambda v: f"`{v}`", text=md)
     if manual:
         creds += "\n\n🔧 اطلاعات اتصال (اندروید و ویندوز):\n" + "\n".join(manual)
     elif guide:
-        creds += "\n\n📱 برای اطلاعات اتصال، دکمه‌ی گوشی خودتان را بزنید:"
+        creds += "\n\n👇 برای اتصال، دکمه‌ی گوشی خود را بزنید."
     apple_url = apple_profile_url(o, fresh) if o["protocol"] in IPSEC_SERVICES else None
     text = (f"{md(service_name(o['protocol']))} — #{o['id']}\n"
             f"🖥 پنل: {md(pname)}\n\n{creds}\n\n{usage_line}\n"
@@ -1914,13 +1972,12 @@ async def show_service_detail(query, uid, oid):
     rows = []
     if o["status"] == "active":
         if guide:
-            for k in guide_kinds(o, fresh):
-                rows.append([InlineKeyboardButton(GUIDE_LABELS[k], callback_data=f"how:{k}:{o['id']}")])
+            rows.append([btn(ANDROID_BTN, f"andr:{o['id']}")])
         if apple_url:
             rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
         rows.append([btn("♻️ تمدید سرویس", f"renew:{o['id']}")])
         refresh = btn("🔄 بروزرسانی اطلاعات", f"svc:{o['id']}")
-        rows.append([btn("📷 QR code", f"qr:{o['id']}"), refresh] if o["sub_url"] else [refresh])
+        rows.append([btn("📷 QR code", f"qr:{o['id']}"), refresh] if o["sub_url"] and not phone else [refresh])
         rows.append([btn("❌ بازگشت وجه / حذف سرویس", f"delreq:{o['id']}")])
     rows.append([btn("🏠 بازگشت به لیست سرویس‌ها", "menu:services")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows), parse_mode="Markdown")
@@ -3056,6 +3113,27 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_service_detail(query, uid, int(parts[1]))
             return
 
+        if cmd == "andr":
+            o = db.get_order(int(parts[1]))
+            if not o or (o["user_id"] != uid and not is_admin(uid)) or o["protocol"] not in ("ikev2", "l2tp", "pptp"):
+                return
+            links = None
+            panel = db.get_panel(o["panel_id"])
+            if panel:
+                try:
+                    links = await asyncio.to_thread(panel_client(panel).links, o["username"])
+                except PanelError as e:
+                    log.warning("android details for %s failed: %s", o["username"], e)
+            text = android_html(o, links)
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به سرویس", callback_data=f"svc:{o['id']}")]])
+            msg = query.message
+            # Under the delivery card (a photo) the details come as a new message; on «My services» the same message changes.
+            if msg and msg.photo:
+                await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
+            else:
+                await safe_edit(query, text, reply_markup=markup, parse_mode="HTML")
+            return
+
         if cmd == "how":
             kind, o = parts[1], db.get_order(int(parts[2]))
             # The admin may open any customer's guide to see exactly what they see.
@@ -3357,11 +3435,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 services = db.get_user_orders(target, active_only=False)
                 lines = [f"{'🟢' if o['status'] == 'active' else '⚪'} <b>#{o['id']}</b>  ·  {h(o['username'])}  ·  "
                          f"{h(order_name(o))}" for o in services]
-                # One button per active IKEv2/L2TP/PPTP service: the admin sees the customer's own guide.
-                guides = [[btn(f"📱 راهنمای اتصال #{o['id']} · {o['username']}", f"how:{o['protocol']}:{o['id']}")]
-                          for o in services if o["status"] == "active" and o["protocol"] in ("ikev2", "l2tp", "pptp")][:20]
                 await page(query, card(f"🛍 سرویس‌های کاربر ({len(services)})", lines or ["این کاربر سرویسی ندارد."]),
-                           guides + [back_row(f"au:panel:{target}")])
+                           [back_row(f"au:panel:{target}")])
             return
 
         if cmd == "set":
