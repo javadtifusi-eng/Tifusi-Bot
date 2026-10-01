@@ -1649,6 +1649,18 @@ def android_html(order, links):
     return "\n".join(lines)
 
 
+def android_copy_rows(order, links):
+    """دکمه‌های «کپی» زیر پیام اندروید، دوتا دوتا: سرور، نام کاربری، رمز و کلید L2TP اگر هست.
+    روی تلگرام یا کتابخانه‌ی قدیمی که دکمه‌ی کپی ندارد، خالی برمی‌گردد و متن بالا کافی است."""
+    kinds = [k for k in ("ikev2", "l2tp", "pptp") if (links or {}).get(f"{k}_configs")] or [order["protocol"]]
+    first = guide_cfg(order, links, kinds[0])
+    l2tp = guide_cfg(order, links, "l2tp") if "l2tp" in kinds else {}
+    items = [("📋 کپی سرور", first["server"]), ("📋 کپی یوزر", first["username"]),
+             ("📋 کپی رمز", first["password"]), ("📋 کپی کلید L2TP", l2tp.get("psk"))]
+    buttons = [b for b in (copy_text_button(label, str(v)) for label, v in items if v and v != "-") if b]
+    return [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+
+
 # ---------- عکس راهنما: فرم «افزودن VPN» اندروید با مقدارهای خود مشتری ----------
 G_GROUND, G_PHONE, G_EDGE, G_HAIR = "#0a0a0a", "#121212", "#2a2a2a", "#222222"
 G_TEXT, G_MUTED, G_DIM = "#f5f5f5", "#8b8b8b", "#5c5c5c"
@@ -3125,7 +3137,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except PanelError as e:
                     log.warning("android details for %s failed: %s", o["username"], e)
             text = android_html(o, links)
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به سرویس", callback_data=f"svc:{o['id']}")]])
+            markup = InlineKeyboardMarkup(android_copy_rows(o, links)
+                                          + [[InlineKeyboardButton("🔙 بازگشت به سرویس", callback_data=f"svc:{o['id']}")]])
             msg = query.message
             # Under the delivery card (a photo) the details come as a new message; on «My services» the same message changes.
             if msg and msg.photo:
