@@ -1665,8 +1665,8 @@ def android_copy_rows(order, links):
     kinds = [k for k in ("ikev2", "l2tp", "pptp") if (links or {}).get(f"{k}_configs")] or [order["protocol"]]
     first = guide_cfg(order, links, kinds[0])
     l2tp = guide_cfg(order, links, "l2tp") if "l2tp" in kinds else {}
-    items = [("📋 کپی سرور", first["server"]), ("📋 کپی یوزر", first["username"]),
-             ("📋 کپی رمز", first["password"]), ("📋 کپی کلید L2TP", l2tp.get("psk"))]
+    items = [("🌐 کپی سرور", first["server"]), ("👤 کپی یوزر", first["username"]),
+             ("🔑 کپی رمز", first["password"]), ("🔐 کپی کلید L2TP", l2tp.get("psk"))]
     buttons = [b for b in (copy_text_button(label, str(v)) for label, v in items if v and v != "-") if b]
     return [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
 
