@@ -1374,14 +1374,116 @@ def create_service_on_panel(user_id, plan, service, username, panel_id=None, ips
     return db.get_order(oid), panel
 
 
+# ---------- کارت تحویل سرویس گوشی: پس‌زمینه‌ی رنگی و مشخصات سرویس به‌جای بارکد ----------
+PC_ROW = {"name": "#4da3ff", "service": "#a78bfa", "volume": "#f97316", "expire": "#f472b6"}
+PC_PROTO = (("IKEv2", "#3ddc84"), ("L2TP", "#f5c518"), ("PPTP", "#ff5a5f"))
+PC_PANEL, PC_EDGE, PC_HAIR = "#121726", "#262d44", "#1f2538"
+
+
+def phone_card_ground(img):
+    """Deep navy fading to black, with soft orange and teal glows behind the mark."""
+    from PIL import Image, ImageDraw, ImageFilter
+    w, h = img.size
+    top, bottom = (16, 22, 44), (8, 8, 12)
+    grad = Image.new("RGB", (1, h))
+    for yy in range(h):
+        k = min(1.0, yy / (h * 0.75))
+        grad.putpixel((0, yy), tuple(int(top[c] + (bottom[c] - top[c]) * k) for c in range(3)))
+    img = grad.resize((w, h))
+    glow = Image.new("RGB", (w, h), (0, 0, 0))
+    g = ImageDraw.Draw(glow)
+    g.ellipse([w // 2 - 330, -40, w // 2 + 10, 300], fill=(150, 64, 10))
+    g.ellipse([w // 2 - 10, -20, w // 2 + 330, 300], fill=(10, 110, 120))
+    glow = glow.filter(ImageFilter.GaussianBlur(90))
+    from PIL import ImageChops
+    return ImageChops.add(img, glow)
+
+
+def _pc_icon(d, kind, cx, cy, color):
+    """A filled colour disc with a tiny white glyph: person, shield, bars or calendar."""
+    r = 30
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color)
+    w = "#ffffff"
+    if kind == "name":
+        d.ellipse([cx - 8, cy - 15, cx + 8, cy + 1], fill=w)
+        d.pieslice([cx - 15, cy + 3, cx + 15, cy + 31], 180, 360, fill=w)
+    elif kind == "service":
+        d.polygon([(cx, cy - 16), (cx + 14, cy - 10), (cx + 12, cy + 6), (cx, cy + 17), (cx - 12, cy + 6), (cx - 14, cy - 10)], fill=w)
+    elif kind == "volume":
+        for k, hgt in enumerate((10, 18, 26)):
+            x = cx - 14 + k * 11
+            d.rounded_rectangle([x, cy + 13 - hgt, x + 7, cy + 13], radius=2, fill=w)
+    else:
+        d.rounded_rectangle([cx - 15, cy - 11, cx + 15, cy + 15], radius=4, fill=w)
+        d.rectangle([cx - 15, cy - 4, cx + 15, cy - 1], fill=color)
+        for x in (cx - 8, cx + 8):
+            d.rounded_rectangle([x - 2, cy - 17, x + 2, cy - 7], radius=2, fill=w)
+
+
+def phone_card_details(img, d, order, y, font, fa, width):
+    """The service's name, protocols, volume and expiry in a panel with a colour strip; returns the y
+    under the «active» pill."""
+    from PIL import ImageFont
+    L, R = 60, CARD_W - 60
+    row_h = 112
+    rows = ("name", "service", "volume", "expire")
+    bottom = y + row_h * len(rows) + 20
+    d.rounded_rectangle([L, y, R, bottom], radius=30, fill=PC_PANEL, outline=PC_EDGE, width=2)
+    # colour strip along the top edge: the three protocols' colours
+    seg = (R - L - 80) / 3
+    for k, (_, c) in enumerate(PC_PROTO):
+        d.rounded_rectangle([L + 40 + k * seg + 4, y - 3, L + 40 + (k + 1) * seg - 4, y + 5], radius=4, fill=c)
+    f_lab, f_val = font("Regular", 29), font("Bold", 34)
+    labels = {"name": "نام سرویس", "service": "سرویس", "volume": "حجم", "expire": "انقضا"}
+    yy = y + 10
+    for i, kind in enumerate(rows):
+        cy = yy + row_h // 2
+        _pc_icon(d, kind, R - 62, cy, PC_ROW[kind])
+        lab = fa(labels[kind])
+        d.text((R - 110 - width(lab, f_lab), cy - 22), lab, font=f_lab, fill="#9aa3b8")
+        if kind == "service":
+            # three coloured chips, IKEv2 first on the left
+            f_c = font("Bold", 26)
+            x = L + 30
+            for name, c in PC_PROTO:
+                cw = width(name, f_c) + 34
+                d.rounded_rectangle([x, cy - 23, x + cw, cy + 23], radius=23, outline=c, width=3)
+                d.text((x + 17, cy - 19), name, font=f_c, fill=c)
+                x += cw + 10
+        else:
+            value = {"name": order["username"], "volume": vol_text(order["volume_gb"]),
+                     "expire": datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")}[kind]
+            fv, dy = f_val, 26
+            if kind == "name":
+                try:
+                    fv, dy = ImageFont.truetype(A_MONO_PATH, 36), 22
+                except OSError:
+                    pass
+            d.text((L + 34, cy - dy), fa(value), font=fv, fill=PC_ROW[kind] if kind == "volume" else "#f5f7fb")
+        if i < len(rows) - 1:
+            d.line([L + 30, yy + row_h, R - 30, yy + row_h], fill=PC_HAIR, width=2)
+        yy += row_h
+    y = bottom + 34
+    pill = fa("فعال")
+    f_p = font("Bold", 30)
+    pw = width(pill, f_p) + 76
+    px = (CARD_W - pw) // 2
+    d.rounded_rectangle([px, y, px + pw, y + 58], radius=29, fill="#3ddc84")
+    d.ellipse([px + pw - 36, y + 23, px + pw - 24, y + 35], fill="#0b3b20")
+    d.text((px + 24, y + 8), pill, font=f_p, fill="#0b3b20")
+    return y + 58
+
+
 def delivery_card_png(order):
     """کارت تصویری تحویل: فقط نشان تیفوسی و بارکد لینک اشتراک. باقی چیزها (نام، حجم، انقضا،
     شناسه، نصب) روی کپشن و دکمه‌های واقعی زیر عکس‌اند، چون داخل تصویر هیچ‌چیز قابل لمس نیست.
     اگر فونت/نشان‌ها یا کتابخانه‌ها نبودند None برمی‌گردد تا تحویل به حالت متنی قبلی برگردد."""
-    if not order["sub_url"]:
+    # Phone services (IKEv2/L2TP/PPTP) connect from the phone's own settings: no link, so no barcode;
+    # their card shows the service's details under the Tifusi mark instead.
+    phone = order["protocol"] in ("ikev2", "l2tp", "pptp")
+    if not order["sub_url"] and not phone:
         return None
     try:
-        import qrcode
         from PIL import Image, ImageDraw, ImageFont, features
 
         def font(name, size):
@@ -1404,6 +1506,8 @@ def delivery_card_png(order):
                 return get_display(arabic_reshaper.reshape(text))
 
         img = Image.new("RGB", (CARD_W, 1100), CARD_GROUND)
+        if phone:
+            img = phone_card_ground(img)
         d = ImageDraw.Draw(img)
 
         def width(text, f):
@@ -1422,6 +1526,15 @@ def delivery_card_png(order):
         d.text(((CARD_W - width(t, f_sub)) // 2, y), t, font=f_sub, fill=CARD_MUTED)
 
         y += 56
+        if phone:
+            y = phone_card_details(img, d, order, y, font, fa, width)
+            buf = io.BytesIO()
+            img.crop((0, 0, CARD_W, y + 50)).save(buf, format="PNG", optimize=True)
+            buf.seek(0)
+            buf.name = "tifusi.png"
+            return buf
+
+        import qrcode
         qr = qrcode.make(order["sub_url"], box_size=10, border=1).convert("RGB").resize((500, 500), Image.NEAREST)
         box = 540
         qx = (CARD_W - box) // 2
@@ -1672,7 +1785,7 @@ def android_copy_rows(order, links):
 
 
 # ---------- عکس «اتصال در اندروید»: لوگوها و نوع‌ها؛ سرور، یوزر و رمز با دکمه‌های کپی زیر عکس ----------
-MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+MONO = A_MONO_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 A_GROUND, A_PANEL, A_FIELD, A_EDGE = "#0a0a0a", "#141414", "#1c1c1c", "#2c2c2c"
 A_TEXT, A_MUTED, A_DIM = "#f5f5f5", "#9a9a9a", "#5e5e5e"
 A_DROID = "#3ddc84"
@@ -2010,7 +2123,8 @@ async def deliver_service(context, chat_id, order, panel):
         rows = []
         guide = order["protocol"] in ("ikev2", "l2tp", "pptp")
         if guide:
-            caption += "\n\n👇 برای اتصال، دکمه‌ی گوشی خود را بزنید"
+            # The picture already carries name, service, volume and expiry.
+            caption = "✅ <b>سرویس شما فعال شد</b>\n\n👇 برای اتصال، دکمه‌ی گوشی خود را بزنید"
             rows.append([InlineKeyboardButton(ANDROID_BTN, callback_data=f"andr:{order['id']}")])
         if apple_url:
             # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
