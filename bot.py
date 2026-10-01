@@ -3058,7 +3058,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "how":
             kind, o = parts[1], db.get_order(int(parts[2]))
-            if not o or o["user_id"] != uid or kind not in GUIDE_LABELS:
+            # The admin may open any customer's guide to see exactly what they see.
+            if not o or (o["user_id"] != uid and not is_admin(uid)) or kind not in GUIDE_LABELS:
                 return
             links = None
             panel = db.get_panel(o["panel_id"])
@@ -3356,8 +3357,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 services = db.get_user_orders(target, active_only=False)
                 lines = [f"{'🟢' if o['status'] == 'active' else '⚪'} <b>#{o['id']}</b>  ·  {h(o['username'])}  ·  "
                          f"{h(order_name(o))}" for o in services]
+                # One button per active IKEv2/L2TP/PPTP service: the admin sees the customer's own guide.
+                guides = [[btn(f"📱 راهنمای اتصال #{o['id']} · {o['username']}", f"how:{o['protocol']}:{o['id']}")]
+                          for o in services if o["status"] == "active" and o["protocol"] in ("ikev2", "l2tp", "pptp")][:20]
                 await page(query, card(f"🛍 سرویس‌های کاربر ({len(services)})", lines or ["این کاربر سرویسی ندارد."]),
-                           [back_row(f"au:panel:{target}")])
+                           guides + [back_row(f"au:panel:{target}")])
             return
 
         if cmd == "set":
