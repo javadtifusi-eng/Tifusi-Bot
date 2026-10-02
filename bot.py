@@ -2327,18 +2327,45 @@ def do_renew(order, plan):
 
 
 # ---------- سرویس‌های من ----------
-async def show_services(query, uid):
-    orders = db.get_user_orders(uid)
-    if not orders:
+SERVICES_PAGE = 10  # name buttons per page of «My services»
+
+
+async def show_services(query, uid, page=0, search=None):
+    """One page of name buttons, ten at a time, with next/previous and a quick search by name.
+    search: part of a service name (letters, digits, _), from the quick-search prompt."""
+    if not search:
+        db.set_state(uid, "none")
+    everything = db.get_user_orders(uid)
+    if not everything:
         await safe_edit(query, "🛍 شما هنوز سرویسی ندارید.", reply_markup=back_kb())
         return
-    # One page: just a button per service, by its name; the details open on tap.
-    text = "🛍 سرویس‌های شما:"
+    orders = [o for o in everything if search.lower() in o["username"].lower()] if search else everything
+    pages = max(1, -(-len(orders) // SERVICES_PAGE))
+    page = max(0, min(page, pages - 1))
+    if search:
+        text = (f"🔎 نتیجه‌ی جستجوی «{search}»: {len(orders)} سرویس" if orders
+                else f"❌ سرویسی با «{search}» پیدا نشد.")
+    else:
+        text = "🛍 سرویس‌های شما:"
+    if pages > 1:
+        text += f"\n📄 صفحه {page + 1} از {pages}"
     rows = []
-    for o in orders:
+    for o in orders[page * SERVICES_PAGE:(page + 1) * SERVICES_PAGE]:
         status = "" if o["status"] == "active" else " ⏳"
         rows.append([btn(f"✨ {o['username']} ✨{status}", f"svc:{o['id']}")])
-    rows.append([btn("🔙 بازگشت", "menu:back")])
+    tail = f":{search}" if search else ""
+    nav = []
+    if page < pages - 1:
+        nav.append(btn("بعدی", f"svcp:{page + 1}{tail}"))
+    if page > 0:
+        nav.append(btn("قبلی", f"svcp:{page - 1}{tail}"))
+    if search:
+        nav.append(btn("🛍 همه‌ی سرویس‌ها", "menu:services"))
+    elif len(everything) > SERVICES_PAGE:
+        nav.append(btn("🔎 جستجو سریع", "svcq"))
+    if nav:
+        rows.append(nav)
+    rows.append([btn("🔙 بازگشت به منوی اصلی", "menu:back")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
 
@@ -3574,6 +3601,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_service_detail(query, uid, int(parts[1]))
             return
 
+        if cmd == "svcp":
+            await show_services(query, uid, int(parts[1]), parts[2] if len(parts) > 2 and parts[2] else None)
+            return
+
+        if cmd == "svcq":
+            db.set_state(uid, "svc_search")
+            await safe_edit(query, "🔎 جستجو سریع\n\nنام سرویس (یا بخشی از آن) را بفرستید:",
+                            reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "menu:services")]]))
+            return
+
         if cmd == "andr":
             o = db.get_order(int(parts[1]))
             if not o or (o["user_id"] != uid and not is_admin(uid)) or o["protocol"] not in ("ikev2", "l2tp", "pptp"):
@@ -4212,6 +4249,15 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         return True
 
     # ---------- پشتیبانی ----------
+    if state == "svc_search":
+        q = re.sub(r"[^A-Za-z0-9_]", "", text)[:20]
+        if not q:
+            await msg.reply_text("❌ نام سرویس فقط حروف انگلیسی، عدد و _ دارد. دوباره بفرستید:")
+            return True
+        db.set_state(uid, "none")
+        await show_services(FakeQuery(msg), uid, 0, q)
+        return True
+
     if state == "support_message":
         tid = db.create_ticket(uid, text)
         db.set_state(uid, "none")
