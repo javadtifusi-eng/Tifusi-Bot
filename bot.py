@@ -2332,13 +2332,12 @@ async def show_services(query, uid):
     if not orders:
         await safe_edit(query, "🛍 شما هنوز سرویسی ندارید.", reply_markup=back_kb())
         return
-    text = f"🛍 سرویس‌های شما:\n\n"
+    # One page: just a button per service, by its name; the details open on tap.
+    text = "🛍 سرویس‌های شما:"
     rows = []
     for o in orders:
-        name = order_name(o)
-        status = "" if o["status"] == "active" else " ⏳(درخواست حذف)"
-        text += f"{o['username']} ← {name}\n"
-        rows.append([btn(f"{o['username']} — {name}{status}", f"svc:{o['id']}")])
+        status = "" if o["status"] == "active" else " ⏳"
+        rows.append([btn(f"✨ {o['username']} ✨{status}", f"svc:{o['id']}")])
     rows.append([btn("🔙 بازگشت", "menu:back")])
     await safe_edit(query, text, reply_markup=InlineKeyboardMarkup(rows))
 
