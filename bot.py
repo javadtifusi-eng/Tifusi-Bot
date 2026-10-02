@@ -352,6 +352,14 @@ class TifusiPanelAPI:
         user = self._call(f"/api/users/{int(user['id'])}", "put", json=body)
         return self._with_links(user)
 
+    def set_status(self, username, status):
+        """روشن/خاموش کردن کاربر روی پنل (active/disabled)؛ False اگر کاربر روی پنل نبود."""
+        user = self.find_user(username)
+        if not user:
+            return False
+        self._call(f"/api/users/{int(user['id'])}", "put", json={"status": status})
+        return True
+
     def del_user(self, username):
         """True اگر حذف شد یا اصلاً روی پنل نبود؛ خطای پنل به‌صورت PanelError بالا می‌رود
         تا بازگشت وجه برای سرویسی که هنوز روی پنل فعال است انجام نشود."""
@@ -494,6 +502,14 @@ class DB:
             self.x("ALTER TABLE users ADD COLUMN is_blocked INTEGER DEFAULT 0")
         except Exception:
             pass
+        # مهاجرت: صفحه‌ی مدیریت کاربر — درصد تخفیف، سقف اکانت تست و آخرین استفاده از ربات
+        for sql in ("ALTER TABLE users ADD COLUMN discount_pct INTEGER DEFAULT 0",
+                    "ALTER TABLE users ADD COLUMN test_limit INTEGER DEFAULT 1",
+                    "ALTER TABLE users ADD COLUMN last_seen INTEGER DEFAULT 0"):
+            try:
+                self.x(sql)
+            except Exception:
+                pass
         # مهاجرت: نوع پنل. فقط 'tifusi' استفاده می‌شود؛ پنل‌های دیتابیس‌های خیلی قدیمی که این ستون را
         # نداشتند 'legacy' می‌شوند و مثل هر نوع دیگری غیر از tifusi فقط به‌عنوان «قدیمی» نمایش داده می‌شوند.
         try:
@@ -604,7 +620,8 @@ class DB:
             self.x("INSERT INTO users (id,username,full_name,balance,state,state_data,created_at) VALUES (?,?,?,0,'none','{}',?)",
                    (uid, username or "", full_name or "", int(time.time())))
         else:
-            self.x("UPDATE users SET username=?, full_name=? WHERE id=?", (username or "", full_name or "", uid))
+            self.x("UPDATE users SET username=?, full_name=?, last_seen=? WHERE id=?",
+                   (username or "", full_name or "", int(time.time()), uid))
         return self.get_user(uid)
 
     def set_state(self, uid, state, data=None):
@@ -900,6 +917,51 @@ def get_admins():
 
 def is_admin(uid):
     return uid == ADMIN_ID or uid in get_admins()
+
+
+def jdate(ts, with_time=True):
+    """تاریخ شمسی به وقت ایران (۱۴۰۵/۰۷/۱۰ ۲۰:۴۷:۳۶)."""
+    if not ts:
+        return "—"
+    t = datetime.datetime.utcfromtimestamp(int(ts) + 12600)
+    gy, gm, gd = t.year, t.month, t.day
+    g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+    gy2 = gy + 1 if gm > 2 else gy
+    days = 355666 + 365 * gy + (gy2 + 3) // 4 - (gy2 + 99) // 100 + (gy2 + 399) // 400 + gd + g_d_m[gm - 1]
+    jy = -1595 + 33 * (days // 12053)
+    days %= 12053
+    jy += 4 * (days // 1461)
+    days %= 1461
+    if days > 365:
+        jy += (days - 1) // 365
+        days = (days - 1) % 365
+    if days < 186:
+        jm, jd = 1 + days // 31, 1 + days % 31
+    else:
+        jm, jd = 7 + (days - 186) // 30, 1 + (days - 186) % 30
+    out = f"{jy}/{jm:02d}/{jd:02d}"
+    return out + t.strftime(" %H:%M:%S") if with_time else out
+
+
+def user_discount(uid):
+    u = db.get_user(uid)
+    try:
+        return max(0, min(100, int(u["discount_pct"] or 0))) if u else 0
+    except (IndexError, KeyError):
+        return 0
+
+
+def user_plan(pid, uid):
+    """پلن با قیمتِ همین کاربر (درصد تخفیفی که ادمین برایش گذاشته). همه‌ی مسیرهای خرید و تمدید
+    مشتری از این می‌خوانند تا پیش‌فاکتور، کیف پول و رسید کارت به کارت یک عدد ببینند."""
+    p = db.get_plan(pid) if pid else None
+    if not p:
+        return None
+    p = dict(p)
+    off = user_discount(uid)
+    if off:
+        p["price"] = int(p["price"] * (100 - off) / 100)
+    return p
 
 
 def btn(text, data):
@@ -2519,8 +2581,11 @@ async def send_test_account(msg, context, uid):
     if db.setting("test_enabled", "0") != "1":
         await msg.reply_text("🔑 اکانت تست در حال حاضر فعال نیست.\n🔐 برای استفاده از سرویس، از «خرید اشتراک» اقدام کنید.")
         return
-    if db.one("SELECT id FROM orders WHERE user_id=? AND price=0", (uid,)):
-        await msg.reply_text("❌ اکانت تست فقط یک‌بار به هر کاربر داده می‌شود.\n🛍 سرویس‌های قبلی‌ات را از «سرویس‌های من» ببین.")
+    # سقف اکانت تست هر کاربر (پیش‌فرض ۱) از صفحه‌ی مدیریت کاربر عوض می‌شود
+    u = db.get_user(uid)
+    limit = int((u["test_limit"] if u and u["test_limit"] is not None else 1))
+    if db.one("SELECT COUNT(*) c FROM orders WHERE user_id=? AND price=0", (uid,))["c"] >= limit:
+        await msg.reply_text("❌ سهمیه‌ی اکانت تست شما تمام شده است.\n🛍 سرویس‌های قبلی‌ات را از «سرویس‌های من» ببین.")
         return
     service = next((s for s in TEST_SERVICE_ORDER if pick_panel(s)), None)
     if not service:
@@ -2622,7 +2687,7 @@ def clear_pending_buy(uid):
 async def offer_pending_buy(bot, uid):
     """بعد از شارژ کیف پول: اگر خرید نیمه‌کاره‌ای هست، پیشنهاد ادامه‌اش را بفرست."""
     data = load_pending_buy(uid)
-    plan = db.get_plan(data["plan_id"]) if data else None
+    plan = user_plan(data["plan_id"], uid) if data else None
     if not plan or not plan["active"]:
         clear_pending_buy(uid)
         return
@@ -2643,7 +2708,7 @@ async def offer_pending_buy(bot, uid):
 
 
 async def finalize_wallet_purchase(query, context, uid, data):
-    plan = db.get_plan(data["plan_id"])
+    plan = user_plan(data["plan_id"], uid)
     if not plan:
         await safe_edit(query, "❌ پلن یافت نشد.", reply_markup=back_kb())
         return
@@ -2703,7 +2768,7 @@ async def renew_menu(query, uid, oid):
 
 async def renew_pay_menu(query, uid, oid, pid):
     o = db.get_order(oid)
-    plan = db.get_plan(pid)
+    plan = user_plan(pid, uid)
     if not o or not plan or o["user_id"] != uid or not plan_fits(plan, o["protocol"]):
         await safe_edit(query, "❌ سرویس یافت نشد.", reply_markup=back_kb())
         return
@@ -2722,7 +2787,7 @@ async def renew_pay_menu(query, uid, oid, pid):
 
 async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
     o = db.get_order(oid)
-    p = db.get_plan(plan_id) if plan_id else db.get_plan(o["plan_id"])
+    p = user_plan(plan_id or o["plan_id"], o["user_id"])
     plan = dict(p) if p else {"id": o["plan_id"], "volume_gb": o["volume_gb"], "days": o["days"], "price": o["price"], "user_limit": None}
     # فقط شکستِ خودِ تمدید خطا برمی‌گرداند (و باعث بازگشت وجه می‌شود)؛ اگر تمدید انجام شد ولی پیام نرسید،
     # نباید پول برگردد چون سرویس تمدید شده است.
@@ -2893,6 +2958,9 @@ async def rc_approve(query, context, rid):
         if not plan:
             await query.message.reply_text("❌ پلن حذف شده؛ وجه را دستی برگردانید.")
             return
+        # سفارش با همان مبلغی ثبت می‌شود که کاربر واقعاً پرداخت کرد (با تخفیف شخصی‌اش)
+        plan = dict(plan)
+        plan["price"] = int(r["amount"])
         try:
             order, panel = await asyncio.to_thread(
                 create_service_on_panel, r["user_id"], plan, meta["protocol"], meta["username"], meta.get("panel_id"),
@@ -2993,26 +3061,162 @@ async def admin_users_list(query, pg=0):
                            note="جدیدترین کاربران اول هستند؛ برای مدیریت روی کاربر بزنید."), rows)
 
 
-async def admin_user_panel(query, uid_target):
+async def admin_user_panel(query, uid_target, notice=None):
     u = db.get_user(uid_target)
     if not u:
         await page(query, card("👤 مدیریت کاربر", ["❌ کاربر یافت نشد."]), [back_row("au:list:0")])
         return
-    services = db.get_user_orders(uid_target, active_only=False)
+    t = u["id"]
+    one = lambda sql, *a: db.one(sql, a)["c"] or 0
+    services = db.get_user_orders(t, active_only=False)
     active = len([o for o in services if o["status"] == "active"])
+    tests = one("SELECT COUNT(*) c FROM orders WHERE user_id=? AND price=0", t)
+    test_limit = u["test_limit"] if u["test_limit"] is not None else 1
+    ref = u["referred_by"]
     uname = f"@{h(u['username'])}" if u["username"] else NOT_SET
-    joined = datetime.datetime.fromtimestamp(u["created_at"]).strftime("%Y-%m-%d") if u["created_at"] else "—"
-    text = card(f"👤 {h(u['full_name'] or 'کاربر')}",
-                [f"💰 موجودی فعلی: <b>{fmt(u['balance'])}</b> تومان"],
-                [f"🆔 آیدی: <code>{u['id']}</code>", f"🔗 یوزرنیم: {uname}", f"📅 عضویت: <b>{joined}</b>"],
-                [f"🛍 سرویس‌ها: <b>{active}</b> فعال از <b>{len(services)}</b>",
-                 f"👥 زیرمجموعه: <b>{db.referral_count(u['id'])}</b>"
-                 + ("  ·  ⛔ <b>مسدود</b>" if u["is_blocked"] else "")])
+    hour, month = now() - 3600, now() - 30 * 86400
+    paid_sql = "FROM orders WHERE user_id=? AND price>0 AND status!='archived'"
+    info = [
+        f"⭕️ وضعیت کاربر: <b>{'⛔ مسدود' if u['is_blocked'] else '✅ فعال'}</b>",
+        f"⭕️ نام: {val(u['full_name'])}",
+        f"⭕️ نام کاربری: {uname}",
+        f"⭕️ آیدی عددی: <code>{t}</code>",
+        f"⭕️ زمان عضویت: <b>{jdate(u['created_at'])}</b>",
+        f"⭕️ آخرین استفاده از ربات: <b>{jdate(u['last_seen'])}</b>",
+        f"⭕️ اکانت تست: <b>{tests}</b> از <b>{test_limit}</b>",
+        f"⭕️ سرویس‌ها: <b>{active}</b> فعال از <b>{len(services)}</b>",
+        f"⭕️ تعداد زیرمجموعه: <b>{db.referral_count(t)}</b>",
+        f"⭕️ معرف کاربر: " + (f"<code>{ref}</code>" if ref else "<b>ندارد</b>"),
+    ]
+    money = [
+        f"🔰 موجودی کاربر: <b>{fmt(u['balance'])}</b> تومان",
+        f"🔰 تعداد خرید کل: <b>{one('SELECT COUNT(*) c ' + paid_sql, t)}</b>",
+        f"🔰 مبلغ کل پرداختی: <b>{fmt(one('SELECT SUM(amount) c FROM receipts WHERE user_id=? AND status=?', t, 'approved'))}</b> تومان",
+        f"🔰 جمع کل خرید: <b>{fmt(one('SELECT SUM(price) c ' + paid_sql, t))}</b> تومان",
+        f"🔰 درصد تخفیف: <b>{user_discount(t)}٪</b>",
+        f"🔰 فروش یک ساعت گذشته: <b>{one('SELECT COUNT(*) c ' + paid_sql + ' AND created_at>?', t, hour)}</b> عدد"
+        f" · <b>{fmt(one('SELECT SUM(price) c ' + paid_sql + ' AND created_at>?', t, hour))}</b> تومان",
+        f"🔰 فروش یک ماه گذشته: <b>{one('SELECT COUNT(*) c ' + paid_sql + ' AND created_at>?', t, month)}</b> عدد"
+        f" · <b>{fmt(one('SELECT SUM(price) c ' + paid_sql + ' AND created_at>?', t, month))}</b> تومان",
+    ]
+    text = "\n\n".join(([f"<b>{notice}</b>"] if notice else []) + [
+        "<b>👀 اطلاعات کاربر</b>", "<blockquote>" + "\n".join(info) + "</blockquote>",
+        "<b>💎 گزارشات مالی</b>", "<blockquote>" + "\n".join(money) + "</blockquote>",
+    ])
     await page(query, text, [
-        [btn("➖ کسر موجودی", f"au:deduct:{u['id']}"), btn("➕ افزایش موجودی", f"au:charge:{u['id']}")],
-        [btn("🛍 سرویس‌های کاربر", f"au:svcs:{u['id']}")],
+        [btn("♻️ بروزرسانی اطلاعات", f"au:panel:{t}")],
+        [btn("👇 کم کردن موجودی", f"au:deduct:{t}"), btn("👆 افزایش موجودی", f"au:charge:{t}")],
+        [btn("🔓 رفع مسدودی کاربر", f"au:unblock:{t}"), btn("🔒 مسدود کردن کاربر", f"au:block:{t}")],
+        [btn("✍️ ارسال پیام به کاربر", f"au:msg:{t}"), btn("🎁 درصد تخفیف", f"au:disc:{t}")],
+        [btn("🛍 مشاهده سفارشات کاربر", f"au:svcs:{t}")],
+        [btn("👥 زیرمجموعه های کاربر", f"au:refs:{t}")],
+        [btn("🔄 حذف زیرمجموعه‌ها", f"au:delrefs:{t}"), btn("🔄 خارج کردن از زیر", f"au:unref:{t}")],
+        [btn("➕ محدودیت اکانت تست", f"au:tlim:{t}"), btn("💰 مشاهده پرداختی", f"au:pays:{t}")],
+        [btn("💡 روشن کردن اکانت", f"au:on:{t}"), btn("💡 خاموش کردن اکانت", f"au:off:{t}")],
+        [btn("🔀 انتقال حساب کاربری", f"au:xfer:{t}")],
+        [btn("❌ حذف سرویس های کاربر", f"au:delsvc:{t}")],
+        [btn("0️⃣ صفر کردن موجودی", f"au:zero:{t}")],
         back_row("au:list:0"),
     ])
+
+
+# کارهایی که برگشت ندارند یک قدم تأیید می‌گیرند: (عنوان، توضیح)
+AU_CONFIRM = {
+    "zero": ("0️⃣ صفر کردن موجودی", "کل موجودی کیف پول این کاربر صفر می‌شود."),
+    "delsvc": ("❌ حذف سرویس های کاربر", "همه‌ی سرویس‌های فعال این کاربر از پنل حذف می‌شوند و پولی برنمی‌گردد."),
+    "delrefs": ("🔄 حذف زیرمجموعه‌ها", "همه‌ی زیرمجموعه‌های این کاربر از زیر او خارج می‌شوند."),
+    "off": ("💡 خاموش کردن اکانت", "همه‌ی سرویس‌های فعال این کاربر روی پنل خاموش می‌شوند تا وقتی دوباره روشن کنید."),
+}
+
+
+def _active_orders_with_panel(target):
+    out = []
+    for o in db.get_user_orders(target, active_only=False):
+        if o["status"] == "active":
+            out.append((o, db.get_panel(o["panel_id"]) if o["panel_id"] else None))
+    return out
+
+
+async def admin_user_action(query, context, uid, action, target):
+    """دکمه‌های صفحه‌ی مدیریت کاربر (au:<action>:<target>)."""
+    u = db.get_user(target)
+    if not u:
+        await page(query, card("👤 مدیریت کاربر", ["❌ کاربر یافت نشد."]), [back_row("au:list:0")])
+        return
+    name = h(u["full_name"] or target)
+    notice = None
+    cancel = [[btn("🔙 انصراف", f"au:panel:{target}")]]
+
+    if action in AU_CONFIRM:
+        title, desc = AU_CONFIRM[action]
+        await page(query, card(title, [f"👤 {name}", f"⚠️ {desc}"], note="مطمئن هستید؟"),
+                   [[btn("✅ بله، انجام بده", f"au:{action}!:{target}")], *cancel])
+        return
+
+    if action in ("block", "unblock"):
+        db.x("UPDATE users SET is_blocked=? WHERE id=?", (1 if action == "block" else 0, target))
+        notice = "⛔ کاربر مسدود شد." if action == "block" else "✅ مسدودی کاربر برداشته شد."
+    elif action == "zero!":
+        db.x("UPDATE users SET balance=0 WHERE id=?", (target,))
+        notice = "✅ موجودی صفر شد."
+    elif action == "unref":
+        db.x("UPDATE users SET referred_by=NULL WHERE id=?", (target,))
+        notice = "✅ کاربر از زیرمجموعه‌ی معرفش خارج شد."
+    elif action == "delrefs!":
+        db.x("UPDATE users SET referred_by=NULL WHERE referred_by=?", (target,))
+        notice = "✅ زیرمجموعه‌ها حذف شدند."
+    elif action in ("on", "off!", "delsvc!"):
+        await safe_edit(query, "⏳ در حال اعمال روی پنل...")
+        ok = fail = 0
+        for o, panel in _active_orders_with_panel(target):
+            if action == "on" and o["expire_at"] and o["expire_at"] < now():
+                continue  # سرویس منقضی با «روشن کردن» دوباره فعال نمی‌شود
+            try:
+                if not panel:
+                    raise RuntimeError("no panel")
+                cl = panel_client(panel)
+                if action == "delsvc!":
+                    await asyncio.to_thread(cl.del_user, o["username"])
+                    db.update_order(o["id"], status="deleted")
+                else:
+                    await asyncio.to_thread(cl.set_status, o["username"], "active" if action == "on" else "disabled")
+                ok += 1
+            except Exception as e:
+                log.warning("au %s order %s: %s", action, o["id"], e)
+                fail += 1
+        verb = {"on": "روشن شد", "off!": "خاموش شد", "delsvc!": "حذف شد"}[action]
+        await page(query, card("💡 نتیجه", [f"✅ {ok} سرویس {verb}."] + ([f"❌ {fail} سرویس ناموفق (پنل در دسترس نبود)."] if fail else [])),
+                   [back_row(f"au:panel:{target}")])
+        return
+    elif action in ("msg", "disc", "tlim", "xfer"):
+        prompts = {
+            "msg": ("✍️ ارسال پیام به کاربر", "متن پیام را بفرستید؛ همان‌طور برای کاربر ارسال می‌شود."),
+            "disc": ("🎁 درصد تخفیف", f"فعلی: {user_discount(target)}٪ — یک عدد از ۰ تا ۱۰۰ بفرستید (۰ یعنی بدون تخفیف)."),
+            "tlim": ("➕ محدودیت اکانت تست", f"فعلی: {u['test_limit'] if u['test_limit'] is not None else 1} — تعداد اکانت تستی که این کاربر می‌تواند بگیرد را بفرستید (۰ تا ۲۰)."),
+            "xfer": ("🔀 انتقال حساب کاربری", "آیدی عددی حساب مقصد را بفرستید. موجودی و همه‌ی سرویس‌های این کاربر به آن حساب منتقل می‌شوند (مقصد باید یک بار ربات را استارت کرده باشد)."),
+        }
+        title, note = prompts[action]
+        db.set_state(uid, f"au_{action}", {"target": target})
+        await page(query, card(title, [f"👤 {name}"], note=note), cancel)
+        return
+    elif action == "refs":
+        refs = db.q("SELECT * FROM users WHERE referred_by=? ORDER BY created_at DESC LIMIT 30", (target,))
+        rows = [[btn(f"👤 {(r['full_name'] or r['username'] or str(r['id']))[:24]}", f"au:panel:{r['id']}")] for r in refs]
+        await page(query, card(f"👥 زیرمجموعه‌های {name} ({db.referral_count(target)})",
+                               [] if refs else ["این کاربر زیرمجموعه‌ای ندارد."],
+                               note="۳۰ نفر آخر؛ برای مدیریت روی هر نفر بزنید." if refs else None),
+                   rows + [back_row(f"au:panel:{target}")])
+        return
+    elif action == "pays":
+        rs = db.q("SELECT * FROM receipts WHERE user_id=? ORDER BY id DESC LIMIT 20", (target,))
+        icon = {"approved": "✅", "rejected": "❌", "pending": "⏳"}
+        kind = {"wallet_charge": "شارژ کیف پول", "purchase": "خرید", "renew": "تمدید"}
+        lines = [f"{icon.get(r['status'], '•')} <b>R{r['id']}</b> · {fmt(r['amount'])} تومان · {kind.get(r['rtype'], h(r['rtype']))}"
+                 f" · {jdate(r['created_at'], False)}" for r in rs]
+        await page(query, card("💰 پرداختی‌های کاربر", lines or ["این کاربر پرداختی ندارد."],
+                               note="۲۰ رسید آخر." if rs else None), [back_row(f"au:panel:{target}")])
+        return
+    await admin_user_panel(query, target, notice)
 
 
 # ---------- تنظیمات ----------
@@ -3551,7 +3755,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "plan":
             state, sd = db.get_state(uid)
-            plan = db.get_plan(int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else None
+            plan = user_plan(int(parts[1]), uid) if len(parts) > 1 and parts[1].isdigit() else None
             service = sd.get("protocol")
             if (state != "buy_plan" or service not in SERVICES or not plan or not plan["active"]
                     or not plan_fits(plan, service)):
@@ -3571,7 +3775,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "bpw":
             state, sd = db.get_state(uid)
-            plan = db.get_plan(sd.get("plan_id"))
+            plan = user_plan(sd.get("plan_id"), uid)
             if state != "buy_password" or not plan or sd.get("protocol") not in SERVICES or not sd.get("username"):
                 await safe_edit(query, "❌ جلسه خرید منقضی شده. دوباره از «خرید اشتراک» شروع کنید.",
                                 reply_markup=InlineKeyboardMarkup([[btn("🔐 خرید اشتراک", "menu:buy")]]))
@@ -3583,7 +3787,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "pay":
             state, sd = db.get_state(uid)
-            plan = db.get_plan(sd.get("plan_id"))
+            plan = user_plan(sd.get("plan_id"), uid)
             if not plan or not sd.get("username") or sd.get("protocol") not in SERVICES:
                 await safe_edit(query, "❌ جلسه خرید منقضی شده. دوباره شروع کنید.", reply_markup=back_kb())
                 db.set_state(uid, "none")
@@ -3705,7 +3909,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             # قیمت همیشه از یک پلن واقعی، فعال و مال همین سرویس می‌آید. قبلاً دکمه‌ی دست‌ساز بدون
             # شماره‌ی پلن قیمت را از خود سفارش برمی‌داشت، و اکانت تست (قیمت صفر) بی‌نهایت مجانی تمدید می‌شد.
-            p = db.get_plan(pid) if pid else None
+            p = user_plan(pid, uid) if pid else None
             if not p or not p["active"] or not plan_fits(p, o["protocol"]):
                 return
             price = p["price"]
@@ -3808,7 +4012,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 "⌛ این خرید دیگر معتبر نیست؛ دوباره از «🔐 خرید اشتراک» شروع کنید.",
                                 reply_markup=back_kb())
                 return
-            plan = db.get_plan(data.get("plan_id"))
+            plan = user_plan(data.get("plan_id"), uid)
             if not plan or not plan["active"] or data.get("protocol") not in SERVICES:
                 clear_pending_buy(uid)
                 await safe_edit(query, "❌ این پلن دیگر فعال نیست؛ دوباره از «🔐 خرید اشتراک» انتخاب کنید.",
@@ -3947,8 +4151,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 services = db.get_user_orders(target, active_only=False)
                 lines = [f"{'🟢' if o['status'] == 'active' else '⚪'} <b>#{o['id']}</b>  ·  {h(o['username'])}  ·  "
                          f"{h(order_name(o))}" for o in services]
-                await page(query, card(f"🛍 سرویس‌های کاربر ({len(services)})", lines or ["این کاربر سرویسی ندارد."]),
+                await page(query, card(f"🛍 سفارشات کاربر ({len(services)})", lines or ["این کاربر سفارشی ندارد."]),
                            [back_row(f"au:panel:{target}")])
+            elif parts[1] != "noop" and len(parts) > 2 and parts[2].lstrip("-").isdigit():
+                await admin_user_action(query, context, uid, parts[1], int(parts[2]))
             return
 
         if cmd == "set":
@@ -4188,7 +4394,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{2,19}", text):
             await msg.reply_text("❌ نام کاربری نامعتبر است.\nباید با حرف انگلیسی شروع شود، ۳ تا ۲۰ کاراکتر، فقط حروف انگلیسی، عدد و _ :")
             return True
-        plan = db.get_plan(sd.get("plan_id"))
+        plan = user_plan(sd.get("plan_id"), uid)
         service = sd.get("protocol")
         panel = pick_panel(service) if plan and service in SERVICES else None
         if not panel:
@@ -4221,7 +4427,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             await msg.reply_text(f"❌ رمز نامعتبر است.\n{IPSEC_PASSWORD_RULES}\n\nدوباره ارسال کنید:",
                                  reply_markup=password_prompt_kb(sd.get("protocol")) if sd.get("protocol") in SERVICES else None)
             return True
-        plan = db.get_plan(sd.get("plan_id"))
+        plan = user_plan(sd.get("plan_id"), uid)
         if not plan or sd.get("protocol") not in SERVICES or not sd.get("username"):
             db.set_state(uid, "none")
             await msg.reply_text("❌ جلسه خرید منقضی شده. دوباره از «🔐 خرید اشتراک» شروع کنید.",
@@ -4314,6 +4520,46 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             except Exception:
                 pass
             await offer_pending_buy(context.bot, target)
+        await admin_user_panel(FakeQuery(msg), target)
+        return True
+
+    if state in ("au_msg", "au_disc", "au_tlim", "au_xfer") and is_admin(uid):
+        target = sd["target"]
+        num = text.strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+        if state == "au_msg":
+            try:
+                await context.bot.send_message(target, f"📩 پیام از پشتیبانی:\n\n{text}")
+                await msg.reply_text("✅ پیام برای کاربر ارسال شد.")
+            except Exception as e:
+                await msg.reply_text(f"❌ ارسال نشد (احتمالاً کاربر ربات را بلاک کرده): {e}")
+        elif state == "au_disc":
+            if not num.isdigit() or int(num) > 100:
+                await msg.reply_text("❌ یک عدد از ۰ تا ۱۰۰ بفرستید:")
+                return True
+            db.x("UPDATE users SET discount_pct=? WHERE id=?", (int(num), target))
+            await msg.reply_text(f"✅ تخفیف این کاربر {int(num)}٪ شد؛ روی خرید و تمدیدهای بعدی‌اش اعمال می‌شود.")
+        elif state == "au_tlim":
+            if not num.isdigit() or int(num) > 20:
+                await msg.reply_text("❌ یک عدد از ۰ تا ۲۰ بفرستید:")
+                return True
+            db.x("UPDATE users SET test_limit=? WHERE id=?", (int(num), target))
+            await msg.reply_text(f"✅ سقف اکانت تست این کاربر {int(num)} شد.")
+        else:
+            dest = db.get_user(int(num)) if num.isdigit() else None
+            if not dest or dest["id"] == target:
+                await msg.reply_text("❌ حساب مقصد پیدا نشد (باید یک بار ربات را استارت کرده باشد). آیدی عددی دیگری بفرستید:")
+                return True
+            src = db.get_user(target)
+            with db.lock:
+                db.conn.execute("UPDATE orders SET user_id=? WHERE user_id=?", (dest["id"], target))
+                db.conn.execute("UPDATE users SET balance=balance+? WHERE id=?", (int(src["balance"] or 0), dest["id"]))
+                db.conn.execute("UPDATE users SET balance=0 WHERE id=?", (target,))
+                db.conn.commit()
+            await msg.reply_text(f"✅ موجودی ({fmt(src['balance'] or 0)} تومان) و همه‌ی سرویس‌ها به حساب {dest['id']} منتقل شد.")
+            db.set_state(uid, "none")
+            await admin_user_panel(FakeQuery(msg), dest["id"])
+            return True
+        db.set_state(uid, "none")
         await admin_user_panel(FakeQuery(msg), target)
         return True
 
@@ -4638,7 +4884,7 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if state == "buy_card_wait_receipt":
-        plan = db.get_plan(sd.get("plan_id"))
+        plan = user_plan(sd.get("plan_id"), uid)
         # جلسه‌ی خریدِ ناقص یا از نسخه‌ی قبلی ربات (سرویسی که دیگر فروخته نمی‌شود) رسید نمی‌سازد
         if not plan or sd.get("protocol") not in SERVICES or not sd.get("username"):
             db.set_state(uid, "none")
