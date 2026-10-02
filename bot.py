@@ -84,10 +84,10 @@ CARD_ACCENT, CARD_TEXT, CARD_MUTED, CARD_DIM = "#f97316", "#f5f5f5", "#8b8b8b", 
 
 # سرویس‌هایی که مشتری با نام کاربری و رمز به آن‌ها وصل می‌شود و موقع خرید رمز دلخواه می‌گیرند
 IPSEC_SERVICES = {"ikev2", "l2tp", "pptp"}
-# همان قاعده‌ی پنل (IPSEC_PASSWORD_PATTERN): نود رمز را داخل گیومه در swanctl.conf و chap-secrets
-# می‌نویسد، پس گیومه، بک‌اسلش و فاصله باعث می‌شوند IKEv2/L2TP رمز دیگری را چک کنند
-IPSEC_PASSWORD_RE = re.compile(r"[A-Za-z0-9@#$%&*._+=!-]{6,32}")
-IPSEC_PASSWORD_RULES = "۶ تا ۳۲ کاراکتر؛ فقط حروف انگلیسی، عدد و @ # $ % & * . _ + = ! -"
+# رمز فقط ۶ رقم است چون مشتری آن را دستی در تنظیمات VPN گوشی تایپ می‌کند
+# (در قاعده‌ی پنل، IPSEC_PASSWORD_PATTERN، هم جا می‌شود)
+IPSEC_PASSWORD_RE = re.compile(r"[0-9]{6}")
+IPSEC_PASSWORD_RULES = "رمز باید دقیقاً ۶ رقم باشد (فقط عدد)."
 
 
 # ══════════════════════ آموزش اتصال (training) ══════════════════════
@@ -1351,9 +1351,8 @@ def plan_device_limit(plan):
 
 
 def random_ipsec_password():
-    """رمز ۱۰ کاراکتری بدون نویسه‌های شبیه به هم (0/O و 1/l/I) تا دستی در تنظیمات VPN آیفون راحت تایپ شود."""
-    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    return "".join(secrets.choice(alphabet) for _ in range(10))
+    """رمز ۶ رقمی تا مشتری راحت دستی در تنظیمات VPN گوشی تایپش کند."""
+    return f"{secrets.randbelow(10**6):06d}"
 
 
 def create_service_on_panel(user_id, plan, service, username, panel_id=None, ipsec_password=None):
@@ -4216,6 +4215,8 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         return True
 
     if state == "buy_password":
+        # کیبورد فارسی ارقام ۰-۹ فارسی می‌فرستد
+        text = text.strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
         if not IPSEC_PASSWORD_RE.fullmatch(text):
             await msg.reply_text(f"❌ رمز نامعتبر است.\n{IPSEC_PASSWORD_RULES}\n\nدوباره ارسال کنید:",
                                  reply_markup=password_prompt_kb(sd.get("protocol")) if sd.get("protocol") in SERVICES else None)
