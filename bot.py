@@ -33,6 +33,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logging.basicConfig(format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", level=logging.INFO)
 log = logging.getLogger("vpn_bot")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # httpx logs full URLs, which contain the bot token
 
 # ══════════════════════ تنظیمات — فقط همین دو مقدار را پر کنید ══════════════════════
 BOT_TOKEN = ""      # توکن ربات از @BotFather
