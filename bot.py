@@ -1118,6 +1118,88 @@ async def notify_admin(bot, text, reply_markup=None):
             log.warning("notify_admin failed for %s: %s", aid, e)
 
 
+def chat_target(value):
+    """آیدی گروه/کانال از تنظیمات: عدد (مثل -100123...) یا @یوزرنیم. خالی = None."""
+    v = (value or "").strip()
+    if not v:
+        return None
+    if v.lstrip("-").isdigit():
+        return int(v)
+    return v if v.startswith("@") else "@" + v
+
+
+_CARD_RE = re.compile(r"\d(?:[ \-]?\d){11,18}")
+
+
+def mask_secrets(text):
+    """شماره کارت/حساب‌های بلند داخل متن کاربر (مثلاً تیکت) قبل از رفتن به گروه پوشانده می‌شود."""
+    def _m(m):
+        digits = re.sub(r"\D", "", m.group())
+        return f"****{digits[-4:]}"
+    t = (text or "").translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+    return _CARD_RE.sub(_m, t)
+
+
+def group_user_line(uid):
+    """👤 نام (@یوزرنیم) · آیدی — برای پیام‌های گروه گزارش (HTML)."""
+    try:
+        u = db.get_user(uid)
+    except Exception:
+        u = None
+    name = (u["full_name"] if u and u["full_name"] else "") or "—"
+    uname = f" (@{h(u['username'])})" if u and u["username"] else ""
+    return f"👤 {h(name)}{uname} · <code>{h(uid)}</code>"
+
+
+async def notify_group(bot, text):
+    """گزارش لحظه‌ای به گروه گزارش (تنظیم group_id). هیچ‌وقت خطا بالا نمی‌دهد تا جریان اصلی
+    (خرید، تمدید، رسید...) متوقف نشود. متن HTML است؛ رمز سرویس، شماره کارت و توکن نباید در آن باشد."""
+    try:
+        target = chat_target(db.setting("group_id"))
+        if not target:
+            return
+        await bot.send_message(target, text, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as e:
+        log.warning("notify_group failed: %s", e)
+
+
+async def group_event(bot, title, uid=None, lines=()):
+    """قالب یکسان گزارش گروه: عنوان با ایموجی، کاربر، خط‌های جزئیات و ساعت ایران (شمسی)."""
+    try:
+        parts = [f"<b>{title}</b>"]
+        if uid is not None:
+            parts.append(group_user_line(uid))
+        parts += [x for x in lines if x]
+        parts.append(f"🕓 {jdate(now())}")
+        await notify_group(bot, "\n".join(parts))
+    except Exception as e:
+        log.warning("group_event failed: %s", e)
+
+
+def admin_name(user):
+    """نام ادمینی که رسید را بررسی کرد (برای گزارش گروه)."""
+    try:
+        return f"@{user.username}" if user.username else (user.full_name or str(user.id))
+    except Exception:
+        return "—"
+
+
+def purchase_lines(plan, service, order, panel, paid=None):
+    """جزئیات خرید/تمدید برای گروه: سرویس، یوزرنیم سرویس، حجم و مدت، مبلغ، پنل (بدون رمز و لینک)."""
+    try:
+        svc = SERVICES.get(service, service)
+        vol = order["volume_gb"] if order else plan["volume_gb"]
+        days = order["days"] if order else plan["days"]
+        price = plan["price"] if paid is None else paid
+        return [f"🧩 سرویس: {h(svc)}" + (f" · <code>{h(order['username'])}</code>" if order else ""),
+                f"📦 حجم: {h(vol_text(vol))} — {h(days)} روز",
+                f"💰 مبلغ: <b>{fmt(price)}</b> تومان",
+                f"🖥 پنل: {h(panel['name'])}" if panel else ""]
+    except Exception as e:
+        log.warning("purchase_lines failed: %s", e)
+        return []
+
+
 async def notify_admins_photo(bot, photo_id, caption, reply_markup=None):
     """ارسال عکس رسید به همه ادمین‌ها تا هرکدام بتوانند تایید/رد کنند."""
     for aid in {ADMIN_ID, *get_admins()}:
@@ -1277,6 +1359,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"نام: {u.full_name}\n"
             f"یوزرنیم: @{u.username or '—'}\n"
             f"آیدی: `{u.id}`", )
+        await group_event(context.bot, "👋 عضو جدید ربات", u.id,
+                          [f"🎁 دعوت‌شده توسط <code>{ref}</code>" if ref else ""])
     db.set_state(u.id, "none")
     await update.message.reply_text(
         f"سلام {u.first_name} عزیز به ربات خوش آمدی 🌹👋\n\nاز منوی زیر استفاده کنید:",
@@ -2901,6 +2985,9 @@ async def send_test_account(msg, context, uid):
     await deliver_service(context, uid, order, panel)
     await notify_admin(context.bot, f"🔑 اکانت تست ساخته شد\n👤 کاربر: {uid}\n"
                                     f"🧩 سرویس: {SERVICES[service]}\n🖥 پنل: {panel['name']}")
+    await group_event(context.bot, "🔑 اکانت تست ساخته شد", uid,
+                      [f"🧩 سرویس: {h(SERVICES[service])}", f"📦 حجم: {h(vol_text(vol))} — {days} روز",
+                       f"🖥 پنل: {h(panel['name'])}"])
 
 
 # ---------- منوی تمدید ----------
@@ -3042,6 +3129,7 @@ async def finalize_wallet_purchase(query, context, uid, data):
     await notify_admin(context.bot,
         f"🛍 خرید جدید (کیف پول)\n👤 {uid}\n📦 {plan_label(plan)}\n"
         f"🖥 پنل: {panel['name']}")
+    await group_event(context.bot, "🛍 خرید جدید — کیف پول", uid, purchase_lines(plan, data["protocol"], order, panel))
 
 
 # ---------- تمدید ----------
@@ -3082,7 +3170,7 @@ async def renew_pay_menu(query, uid, oid, pid):
         reply_markup=kb)
 
 
-async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
+async def do_renew_and_deliver(query, context, uid, oid, plan_id=None, via="کیف پول", paid=None, approver=None):
     o = db.get_order(oid)
     p = user_plan(plan_id or o["plan_id"], o["user_id"])
     plan = dict(p) if p else {"id": o["plan_id"], "volume_gb": o["volume_gb"], "days": o["days"], "price": o["price"], "user_limit": None}
@@ -3100,6 +3188,10 @@ async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
             parse_mode="Markdown")
     except Exception as e:
         log.warning("renew message to %s failed: %s", uid, e)
+    await group_event(context.bot, f"♻️ تمدید سرویس — {via}", uid,
+                      purchase_lines(plan, new_o["protocol"], new_o, panel, paid) +
+                      [f"⏳ اعتبار تا: {jdate(new_o['expire_at'], with_time=False)}",
+                       f"✅ تأیید: {h(approver)}" if approver else ""])
 
 
 # ---------- درخواست حذف ----------
@@ -3237,12 +3329,17 @@ async def rc_approve(query, context, rid):
     await close_receipt_for_others(context.bot, rid, query.message.chat_id,
                                    "✅ این تراکنش توسط یک ادمین دیگر تایید شد و بسته شد.")
     meta = json.loads(r["meta"] or "{}")
+    approver = admin_name(query.from_user)
     try:
         await query.message.delete()
     except Exception:
         pass
     if r["rtype"] == "wallet_charge":
         db.add_balance(r["user_id"], r["amount"])
+        await group_event(context.bot, f"💎 شارژ کیف پول — رسید #{rid} تأیید شد", r["user_id"],
+                          [f"💰 مبلغ: <b>{fmt(r['amount'])}</b> تومان",
+                           f"💎 موجودی جدید: {fmt(db.get_balance(r['user_id']))} تومان",
+                           f"✅ تأیید: {h(approver)}"])
         await context.bot.send_message(r["user_id"],
             f"💎 کاربر گرامی مبلغ {fmt(r['amount'])} تومان به کیف پول شما واریز گردید. با تشکر از پرداخت شما 🙏\n\n"
             f"🛒 کد پیگیری شما: R{r['id']}\n"
@@ -3268,6 +3365,9 @@ async def rc_approve(query, context, rid):
                 f"❌ خطا در ساخت سرویس: {e}\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما برگشت.")
             await query.message.reply_text(f"⚠️ ساخت سرویس ناموفق ({e})\n💰 وجه به‌صورت خودکار به کیف پول کاربر برگشت.")
             return
+        await group_event(context.bot, f"🛍 خرید جدید — کارت به کارت (رسید #{rid})", r["user_id"],
+                          purchase_lines(plan, meta["protocol"], order, panel, r["amount"]) +
+                          [f"✅ تأیید: {h(approver)}"])
         await deliver_service(context, r["user_id"], order, panel)
         await query.message.reply_text(f"✅ رسید #{rid} تایید شد — سرویس ساخته و برای کاربر ارسال شد.")
     elif r["rtype"] == "renew":
@@ -3283,7 +3383,8 @@ async def rc_approve(query, context, rid):
             await query.message.reply_text(f"⚠️ سفارش رسید #{rid} فعال نیست؛ تمدید انجام نشد و وجه به کیف پول کاربر برگشت.")
             return
         try:
-            await do_renew_and_deliver(query, context, r["user_id"], o["id"], meta.get("plan_id"))
+            await do_renew_and_deliver(query, context, r["user_id"], o["id"], meta.get("plan_id"),
+                                       via=f"کارت به کارت (رسید #{rid})", paid=r["amount"], approver=approver)
         except Exception as e:
             db.add_balance(r["user_id"], r["amount"])  # بازگشت خودکار وجه
             await context.bot.send_message(r["user_id"],
@@ -3305,6 +3406,11 @@ async def rc_reject(query, context, rid):
     db.set_receipt_status(rid, "rejected")
     await close_receipt_for_others(context.bot, rid, query.message.chat_id,
                                    "❌ این تراکنش توسط یک ادمین دیگر رد شد و بسته شد.")
+    kinds = {"wallet_charge": "شارژ کیف پول", "purchase": "خرید سرویس", "renew": "تمدید سرویس"}
+    await group_event(context.bot, f"❌ رسید #{rid} رد شد", r["user_id"],
+                      [f"🧾 نوع: {h(kinds.get(r['rtype'], r['rtype']))}",
+                       f"💰 مبلغ: <b>{fmt(r['amount'])}</b> تومان",
+                       f"🚫 رد توسط: {h(admin_name(query.from_user))}"])
     try:
         await query.message.delete()
     except Exception:
@@ -3893,7 +3999,7 @@ async def send_backup(bot, chat_id, note="💾 بکاپ دیتابیس ربات"
     os.close(fd)
     try:
         await asyncio.to_thread(db.backup_to, tmp)
-        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+        stamp = datetime.datetime.now(IRAN_TZ).strftime("%Y-%m-%d_%H-%M")  # وقت ایران
         t = db.totals()
         with open(tmp, "rb") as f:
             await bot.send_document(chat_id, f, filename=f"tifusi-bot-backup_{stamp}.db",
@@ -3911,14 +4017,31 @@ async def admin_backup_menu(query):
     auto = db.setting("backup_auto", "1") == "1"
     text = card("💾 بکاپ ربات",
                 ["📦 شامل همه‌چیز: کاربران، کیف پول‌ها، سفارش‌ها، رسیدها، پنل‌ها، پلن‌ها و تنظیمات"],
-                [f"🕓 بکاپ خودکار روزانه (۳ بامداد): <b>{'🟢 روشن' if auto else '🔴 خاموش'}</b>",
+                [f"🕓 بکاپ خودکار روزانه: <b>{'🟢 روشن' if auto else '🔴 خاموش'}</b>",
+                 f"⏰ ساعت بکاپ: <b>{daily_time_text('daily_backup')}</b>  ·  ساعت گزارش: <b>{daily_time_text('daily_report')}</b> (وقت ایران)",
                  f"📢 کانال بکاپ: {val(db.setting('backup_chat_id'))}"],
                 note="کانال بکاپ را از «⚙️ تنظیمات عمومی» تنظیم کنید.")
     await page(query, text, [
         [btn("📥 دریافت بکاپ الان", "bk:now")],
         [btn(f"🔁 خودکار: {'روشن ✅' if auto else 'خاموش ❌'}", "bk:auto"), btn("♻️ بازگردانی", "bk:restore")],
+        [btn("⏰ ساعت بکاپ", "bk:hours:daily_backup"), btn("⏰ ساعت گزارش", "bk:hours:daily_report")],
         back_row("admin:g:update"),
     ])
+
+
+async def admin_hour_picker(query, name):
+    """انتخاب ساعت (وقت ایران) برای بکاپ یا گزارش روزانه — ۲۴ دکمه."""
+    label = DAILY_JOBS[name][3]
+    cur = daily_time(name)[0]
+    rows, row = [], []
+    for hh in range(24):
+        row.append(btn(f"{'✅ ' if hh == cur else ''}{hh:02d}:00", f"bk:sethour:{name}:{hh}"))
+        if len(row) == 4:
+            rows.append(row)
+            row = []
+    rows.append(back_row("admin:backup"))
+    await page(query, card(f"⏰ ساعت {label}", [f"ساعت فعلی: <b>{daily_time_text(name)}</b> به وقت ایران"],
+                           note="ساعت جدید را انتخاب کنید؛ بدون ری‌استارت اعمال می‌شود."), rows)
 
 
 # ---------- پیام همگانی ----------
@@ -4255,7 +4378,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 await safe_edit(query, "♻️ در حال تمدید...")
                 try:
-                    await do_renew_and_deliver(query, context, uid, oid, plan_id)
+                    await do_renew_and_deliver(query, context, uid, oid, plan_id, paid=price)
                 except Exception as e:
                     db.add_balance(uid, price)
                     await context.bot.send_message(uid, f"❌ خطا در تمدید: {e}\n💰 مبلغ به کیف پول برگشت.")
@@ -4371,6 +4494,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif parts[1] == "auto":
                 db.set_setting("backup_auto", "0" if db.setting("backup_auto", "1") == "1" else "1")
                 await admin_backup_menu(query)
+            elif parts[1] == "hours" and len(parts) > 2 and parts[2] in DAILY_JOBS:
+                await admin_hour_picker(query, parts[2])
+            elif parts[1] == "sethour" and len(parts) > 3 and parts[2] in DAILY_JOBS and parts[3].isdigit() \
+                    and 0 <= int(parts[3]) < 24:
+                name = parts[2]
+                db.set_setting(DAILY_JOBS[name][0], f"{int(parts[3]):02d}:00")
+                schedule_daily_jobs(context.job_queue, only=name)
+                await admin_backup_menu(query)  # ساعت جدید همین‌جا در کادر صفحه دیده می‌شود
             elif parts[1] == "restore":
                 if uid != ADMIN_ID:
                     await safe_edit(query, "⛔ فقط ادمین اصلی می‌تواند بکاپ را بازگردانی کند.",
@@ -4831,6 +4962,9 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         await msg.reply_text(f"✅ تیکت #{tid} ثبت شد. به‌زودی پاسخ می‌گیرید.", reply_markup=main_menu_kb(uid))
         await notify_admin(context.bot, f"🎫 تیکت جدید #{tid} از کاربر {uid}:\n\n{text}",
             reply_markup=InlineKeyboardMarkup([[btn("✍️ پاسخ", f"tk:reply:{tid}"), btn("🔒 بستن", f"tk:close:{tid}")]]))
+        preview = mask_secrets(text)
+        preview = preview[:200] + ("…" if len(preview) > 200 else "")
+        await group_event(context.bot, f"🎫 تیکت جدید #{tid}", uid, [f"💬 {h(preview)}"])
         return True
 
     # ---------- ادمین اصلی: افزودن ادمین ----------
@@ -5256,6 +5390,8 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.set_state(uid, "none")
         await msg.reply_text(f"✅ تیکت #{tid} ثبت شد.", reply_markup=main_menu_kb(uid))
         await notify_admin(context.bot, f"🎫 تیکت جدید #{tid} از کاربر {uid} (عکس)")
+        await group_event(context.bot, f"🎫 تیکت جدید #{tid} (عکس)", uid,
+                          [f"💬 {h(mask_secrets(msg.caption)[:200])}" if msg.caption else ""])
         return
 
     if state == "charge_wait_receipt":
@@ -5357,9 +5493,12 @@ async def health_job(context: ContextTypes.DEFAULT_TYPE):
         if not ok and p["status"] == "active":
             db.update_panel(p["id"], status="offline")
             await notify_admin(context.bot, f"⚠️ پنل «{p['name']}» offline شد و از فروش خارج شد!")
+            await group_event(context.bot, f"🔴 پنل «{h(p['name'])}» آفلاین شد",
+                              lines=["از فروش خارج شد تا دوباره وصل شود."])
         elif ok and p["status"] == "offline":
             db.update_panel(p["id"], status="active")
             await notify_admin(context.bot, f"✅ پنل «{p['name']}» دوباره online شد.")
+            await group_event(context.bot, f"🟢 پنل «{h(p['name'])}» دوباره آنلاین شد")
         if ok and p["checked_at"] and set(before) != set(after):
             fresh = db.get_panel(p["id"])
             waiting = [SERVICES[s] for s in SERVICES
@@ -5415,16 +5554,64 @@ async def daily_backup_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def daily_report_job(context: ContextTypes.DEFAULT_TYPE):
-    """گزارش خودکار هر شب ساعت ۰۰:۰۰."""
-    text = report_text("گزارش روزانه", now() - 86400)
+    """گزارش خودکار روزانه (۲۴ ساعت گذشته) در ساعتی که در صفحه‌ی بکاپ تنظیم شده (وقت ایران)."""
+    text = report_text(f"گزارش روزانه — {jdate(now() - 3600, with_time=False)}", now() - 86400)
     await notify_admin(context.bot, text)
     for key in ("channel_id", "group_id"):
-        target = db.setting(key)
+        target = chat_target(db.setting(key))
         if target:
             try:
-                await context.bot.send_message(target if target.startswith("@") else int(target), text)
+                await context.bot.send_message(target, text)
             except Exception as e:
                 log.warning("report to %s failed: %s", key, e)
+
+
+# ---------- ساعت بکاپ و گزارش روزانه (وقت ایران) ----------
+try:
+    from zoneinfo import ZoneInfo
+    IRAN_TZ = ZoneInfo("Asia/Tehran")
+except Exception:  # سرور بدون tzdata: ایران از ۱۴۰۱ ساعت تابستانی ندارد، پس +۳:۳۰ ثابت درست است
+    IRAN_TZ = datetime.timezone(datetime.timedelta(hours=3, minutes=30))
+
+# نام job ← (کلید تنظیم، پیش‌فرض به وقت ایران، تابع، برچسب فارسی)
+DAILY_JOBS = {
+    "daily_report": ("report_hour", "00:00", daily_report_job, "📈 گزارش روزانه"),
+    "daily_backup": ("backup_hour", "04:00", daily_backup_job, "💾 بکاپ روزانه"),
+}
+
+
+def daily_time(name):
+    """ساعت ذخیره‌شده‌ی یک job به‌صورت (ساعت، دقیقه) به وقت ایران؛ مقدار خراب = پیش‌فرض."""
+    key, default, _, _ = DAILY_JOBS[name]
+    for raw in (db.setting(key, default), default):
+        try:
+            hh, mm = (int(x) for x in (raw or "").strip().split(":"))
+            if 0 <= hh < 24 and 0 <= mm < 60:
+                return hh, mm
+        except ValueError:
+            pass
+    return 0, 0
+
+
+def daily_time_text(name):
+    hh, mm = daily_time(name)
+    return f"{hh:02d}:{mm:02d}"
+
+
+def schedule_daily_jobs(job_queue, only=None):
+    """job های روزانه را با ساعت تنظیمات (وقت ایران) می‌سازد؛ job قبلی هم‌نام حذف می‌شود، پس
+    بعد از عوض شدن ساعت بدون ری‌استارت ربات اعمال می‌شود. ساعت با tzinfo ایران به job_queue داده می‌شود
+    و خودش به UTC سرور تبدیل می‌کند."""
+    if not job_queue:
+        return
+    for name, (_, _, callback, _) in DAILY_JOBS.items():
+        if only and name != only:
+            continue
+        for old in job_queue.get_jobs_by_name(name):
+            old.schedule_removal()
+        hh, mm = daily_time(name)
+        job_queue.run_daily(callback, time=datetime.time(hh, mm, tzinfo=IRAN_TZ), name=name)
+        log.info("%s scheduled at %02d:%02d Asia/Tehran", name, hh, mm)
 
 
 async def on_error(update, context):
@@ -5464,8 +5651,7 @@ def main():
     if app.job_queue:
         app.job_queue.run_repeating(health_job, interval=300, first=30)
         app.job_queue.run_repeating(reminder_job, interval=3600, first=120)
-        app.job_queue.run_daily(daily_report_job, time=datetime.time(23, 0))
-        app.job_queue.run_daily(daily_backup_job, time=datetime.time(3, 0))
+        schedule_daily_jobs(app.job_queue)  # گزارش و بکاپ روزانه با ساعت قابل تنظیم (وقت ایران)
     else:
         log.warning("job-queue نصب نیست: چک سلامت، یادآوری انقضا و بکاپ خودکار اجرا نمی‌شوند "
                     "(pip install 'python-telegram-bot[job-queue]')")
