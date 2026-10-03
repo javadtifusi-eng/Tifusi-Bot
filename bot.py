@@ -1148,22 +1148,37 @@ def who(uid):
     return " ".join(x for x in ((u["full_name"] or "").strip(), tag, f"({uid})") if x)
 
 
-async def _send_group(bot, text):
+def group_thread(topic):
+    """Thread id of a report topic in the group (settings topic_<name>); None without topics."""
+    v = (db.setting(f"topic_{topic}") or "").strip() if topic else ""
+    return int(v) if v.isdigit() else None
+
+
+async def _send_group(bot, text, topic=None):
     target = _chat_target(db.setting("group_id"))
     if target is None:
         return
+    text = f"{text}\n🕓 {jdate(now())}"
+    thread = group_thread(topic)
     try:
-        await bot.send_message(target, f"{text}\n🕓 {jdate(now())}")
+        await bot.send_message(target, text, message_thread_id=thread)
     except Exception as e:
+        if thread and "thread" in str(e).lower():
+            # The topic was deleted in the group: still report, in General.
+            try:
+                await bot.send_message(target, text)
+                return
+            except Exception as e2:
+                e = e2
         log.warning("group report failed: %s", e)
 
 
-def notify_group(bot, text):
+def notify_group(bot, text, topic=None):
     """گزارش لحظه‌ای به گروه گزارش، بدون منتظر ماندن: گروهِ کند یا خراب هیچ‌وقت خرید را معطل نمی‌کند.
     رمز سرویس مشتری، شماره کارت و توکن هرگز در این متن‌ها نمی‌آیند."""
     if _chat_target(db.setting("group_id")) is None:
         return
-    task = asyncio.create_task(_send_group(bot, text))
+    task = asyncio.create_task(_send_group(bot, text, topic))
     _group_tasks.add(task)
     task.add_done_callback(_group_tasks.discard)
 
@@ -1182,7 +1197,7 @@ async def send_receipt_to_admins(bot, rid, photo_id, caption):
         r = db.get_receipt(rid)
         kinds = {"wallet_charge": "شارژ کیف پول", "purchase": "خرید", "renew": "تمدید"}
         notify_group(bot, f"🧾 رسید جدید منتظر تأیید — R{rid}\n👤 {who(r['user_id'])}\n"
-                          f"📌 {kinds.get(r['rtype'], r['rtype'])} | 💸 {fmt(r['amount'])} تومان")
+                          f"📌 {kinds.get(r['rtype'], r['rtype'])} | 💸 {fmt(r['amount'])} تومان", topic="pay")
         meta = json.loads(r["meta"] or "{}")
         meta["admin_msgs"] = msgs
         db.x("UPDATE receipts SET meta=? WHERE id=?", (json.dumps(meta, ensure_ascii=False), rid))
@@ -1321,7 +1336,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"نام: {u.full_name}\n"
             f"یوزرنیم: @{u.username or '—'}\n"
             f"آیدی: `{u.id}`", )
-        notify_group(context.bot, f"👤 عضو جدید ربات: {who(u.id)}")
+        notify_group(context.bot, f"👤 عضو جدید ربات: {who(u.id)}", topic="users")
     db.set_state(u.id, "none")
     await update.message.reply_text(
         f"سلام {u.first_name} عزیز به ربات خوش آمدی 🌹👋\n\nاز منوی زیر استفاده کنید:",
@@ -2655,7 +2670,7 @@ async def deliver_service(context, chat_id, order, panel):
     notify_group(context.bot,
                  f"{'🛍 خرید جدید' if order['price'] else '🎁 اکانت تست'}\n👤 {who(order['user_id'])}\n"
                  f"🧩 {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — {order['days']} روز\n"
-                 f"🔖 {order['username']} | 💰 {fmt(order['price'])} تومان")
+                 f"🔖 {order['username']} | 💰 {fmt(order['price'])} تومان", topic="sales")
     links = None
     if order["protocol"] in IPSEC_SERVICES:
         try:
@@ -3140,7 +3155,7 @@ async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
     new_o, panel = await asyncio.to_thread(do_renew, o, plan)
     notify_group(context.bot,
                  f"♻️ تمدید سرویس\n👤 {who(new_o['user_id'])}\n🔖 {new_o['username']} — "
-                 f"{vol_text(new_o['volume_gb'])} — {new_o['days']} روز | 💰 {fmt(plan['price'])} تومان")
+                 f"{vol_text(new_o['volume_gb'])} — {new_o['days']} روز | 💰 {fmt(plan['price'])} تومان", topic="sales")
     dt = datetime.datetime.fromtimestamp(new_o["expire_at"]).strftime("%Y-%m-%d %H:%M")
     try:
         await context.bot.send_message(uid,
@@ -3293,7 +3308,7 @@ async def rc_approve(query, context, rid):
         await query.message.delete()
     except Exception:
         pass
-    notify_group(context.bot, f"✅ رسید R{rid} تأیید شد\n👤 {who(r['user_id'])} | 💸 {fmt(r['amount'])} تومان")
+    notify_group(context.bot, f"✅ رسید R{rid} تأیید شد\n👤 {who(r['user_id'])} | 💸 {fmt(r['amount'])} تومان", topic="pay")
     if r["rtype"] == "wallet_charge":
         db.add_balance(r["user_id"], r["amount"])
         await context.bot.send_message(r["user_id"],
@@ -3356,7 +3371,7 @@ async def rc_reject(query, context, rid):
         await query.answer("⚠️ این تراکنش قبلاً توسط یک ادمین دیگر بررسی و بسته شده است.", show_alert=True)
         return
     db.set_receipt_status(rid, "rejected")
-    notify_group(context.bot, f"❌ رسید R{rid} رد شد\n👤 {who(r['user_id'])} | 💸 {fmt(r['amount'])} تومان")
+    notify_group(context.bot, f"❌ رسید R{rid} رد شد\n👤 {who(r['user_id'])} | 💸 {fmt(r['amount'])} تومان", topic="pay")
     await close_receipt_for_others(context.bot, rid, query.message.chat_id,
                                    "❌ این تراکنش توسط یک ادمین دیگر رد شد و بسته شد.")
     try:
@@ -3979,7 +3994,7 @@ async def admin_panels_cap(query):
 
 
 # ---------- بکاپ ----------
-async def send_backup(bot, chat_id, note="💾 بکاپ دیتابیس ربات"):
+async def send_backup(bot, chat_id, note="💾 بکاپ دیتابیس ربات", thread_id=None):
     """کپی سازگار دیتابیس (کاربران، کیف پول‌ها، سفارش‌ها، پنل‌ها، پلن‌ها، تنظیمات) به‌صورت فایل برای ادمین."""
     fd, tmp = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -3988,7 +4003,7 @@ async def send_backup(bot, chat_id, note="💾 بکاپ دیتابیس ربات"
         stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
         t = db.totals()
         with open(tmp, "rb") as f:
-            await bot.send_document(chat_id, f, filename=f"bot-backup_{stamp}.db",
+            await bot.send_document(chat_id, f, filename=f"bot-backup_{stamp}.db", message_thread_id=thread_id,
                 caption=(f"{note}\n🕓 {stamp}\n👤 کاربران: {t['users']} | 🧾 سفارش‌ها: {t['orders']} | "
                          f"✅ فعال: {t['active']}\n\n♻️ برای بازگردانی: پنل مدیریت ← 💾 بکاپ ← بازگردانی"))
         return True
@@ -4371,7 +4386,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if o and o["user_id"] == uid and o["status"] == "active":
                     db.update_order(oid, status="delreq_pending")
                     await safe_edit(query, "✅ درخواست حذف ثبت شد و برای ادمین ارسال شد.", reply_markup=back_kb())
-                    notify_group(context.bot, f"🗑 درخواست حذف سرویس #{oid} — {o['username']}\n👤 {who(uid)}")
+                    notify_group(context.bot, f"🗑 درخواست حذف سرویس #{oid} — {o['username']}\n👤 {who(uid)}", topic="tickets")
                     await notify_admin(context.bot,
                         f"🗑 درخواست حذف سرویس\n👤 کاربر: {uid}\n🛍 سرویس #{oid} — {o['username']}",
                         reply_markup=InlineKeyboardMarkup([
@@ -4924,7 +4939,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         tid = db.create_ticket(uid, text)
         db.set_state(uid, "none")
         await msg.reply_text(f"✅ تیکت #{tid} ثبت شد. به‌زودی پاسخ می‌گیرید.", reply_markup=main_menu_kb(uid))
-        notify_group(context.bot, f"🎫 تیکت جدید #{tid}\n👤 {who(uid)}")
+        notify_group(context.bot, f"🎫 تیکت جدید #{tid}\n👤 {who(uid)}", topic="tickets")
         await notify_admin(context.bot, f"🎫 تیکت جدید #{tid} از کاربر {uid}:\n\n{text}",
             reply_markup=InlineKeyboardMarkup([[btn("✍️ پاسخ", f"tk:reply:{tid}"), btn("🔒 بستن", f"tk:close:{tid}")]]))
         return True
@@ -5361,7 +5376,7 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tid = db.create_ticket(uid, msg.caption or "(عکس)", photo_id)
         db.set_state(uid, "none")
         await msg.reply_text(f"✅ تیکت #{tid} ثبت شد.", reply_markup=main_menu_kb(uid))
-        notify_group(context.bot, f"🎫 تیکت جدید #{tid} (عکس)\n👤 {who(uid)}")
+        notify_group(context.bot, f"🎫 تیکت جدید #{tid} (عکس)\n👤 {who(uid)}", topic="tickets")
         await notify_admin(context.bot, f"🎫 تیکت جدید #{tid} از کاربر {uid} (عکس)")
         return
 
@@ -5463,11 +5478,11 @@ async def health_job(context: ContextTypes.DEFAULT_TYPE):
             ok, before, after = False, {}, {}
         if not ok and p["status"] == "active":
             db.update_panel(p["id"], status="offline")
-            notify_group(context.bot, f"⚠️ پنل «{p['name']}» offline شد و از فروش خارج شد!")
+            notify_group(context.bot, f"⚠️ پنل «{p['name']}» offline شد و از فروش خارج شد!", topic="status")
             await notify_admin(context.bot, f"⚠️ پنل «{p['name']}» offline شد و از فروش خارج شد!")
         elif ok and p["status"] == "offline":
             db.update_panel(p["id"], status="active")
-            notify_group(context.bot, f"✅ پنل «{p['name']}» دوباره online شد.")
+            notify_group(context.bot, f"✅ پنل «{p['name']}» دوباره online شد.", topic="status")
             await notify_admin(context.bot, f"✅ پنل «{p['name']}» دوباره online شد.")
         if ok and p["checked_at"] and set(before) != set(after):
             fresh = db.get_panel(p["id"])
@@ -5516,9 +5531,11 @@ async def daily_backup_job(context: ContextTypes.DEFAULT_TYPE):
     chat = db.setting("backup_chat_id", "").strip()
     if chat:
         targets.append(chat if chat.startswith("@") else int(chat) if chat.lstrip("-").isdigit() else chat)
+    group = _chat_target(db.setting("group_id"))
     for target in targets:
         try:
-            await send_backup(context.bot, target, "💾 بکاپ خودکار روزانه‌ی ربات")
+            await send_backup(context.bot, target, "💾 بکاپ خودکار روزانه‌ی ربات",
+                              group_thread("backup") if target == group else None)
         except Exception as e:
             log.warning("daily backup to %s failed: %s", target, e)
 
@@ -5531,7 +5548,8 @@ async def daily_report_job(context: ContextTypes.DEFAULT_TYPE):
         target = db.setting(key)
         if target:
             try:
-                await context.bot.send_message(target if target.startswith("@") else int(target), text)
+                await context.bot.send_message(target if target.startswith("@") else int(target), text,
+                                               message_thread_id=group_thread("report") if key == "group_id" else None)
             except Exception as e:
                 log.warning("report to %s failed: %s", key, e)
 
