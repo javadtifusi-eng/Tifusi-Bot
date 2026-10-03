@@ -1127,6 +1127,47 @@ async def notify_admins_photo(bot, photo_id, caption, reply_markup=None):
             log.warning("notify_admins_photo failed for %s: %s", aid, e)
 
 
+# ---------- گزارش لحظه‌ای در گروه گزارش (تنظیمات ← 👥 آیدی گروه) ----------
+_group_tasks = set()
+
+
+def _chat_target(value):
+    """@name, or the numeric -100… id as an int; None when not set."""
+    v = (value or "").strip()
+    if not v:
+        return None
+    return int(v) if v.lstrip("-").isdigit() else v
+
+
+def who(uid):
+    """«name @username (id)» for a report line."""
+    u = db.get_user(uid)
+    if not u:
+        return str(uid)
+    tag = f"@{u['username']}" if u["username"] else ""
+    return " ".join(x for x in ((u["full_name"] or "").strip(), tag, f"({uid})") if x)
+
+
+async def _send_group(bot, text):
+    target = _chat_target(db.setting("group_id"))
+    if target is None:
+        return
+    try:
+        await bot.send_message(target, f"{text}\n🕓 {jdate(now())}")
+    except Exception as e:
+        log.warning("group report failed: %s", e)
+
+
+def notify_group(bot, text):
+    """گزارش لحظه‌ای به گروه گزارش، بدون منتظر ماندن: گروهِ کند یا خراب هیچ‌وقت خرید را معطل نمی‌کند.
+    رمز سرویس مشتری، شماره کارت و توکن هرگز در این متن‌ها نمی‌آیند."""
+    if _chat_target(db.setting("group_id")) is None:
+        return
+    task = asyncio.create_task(_send_group(bot, text))
+    _group_tasks.add(task)
+    task.add_done_callback(_group_tasks.discard)
+
+
 async def send_receipt_to_admins(bot, rid, photo_id, caption):
     """ارسال رسید به همه ادمین‌ها + ذخیره آیدی پیام‌ها تا بعداً برای بقیه بسته شود."""
     msgs = []
@@ -1139,6 +1180,9 @@ async def send_receipt_to_admins(bot, rid, photo_id, caption):
             log.warning("send_receipt_to_admins failed for %s: %s", aid, e)
     try:
         r = db.get_receipt(rid)
+        kinds = {"wallet_charge": "شارژ کیف پول", "purchase": "خرید", "renew": "تمدید"}
+        notify_group(bot, f"🧾 رسید جدید منتظر تأیید — R{rid}\n👤 {who(r['user_id'])}\n"
+                          f"📌 {kinds.get(r['rtype'], r['rtype'])} | 💸 {fmt(r['amount'])} تومان")
         meta = json.loads(r["meta"] or "{}")
         meta["admin_msgs"] = msgs
         db.x("UPDATE receipts SET meta=? WHERE id=?", (json.dumps(meta, ensure_ascii=False), rid))
@@ -1277,6 +1321,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"نام: {u.full_name}\n"
             f"یوزرنیم: @{u.username or '—'}\n"
             f"آیدی: `{u.id}`", )
+        notify_group(context.bot, f"👤 عضو جدید ربات: {who(u.id)}")
     db.set_state(u.id, "none")
     await update.message.reply_text(
         f"سلام {u.first_name} عزیز به ربات خوش آمدی 🌹👋\n\nاز منوی زیر استفاده کنید:",
@@ -2607,6 +2652,10 @@ async def deliver_service(context, chat_id, order, panel):
     تحویل متنی قبلی (خلاصه، بارکد، جزئیات) فرستاده می‌شود."""
     dt = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")
     summary = f"✅ {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — تا {dt}"
+    notify_group(context.bot,
+                 f"{'🛍 خرید جدید' if order['price'] else '🎁 اکانت تست'}\n👤 {who(order['user_id'])}\n"
+                 f"🧩 {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — {order['days']} روز\n"
+                 f"🔖 {order['username']} | 💰 {fmt(order['price'])} تومان")
     links = None
     if order["protocol"] in IPSEC_SERVICES:
         try:
@@ -3089,6 +3138,9 @@ async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
     # فقط شکستِ خودِ تمدید خطا برمی‌گرداند (و باعث بازگشت وجه می‌شود)؛ اگر تمدید انجام شد ولی پیام نرسید،
     # نباید پول برگردد چون سرویس تمدید شده است.
     new_o, panel = await asyncio.to_thread(do_renew, o, plan)
+    notify_group(context.bot,
+                 f"♻️ تمدید سرویس\n👤 {who(new_o['user_id'])}\n🔖 {new_o['username']} — "
+                 f"{vol_text(new_o['volume_gb'])} — {new_o['days']} روز | 💰 {fmt(plan['price'])} تومان")
     dt = datetime.datetime.fromtimestamp(new_o["expire_at"]).strftime("%Y-%m-%d %H:%M")
     try:
         await context.bot.send_message(uid,
@@ -3241,6 +3293,7 @@ async def rc_approve(query, context, rid):
         await query.message.delete()
     except Exception:
         pass
+    notify_group(context.bot, f"✅ رسید R{rid} تأیید شد\n👤 {who(r['user_id'])} | 💸 {fmt(r['amount'])} تومان")
     if r["rtype"] == "wallet_charge":
         db.add_balance(r["user_id"], r["amount"])
         await context.bot.send_message(r["user_id"],
@@ -3303,6 +3356,7 @@ async def rc_reject(query, context, rid):
         await query.answer("⚠️ این تراکنش قبلاً توسط یک ادمین دیگر بررسی و بسته شده است.", show_alert=True)
         return
     db.set_receipt_status(rid, "rejected")
+    notify_group(context.bot, f"❌ رسید R{rid} رد شد\n👤 {who(r['user_id'])} | 💸 {fmt(r['amount'])} تومان")
     await close_receipt_for_others(context.bot, rid, query.message.chat_id,
                                    "❌ این تراکنش توسط یک ادمین دیگر رد شد و بسته شد.")
     try:
@@ -3540,7 +3594,42 @@ SETTING_KEYS = [
     ("faq_text", "❓ سوالات متداول"),
     ("channel_id", "📢 کانال گزارش"),
     ("group_id", "👥 گروه گزارش"),
+    ("backup_time", "🕓 ساعت بکاپ روزانه (وقت ایران)"),
+    ("report_time", "🕓 ساعت گزارش روزانه (وقت ایران)"),
 ]
+# Iran has had no daylight saving since 2022: a fixed +03:30.
+IRAN_OFFSET = datetime.timedelta(hours=3, minutes=30)
+DAILY_TIMES = {"backup_time": "06:30", "report_time": "02:30"}  # the old 03:00 and 23:00 UTC
+
+
+def parse_hhmm(text):
+    """«6:30»، «۰۶:۳۰» یا «18» ← «06:30»؛ None اگر ساعت معتبر نبود."""
+    t = (text or "").strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    m = re.fullmatch(r"(\d{1,2})(?:[:.٫](\d{2}))?", t)
+    if not m:
+        return None
+    h, mi = int(m.group(1)), int(m.group(2) or 0)
+    return f"{h:02d}:{mi:02d}" if h < 24 and mi < 60 else None
+
+
+def daily_time(key):
+    return parse_hhmm(db.setting(key, DAILY_TIMES[key])) or DAILY_TIMES[key]
+
+
+def iran_to_utc(hhmm):
+    h, m = map(int, hhmm.split(":"))
+    return (datetime.datetime(2000, 1, 1, h, m) - IRAN_OFFSET).time().replace(tzinfo=datetime.timezone.utc)
+
+
+def schedule_daily_jobs(jq):
+    """Daily report and backup at the times set in the bot (Iran time); re-run after a change, no restart."""
+    if not jq:
+        return
+    for name in ("daily_report", "daily_backup"):
+        for job in jq.get_jobs_by_name(name):
+            job.schedule_removal()
+    jq.run_daily(daily_report_job, time=iran_to_utc(daily_time("report_time")), name="daily_report")
+    jq.run_daily(daily_backup_job, time=iran_to_utc(daily_time("backup_time")), name="daily_backup")
 # چیدمان دکمه‌ها در صفحه تنظیمات (یک ردیف کامل یا دو دکمه کنار هم)
 SETTING_LAYOUT = [
     ("test_volume_gb", "test_days"),
@@ -3580,10 +3669,13 @@ async def admin_settings(query):
 
 async def admin_channel(query):
     text = card("📢 کانال و گروه گزارش",
-                [f"📢 کانال: {val(db.setting('channel_id'))}", f"👥 گروه: {val(db.setting('group_id'))}"],
-                note="آیدی را با @ یا عدد -100 وارد کنید. ربات باید در کانال/گروه ادمین باشد.")
+                [f"📢 کانال: {val(db.setting('channel_id'))}", f"👥 گروه: {val(db.setting('group_id'))}",
+                 f"🕓 گزارش روزانه: ساعت {daily_time('report_time')} به وقت ایران"],
+                note="آیدی را با @ یا عدد -100 وارد کنید. ربات باید در کانال/گروه ادمین باشد. "
+                     "گروه، گزارش لحظه‌ای (خرید، تمدید، رسید، تیکت، عضو جدید، وضعیت پنل) را هم می‌گیرد.")
     await page(query, text, [
         [btn("👥 آیدی گروه", "set:group_id"), btn("📢 آیدی کانال", "set:channel_id")],
+        [btn("🕓 ساعت گزارش روزانه", "set:report_time")],
         back_row("admin:g:shop"),
     ])
 
@@ -3911,12 +4003,13 @@ async def admin_backup_menu(query):
     auto = db.setting("backup_auto", "1") == "1"
     text = card("💾 بکاپ ربات",
                 ["📦 شامل همه‌چیز: کاربران، کیف پول‌ها، سفارش‌ها، رسیدها، پنل‌ها، پلن‌ها و تنظیمات"],
-                [f"🕓 بکاپ خودکار روزانه (۳ بامداد): <b>{'🟢 روشن' if auto else '🔴 خاموش'}</b>",
+                [f"🕓 بکاپ خودکار روزانه (ساعت {daily_time('backup_time')} به وقت ایران): <b>{'🟢 روشن' if auto else '🔴 خاموش'}</b>",
                  f"📢 کانال بکاپ: {val(db.setting('backup_chat_id'))}"],
                 note="کانال بکاپ را از «⚙️ تنظیمات عمومی» تنظیم کنید.")
     await page(query, text, [
         [btn("📥 دریافت بکاپ الان", "bk:now")],
         [btn(f"🔁 خودکار: {'روشن ✅' if auto else 'خاموش ❌'}", "bk:auto"), btn("♻️ بازگردانی", "bk:restore")],
+        [btn("🕓 ساعت بکاپ روزانه", "set:backup_time")],
         back_row("admin:g:update"),
     ])
 
@@ -4278,6 +4371,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if o and o["user_id"] == uid and o["status"] == "active":
                     db.update_order(oid, status="delreq_pending")
                     await safe_edit(query, "✅ درخواست حذف ثبت شد و برای ادمین ارسال شد.", reply_markup=back_kb())
+                    notify_group(context.bot, f"🗑 درخواست حذف سرویس #{oid} — {o['username']}\n👤 {who(uid)}")
                     await notify_admin(context.bot,
                         f"🗑 درخواست حذف سرویس\n👤 کاربر: {uid}\n🛍 سرویس #{oid} — {o['username']}",
                         reply_markup=InlineKeyboardMarkup([
@@ -4523,7 +4617,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             label = dict(SETTING_KEYS).get(key, key)
             await page(query, card(f"✏️ {label}", [f"مقدار فعلی: {val(db.setting(key))}"],
                                    note="مقدار جدید را بفرستید."),
-                       [[btn("🔙 انصراف", "admin:channel" if key in ("channel_id", "group_id") else "admin:settings")]])
+                       [[btn("🔙 انصراف", "admin:channel" if key in ("channel_id", "group_id", "report_time")
+                             else "admin:backup" if key == "backup_time" else "admin:settings")]])
             return
 
         if cmd == "tk":
@@ -4829,6 +4924,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         tid = db.create_ticket(uid, text)
         db.set_state(uid, "none")
         await msg.reply_text(f"✅ تیکت #{tid} ثبت شد. به‌زودی پاسخ می‌گیرید.", reply_markup=main_menu_kb(uid))
+        notify_group(context.bot, f"🎫 تیکت جدید #{tid}\n👤 {who(uid)}")
         await notify_admin(context.bot, f"🎫 تیکت جدید #{tid} از کاربر {uid}:\n\n{text}",
             reply_markup=InlineKeyboardMarkup([[btn("✍️ پاسخ", f"tk:reply:{tid}"), btn("🔒 بستن", f"tk:close:{tid}")]]))
         return True
@@ -4953,6 +5049,16 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
     if state == "set_value" and is_admin(uid):
         if sd["key"] in ("test_volume_gb", "test_days") and not (text.isdigit() and int(text) > 0):
             await msg.reply_text("❌ یک عدد بزرگ‌تر از صفر وارد کنید:")
+            return True
+        if sd["key"] in DAILY_TIMES:
+            hhmm = parse_hhmm(text)
+            if not hhmm:
+                await msg.reply_text("❌ ساعت را به شکل ۰۶:۳۰ یا ۲۳:۰۰ (وقت ایران) بفرستید:")
+                return True
+            db.set_setting(sd["key"], hhmm)
+            schedule_daily_jobs(context.job_queue)
+            db.set_state(uid, "none")
+            await msg.reply_text(f"✅ «{dict(SETTING_KEYS)[sd['key']]}» شد {hhmm}. از همین امروز اعمال می‌شود.")
             return True
         db.set_setting(sd["key"], text)
         db.set_state(uid, "none")
@@ -5255,6 +5361,7 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tid = db.create_ticket(uid, msg.caption or "(عکس)", photo_id)
         db.set_state(uid, "none")
         await msg.reply_text(f"✅ تیکت #{tid} ثبت شد.", reply_markup=main_menu_kb(uid))
+        notify_group(context.bot, f"🎫 تیکت جدید #{tid} (عکس)\n👤 {who(uid)}")
         await notify_admin(context.bot, f"🎫 تیکت جدید #{tid} از کاربر {uid} (عکس)")
         return
 
@@ -5356,9 +5463,11 @@ async def health_job(context: ContextTypes.DEFAULT_TYPE):
             ok, before, after = False, {}, {}
         if not ok and p["status"] == "active":
             db.update_panel(p["id"], status="offline")
+            notify_group(context.bot, f"⚠️ پنل «{p['name']}» offline شد و از فروش خارج شد!")
             await notify_admin(context.bot, f"⚠️ پنل «{p['name']}» offline شد و از فروش خارج شد!")
         elif ok and p["status"] == "offline":
             db.update_panel(p["id"], status="active")
+            notify_group(context.bot, f"✅ پنل «{p['name']}» دوباره online شد.")
             await notify_admin(context.bot, f"✅ پنل «{p['name']}» دوباره online شد.")
         if ok and p["checked_at"] and set(before) != set(after):
             fresh = db.get_panel(p["id"])
@@ -5464,8 +5573,7 @@ def main():
     if app.job_queue:
         app.job_queue.run_repeating(health_job, interval=300, first=30)
         app.job_queue.run_repeating(reminder_job, interval=3600, first=120)
-        app.job_queue.run_daily(daily_report_job, time=datetime.time(23, 0))
-        app.job_queue.run_daily(daily_backup_job, time=datetime.time(3, 0))
+        schedule_daily_jobs(app.job_queue)
     else:
         log.warning("job-queue نصب نیست: چک سلامت، یادآوری انقضا و بکاپ خودکار اجرا نمی‌شوند "
                     "(pip install 'python-telegram-bot[job-queue]')")
