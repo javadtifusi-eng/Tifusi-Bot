@@ -3988,7 +3988,7 @@ async def send_backup(bot, chat_id, note="💾 بکاپ دیتابیس ربات"
         stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
         t = db.totals()
         with open(tmp, "rb") as f:
-            await bot.send_document(chat_id, f, filename=f"tifusi-bot-backup_{stamp}.db",
+            await bot.send_document(chat_id, f, filename=f"bot-backup_{stamp}.db",
                 caption=(f"{note}\n🕓 {stamp}\n👤 کاربران: {t['users']} | 🧾 سفارش‌ها: {t['orders']} | "
                          f"✅ فعال: {t['active']}\n\n♻️ برای بازگردانی: پنل مدیریت ← 💾 بکاپ ← بازگردانی"))
         return True
