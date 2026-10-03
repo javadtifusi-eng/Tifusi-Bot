@@ -1562,9 +1562,259 @@ def phone_card_details(img, d, order, y, font, fa, width):
     return y + 62
 
 
+# ---------- کارت لاجوردی سرویس گوشی (خرید جدید و «سرویس‌های من») ----------
+LZ = {"ground": "#0A1730", "panel": "#0F2247", "line": "#1E3A6E", "track": "#1B3566", "dot": "#16305F",
+      "dash": "#2A4A85", "ink": "#EAF0FF", "muted": "#9DB0D6", "turq": "#35D0C0", "silver": "#DCE4F5",
+      "blue": "#7FA8FF", "orange": "#FFA94D", "red": "#FF6B6B", "dim": "#BFC9DE"}
+LZ_PROTO = (("IKEv2", "turq"), ("L2TP", "blue"), ("PPTP", "silver"))
+FA_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+
+
+def _lz_font(name, size, weight=None):
+    """Vazirmatn for Persian; Unbounded and JetBrains Mono (variable fonts) for the Latin figures.
+    A missing Latin face falls back to Vazirmatn so the card never fails over a font."""
+    from PIL import ImageFont
+    if name in ("Regular", "Bold"):
+        return ImageFont.truetype(os.path.join(ASSET_DIR, f"Vazirmatn-{name}.ttf"), size)
+    try:
+        f = ImageFont.truetype(os.path.join(ASSET_DIR, f"{name}-VF.ttf"), size)
+        if weight:
+            f.set_variation_by_axes([weight])
+        return f
+    except (OSError, ValueError):
+        return ImageFont.truetype(os.path.join(ASSET_DIR, "Vazirmatn-Bold.ttf"), size)
+
+
+def _lz_num(x):
+    return f"{x:g}" if x < 100 else f"{x:.0f}"
+
+
+def lapis_card_png(order, used_gb=None, fresh=False):
+    """The service as a lapis card: usage dial, name/protocol/expiry, days-left strip.
+    fresh: just bought (nothing used yet, and a hint pointing at the buttons under the photo).
+    used_gb: GB used per the panel; None means the panel did not answer. None if the card can't be drawn."""
+    try:
+        import math
+        from PIL import Image, ImageDraw, features
+        if not features.check("raqm"):
+            return None
+        W, P = CARD_W, 36            # card width, side gutter
+        L, R = P, W - P
+        img = Image.new("RGB", (W, 1700), LZ["ground"])
+        d = ImageDraw.Draw(img)
+        # dot grid behind everything
+        for gy in range(18, 1700, 36):
+            for gx in range(18, W, 36):
+                d.ellipse([gx - 2, gy - 2, gx + 2, gy + 2], fill=LZ["dot"])
+        wid = lambda t, f: d.textbbox((0, 0), t, font=f)[2] - d.textbbox((0, 0), t, font=f)[0]
+
+        now = time.time()
+        total = order["volume_gb"] or 0
+        used = 0.0 if fresh else used_gb
+        expired = order["expire_at"] <= now
+        out = bool(total) and used is not None and used >= total
+        active = order["status"] == "active" and not expired and not out
+        days_left = max(0, math.ceil((order["expire_at"] - now) / 86400 - 0.01))
+        days_total = max(1, int(order["days"] or 30), days_left)
+
+        # --- top row: state on the right, brand on the left
+        y = 40
+        if active:
+            state, dot = "فعال", (LZ["orange"] if days_left <= 3 or (total and used is not None and used / total >= .85) else LZ["turq"])
+        else:
+            state, dot = ("حجم تمام شد" if out else "منقضی شده" if expired else "غیرفعال"), LZ["red"]
+        f_small, f_state = _lz_font("Regular", 26), _lz_font("Bold", 32)
+        lab = "وضعیت سرویس"
+        d.text((R - 8 - wid(lab, f_small), y + 22), lab, font=f_small, fill=LZ["muted"])
+        sw = wid(state, f_state)
+        d.text((R - 8 - sw, y + 62), state, font=f_state, fill=LZ["ink"])
+        cx, cy = R - 8 - sw - 22, y + 86
+        d.ellipse([cx - 22, cy - 22, cx + 22, cy + 22], fill=_lz_mix(dot, LZ["ground"], .22))
+        d.ellipse([cx - 10, cy - 10, cx + 10, cy + 10], fill=dot)
+
+        mark = Image.open(os.path.join(ASSET_DIR, "tifusi-emblem.png")).convert("RGBA")
+        mark = mark.resize((196, int(196 * mark.height / mark.width)), Image.LANCZOS)
+        img.paste(mark, (L, y), mark)
+        f_brand, f_vpn = _lz_font("Unbounded", 44, 800), _lz_font("Unbounded", 22, 500)
+        bx, by = L + mark.width + 22, y + mark.height // 2 - 38
+        d.text((bx, by), "TIFUSI", font=f_brand, fill=LZ["ink"])
+        x = bx + 2
+        for ch in "VPN":           # letter-spaced, like the CSS
+            d.text((x, by + 58), ch, font=f_vpn, fill=LZ["turq"])
+            x += wid(ch, f_vpn) + 12
+        y += max(mark.height, 130) + 28
+
+        # --- usage panel with the dial
+        top = y
+        ph = 624
+        d.rounded_rectangle([L, top, R, top + ph], radius=56, fill=LZ["panel"], outline=LZ["line"], width=3)
+        D = 472
+        dx, dy = (W - D) // 2, top + 44
+        frac = 0.0 if not total or used is None else max(0.0, min(1.0, used / total))
+        ring = LZ["turq"] if frac < .85 else LZ["orange"] if frac < 1 else LZ["red"]
+        # CSS conic-gradient from 225deg (clockwise from north) = PIL angle 135, a 270° sweep
+        d.arc([dx, dy, dx + D, dy + D], 135, 405, fill=LZ["track"], width=36)
+        if not total and used is not None:
+            d.arc([dx, dy, dx + D, dy + D], 135, 405, fill=_lz_mix(LZ["turq"], LZ["track"], .45), width=36)
+        elif frac > 0:
+            d.arc([dx, dy, dx + D, dy + D], 135, 135 + max(3, 270 * frac), fill=ring, width=36)
+        else:
+            d.arc([dx, dy, dx + D, dy + D], 135, 138, fill=LZ["turq"], width=36)
+        _lz_dashed_circle(d, W // 2, dy + D // 2, D // 2 - 60, LZ["dash"])
+        mid = dy + D // 2
+        lab = "مصرف"
+        d.text(((W - wid(lab, f_small)) // 2, mid - 112), lab, font=f_small, fill=LZ["muted"])
+        if used is None:
+            big, tail = "—", ""
+        else:
+            big, tail = _lz_num(round(used, 2)), (f"/ {_lz_num(total)}" if total else "/ ∞")
+        fb = _lz_font("Unbounded", 124 if len(big) <= 2 else 96 if len(big) <= 4 else 76, 800)
+        ft = _lz_font("Unbounded", 40, 500) if total else _lz_font("Regular", 46)
+        bw, tw = wid(big, fb), (wid(tail, ft) + 12 if tail else 0)
+        bx = (W - bw - tw) // 2
+        bb = d.textbbox((bx, 0), big, font=fb)
+        d.text((bx, mid + 22 - bb[3]), big, font=fb, fill=ring if total else LZ["turq"])
+        if tail:
+            tb = d.textbbox((0, 0), tail, font=ft)
+            d.text((bx + bw + 12, mid + 22 - tb[3]), tail, font=ft, fill=LZ["muted"])
+        f_gb = _lz_font("Unbounded", 24, 500)
+        gbw = sum(wid(c, f_gb) for c in "GB") + 8
+        x = (W - gbw) // 2
+        for ch in "GB":
+            d.text((x, mid + 44), ch, font=f_gb, fill=LZ["muted"])
+            x += wid(ch, f_gb) + 8
+        if total:
+            f_end = _lz_font("JetBrainsMono", 26, 600)
+            d.text((dx + 70, dy + D - 30), "0", font=f_end, fill=LZ["muted"])
+            e = _lz_num(total)
+            d.text((dx + D - 70 - wid(e, f_end), dy + D - 30), e, font=f_end, fill=LZ["muted"])
+        # remaining row under the dial
+        ry = dy + D + 30
+        f_left = _lz_font("Bold", 32)
+        if used is None:
+            left = "مصرف فعلاً در دسترس نیست"
+        elif not total:
+            left = "حجم نامحدود"
+        else:
+            left = f"{_lz_num(max(0.0, round(total - used, 2)))} گیگ باقی‌مانده".translate(FA_DIGITS)
+        d.text((R - 40 - wid(left, f_left), ry), left, font=f_left, fill=LZ["ink"])
+        if total and used is not None:
+            pct = f"{round(frac * 100)}%"
+            f_pct = _lz_font("JetBrainsMono", 28, 700)
+            pw = wid(pct, f_pct) + 48
+            d.rounded_rectangle([L + 40, ry + 2, L + 40 + pw, ry + 50], radius=24, fill=ring)
+            d.text((L + 64, ry + 8), pct, font=f_pct, fill=LZ["ground"])
+        y = top + ph + 32
+
+        # --- facts panel
+        rows = [("نام سرویس", "name"), ("سرویس", "proto"), ("انقضا", "expire")]
+        rh = 116
+        top = y
+        d.rounded_rectangle([L, top, R, top + rh * len(rows) + 12], radius=56, fill=LZ["panel"], outline=LZ["line"], width=3)
+        f_dt = _lz_font("Regular", 28)
+        yy = top + 6
+        for i, (label, kind) in enumerate(rows):
+            cy = yy + rh // 2
+            d.text((R - 40 - wid(label, f_dt), cy - 24), label, font=f_dt, fill=LZ["muted"])
+            if kind == "proto":
+                f_c = _lz_font("JetBrainsMono", 26, 700)
+                x = L + 40
+                for name, tone in LZ_PROTO:
+                    cw = wid(name, f_c) + 44
+                    d.rounded_rectangle([x, cy - 26, x + cw, cy + 26], radius=20, fill=LZ[tone])
+                    tb = d.textbbox((0, 0), name, font=f_c)
+                    d.text((x + 22, cy - (tb[1] + tb[3]) // 2), name, font=f_c, fill=LZ["ground"])
+                    x += cw + 12
+            else:
+                value = order["username"] if kind == "name" else \
+                    datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")
+                fv = _lz_font("JetBrainsMono", 40 if kind == "name" else 36, 700)
+                tb = d.textbbox((0, 0), value, font=fv)
+                d.text((L + 40, cy - (tb[1] + tb[3]) // 2), value, font=fv, fill=LZ["ink"])
+            if i < len(rows) - 1:
+                _lz_dashed_line(d, L + 40, R - 40, yy + rh, LZ["line"])
+            yy += rh
+        y = top + rh * len(rows) + 12 + 32
+
+        # --- days strip
+        top = y
+        sh = 200
+        d.rounded_rectangle([L, top, R, top + sh], radius=56, fill=LZ["silver"])
+        f_days, f_dl, f_of = _lz_font("Bold", 76), _lz_font("Bold", 32), _lz_font("Regular", 26)
+        if expired:
+            num, unit = "", "سرویس منقضی شده"
+        else:
+            num, unit = str(days_left).translate(FA_DIGITS), "روز مانده"
+        nw = wid(num, f_days) if num else 0
+        uw = wid(unit, f_dl)
+        base = top + 112
+        if num:
+            nb = d.textbbox((0, 0), num, font=f_days)
+            d.text((R - 40 - nw, base - nb[3]), num, font=f_days, fill=LZ["ground"])
+        ub = d.textbbox((0, 0), unit, font=f_dl)
+        d.text((R - 40 - nw - (14 if num else 0) - uw, base - ub[3]), unit, font=f_dl, fill=LZ["ground"])
+        of = f"از {days_total} روز".translate(FA_DIGITS)
+        ob = d.textbbox((0, 0), of, font=f_of)
+        d.text((L + 40, base - ob[3]), of, font=f_of, fill=LZ["ground"])
+        cells, gap = 30, 6
+        on = cells if days_left >= days_total else round(cells * days_left / days_total)
+        cw = (R - L - 80 - gap * (cells - 1)) / cells
+        for k in range(cells):
+            x0 = L + 40 + k * (cw + gap)
+            d.rounded_rectangle([x0, top + 134, x0 + cw, top + 178], radius=6,
+                                fill=LZ["ground"] if k < on else _lz_mix(LZ["ground"], LZ["silver"], .2))
+        y = top + sh
+
+        if fresh:
+            y += 34
+            hint = "برای اتصال، دکمه‌ی گوشی خود را بزنید"
+            f_h = _lz_font("Bold", 30)
+            pw = wid(hint, f_h) + 110
+            px = (W - pw) // 2
+            d.rounded_rectangle([px, y, px + pw, y + 64], radius=32, fill=LZ["turq"])
+            ax = px + 42
+            d.polygon([(ax - 13, y + 25), (ax + 13, y + 25), (ax, y + 41)], fill=LZ["ground"])
+            d.text((px + 72, y + 10), hint, font=f_h, fill=LZ["ground"])
+            y += 64
+
+        buf = io.BytesIO()
+        img.crop((0, 0, W, y + 44)).save(buf, format="PNG", optimize=True)
+        buf.seek(0)
+        buf.name = "tifusi.png"
+        return buf
+    except Exception as e:
+        log.warning("lapis card failed: %s", e)
+        return None
+
+
+def _lz_mix(a, b, k):
+    """Colour a at strength k over colour b (both #rrggbb)."""
+    pa = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    pb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(pa[c] * k + pb[c] * (1 - k)):02x}" for c in range(3))
+
+
+def _lz_dashed_line(d, x0, x1, y, color):
+    x = x0
+    while x < x1:
+        d.line([x, y, min(x + 12, x1), y], fill=color, width=3)
+        x += 22
+
+
+def _lz_dashed_circle(d, cx, cy, r, color):
+    import math
+    n = int(2 * math.pi * r / 18)
+    for k in range(0, n, 2):
+        a0, a1 = 360 * k / n, 360 * (k + 1) / n
+        d.arc([cx - r, cy - r, cx + r, cy + r], a0, a1, fill=color, width=3)
+
+
 def service_status_png(order, used_gb=None):
     """کارت «سرویس‌های من» برای سرویس گوشی: هر بار با مصرف همان لحظه ساخته می‌شود.
     used_gb: گیگ مصرف‌شده از پنل؛ None یعنی پنل جواب نداد. None برمی‌گرداند اگر ساختن عکس ممکن نبود."""
+    card = lapis_card_png(order, used_gb)
+    if card:
+        return card
     try:
         from PIL import Image, ImageDraw, ImageFont, features
         if not features.check("raqm"):
@@ -1689,6 +1939,10 @@ def delivery_card_png(order):
     phone = order["protocol"] in ("ikev2", "l2tp", "pptp")
     if not order["sub_url"] and not phone:
         return None
+    if phone:
+        card = lapis_card_png(order, fresh=True)
+        if card:
+            return card
     try:
         from PIL import Image, ImageDraw, ImageFont, features
 
