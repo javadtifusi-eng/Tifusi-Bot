@@ -2147,7 +2147,7 @@ def guide_html(order, links, kind):
                 f"• اگر <b>{esc(MANUAL_TYPE['ikev2'])}</b> را دیدید ← دکمه‌ی «اندروید جدید (IKEv2)»\n"
                 f"• اگر نبود ← دکمه‌ی «اندروید قدیمی (L2TP)»\n\n"
                 "• اگر هیچ‌کدام وصل نشد ← دکمه‌ی «گوشی خیلی قدیمی (PPTP)»\n\n"
-                "💡 IKEv2های «بدون نام کاربری» (PSK و RSA) به کار ما نمی‌آیند؛ آن گوشی‌ها L2TP دارند.\n"
+                "💡 اگر IKEv2 با یوزر و پسورد وصل نشد، نوع <b>IKEv2/IPSec PSK</b> هم کار می‌کند: شناسه = نام کاربری، کلید = رمز خودتان (دکمه‌ی «🔐 با یوزر و پسورد وصل نشد؟» زیر «اتصال در اندروید»).\n"
                 "💡 اگر گزینه‌ها خاکستری و قفل بود، اول برای گوشی قفل صفحه (پین یا الگو) بگذارید.")
     cfg = guide_cfg(order, links, kind)
     if kind == "ikev2":
@@ -2231,6 +2231,33 @@ def android_html(order, links):
             lines.append("      " + "  ·  ".join(extra))
     lines += ["", "<b>ذخیره</b> ← روی VPN بزنید ← <b>اتصال</b> ✅"]
     return "\n".join(lines)
+
+
+PSK_BTN = "🔐 با یوزر و پسورد وصل نشد؟"
+
+
+def android_psk(order, links):
+    """IKEv2 without a certificate (PSK): identifier = the username, key = the user's own password.
+    For phones and lines where the certificate of the usual method never gets through. The server
+    accepts only the user's own name with their own password; the shared L2TP key does not work here."""
+    esc = html.escape
+    code = lambda v: f"<code>{esc(str(v))}</code>"
+    c = guide_cfg(order, links, "ikev2")
+    text = "\n".join([
+        "🔐 <b>اتصال IKEv2 بدون یوزر و پسورد (PSK)</b>", "",
+        "اگر با روش معمولی وصل نشد، یک VPN <b>جدید</b> بسازید:",
+        "<b>تنظیمات</b> ← <b>VPN</b> ← <b>افزودن</b>", "<i>(روی هر مقدار بزنید کپی می‌شود)</i>", "",
+        f"🧩 <b>نوع:</b> {code('IKEv2/IPSec PSK')}",
+        f"🌐 <b>آدرس سرور:</b> {code(c['server'])}",
+        f"🆔 <b>شناسه‌ی IPSec:</b> {code(c['username'])}",
+        f"🔑 <b>کلید IPSec:</b> {code(c['password'])}", "",
+        "⚠️ کلید همان <b>رمز خود شماست</b>، نه کلید L2TP.",
+        "در این نوع، کادر نام کاربری و رمز جدا نیست.", "",
+        "<b>ذخیره</b> ← روی VPN بزنید ← <b>اتصال</b> ✅",
+    ])
+    items = [("کپی سرور", c["server"]), ("کپی شناسه", c["username"]), ("کپی کلید", c["password"])]
+    buttons = [b for b in (copy_text_button(label, str(v)) for label, v in items if v and v != "-") if b]
+    return text, [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
 
 
 def android_info(order, links):
@@ -4109,7 +4136,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except PanelError as e:
                     log.warning("android details for %s failed: %s", o["username"], e)
             text = android_html(o, links)
-            markup = InlineKeyboardMarkup(android_copy_rows(o, links)
+            psk_row = ([[InlineKeyboardButton(PSK_BTN, callback_data=f"andpsk:{o['id']}")]]
+                       if "ikev2" in android_info(o, links)["kinds"] else [])
+            markup = InlineKeyboardMarkup(android_copy_rows(o, links) + psk_row
                                           + [[InlineKeyboardButton("🔙 بازگشت به سرویس", callback_data=f"svc:{o['id']}")]])
             msg = query.message
             png = await asyncio.to_thread(android_png, android_info(o, links))
@@ -4128,6 +4157,26 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     log.warning("android picture for order %s failed: %s", o["id"], e)
             # No picture: the text version, as a new message under the card or in place on «My services».
             if msg and msg.photo and not (msg.caption or "").startswith(STATUS_MARK):
+                await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
+            else:
+                await safe_edit(query, text, reply_markup=markup, parse_mode="HTML")
+            return
+
+        if cmd == "andpsk":
+            o = db.get_order(int(parts[1]))
+            if not o or (o["user_id"] != uid and not is_admin(uid)) or o["protocol"] not in ("ikev2", "l2tp", "pptp"):
+                return
+            links = None
+            panel = db.get_panel(o["panel_id"])
+            if panel:
+                try:
+                    links = await asyncio.to_thread(panel_client(panel).links, o["username"])
+                except PanelError as e:
+                    log.warning("PSK details for %s failed: %s", o["username"], e)
+            text, rows = android_psk(o, links)
+            markup = InlineKeyboardMarkup(rows + [[InlineKeyboardButton("🔙 بازگشت", callback_data=f"andr:{o['id']}")]])
+            msg = query.message
+            if msg and msg.photo:
                 await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
             else:
                 await safe_edit(query, text, reply_markup=markup, parse_mode="HTML")
