@@ -19,7 +19,7 @@ import shutil
 import tempfile
 import weakref
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, WebAppInfo
 from telegram.error import RetryAfter, Forbidden, BadRequest
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler,
                           CallbackQueryHandler, ContextTypes, filters)
@@ -219,6 +219,11 @@ class TifusiPanelAPI:
 
     def login(self):
         with self.lock:
+            # کلید API پنل (tifusi_…) به‌جای رمز: نیازی به ورود نیست و با ۲FA ادمین هم کار می‌کند
+            if (self.password or "").startswith("tifusi_"):
+                self.token = self.password
+                self.s.headers.update({"Authorization": f"Bearer {self.password}"})
+                return True
             r = self._send("post", "/api/auth/login", json={"username": self.username, "password": self.password})
             if r.status_code == 429:
                 raise PanelError("تلاش ورود زیاد بود؛ چند دقیقه بعد دوباره امتحان کنید")
@@ -1338,9 +1343,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"آیدی: `{u.id}`", )
         notify_group(context.bot, f"👤 عضو جدید ربات: {who(u.id)}", topic="users")
     db.set_state(u.id, "none")
+    if u.id in miniapp_only_ids():
+        await send_miniapp_only(update.message)
+        return
     await update.message.reply_text(
         f"سلام {u.first_name} عزیز به ربات خوش آمدی 🌹👋\n\nاز منوی زیر استفاده کنید:",
         reply_markup=main_menu_kb(u.id))
+
+
+MINIAPP_URL = "https://app.bomalo.ir/"
+
+
+def miniapp_only_ids():
+    """کاربرهایی که به‌جای منوی قدیمی ربات فقط مینی‌اپ را می‌بینند (دوره‌ی تست: حساب‌های جواد).
+    تنظیم «miniapp_only» در دیتابیس؛ وقتی برای همه روشن شد این لیست کنار می‌رود."""
+    try:
+        return {int(x) for x in json.loads(db.setting("miniapp_only", "[]") or "[]")}
+    except Exception:
+        return set()
+
+
+MINIAPP_WELCOME = os.path.join(ASSET_DIR, "welcome-miniapp.jpg")
+
+
+async def send_miniapp_only(message):
+    # منوی پایین قدیمی برداشته می‌شود (پیام کمکی همان لحظه پاک می‌شود) و فقط عکسی می‌ماند
+    # که با فلش به دکمه‌ی «Tifusi» کنار کادر پیام اشاره می‌کند.
+    try:
+        tmp = await message.reply_text("⏳", reply_markup=ReplyKeyboardRemove())
+        await tmp.delete()
+    except Exception as e:
+        log.info("miniapp keyboard remove: %s", e)
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Open", web_app=WebAppInfo(url=MINIAPP_URL), style="primary")]])
+    cached = db.setting("miniapp_welcome_file_id", "")
+    try:
+        if cached:
+            await message.reply_photo(cached, reply_markup=kb)
+            return
+        with open(MINIAPP_WELCOME, "rb") as f:
+            sent = await message.reply_photo(f, reply_markup=kb)
+        db.set_setting("miniapp_welcome_file_id", sent.photo[-1].file_id)
+    except Exception as e:
+        log.warning("miniapp welcome photo failed: %s", e)
+        await message.reply_text("👇", reply_markup=kb)
+
+
+async def admin_menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/admin: منوی کامل قدیمی برای ادمین، حتی وقتی برایش فقط مینی‌اپ روشن است."""
+    u = update.effective_user
+    if not is_admin(u.id):
+        return
+    db.set_state(u.id, "none")
+    await update.message.reply_text("👑 منوی ربات:", reply_markup=main_menu_kb(u.id))
 
 
 # ---------- فلوی کاربر: منوها ----------
@@ -2245,6 +2299,16 @@ def guide_html(order, links, kind):
 
 # ---------- دکمه‌ی «اتصال در اندروید»: سرور، نام کاربری، رمز و نوع، همه در یک پیام ----------
 ANDROID_BTN = "🤖 اتصال در اندروید"
+GUIDE_BTN = "📖 راهنمای اتصال"
+
+
+def guide_button(order):
+    """راهنمای قدم‌به‌قدم پنل (/sub/<secret>/guide) به‌صورت مینی‌اپ تلگرام، برای IKEv2 و L2TP.
+    مینی‌اپ فقط آدرس https قبول می‌کند؛ بدون لینک اشتراک دکمه‌ای نمی‌سازیم."""
+    url = (order["sub_url"] or "").rstrip("/")
+    if order["protocol"] not in ("ikev2", "l2tp") or not url.startswith("https://"):
+        return None
+    return InlineKeyboardButton(GUIDE_BTN, web_app=WebAppInfo(url=url + "/guide"))
 
 
 def android_html(order, links):
@@ -2692,6 +2756,9 @@ async def deliver_service(context, chat_id, order, panel):
         if guide:
             # The picture carries everything: «active», name, service, volume, expiry and what to tap.
             caption = None
+            gb = guide_button(order)
+            if gb:
+                rows.append([gb])
             rows.append([InlineKeyboardButton(ANDROID_BTN, callback_data=f"andr:{order['id']}")])
         if apple_url:
             # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
@@ -2849,6 +2916,9 @@ async def show_service_detail(query, uid, oid):
     rows = []
     if o["status"] == "active":
         if guide:
+            gb = guide_button(o)
+            if gb:
+                rows.append([gb])
             rows.append([btn(ANDROID_BTN, f"andr:{o['id']}")])
         if apple_url:
             rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
@@ -5577,11 +5647,21 @@ def per_user(handler):
     return wrapped
 
 
+async def start_miniapp(application):
+    """سرور مینی‌اپ (miniapp.py) کنار ربات؛ اگر نصب نبود یا بالا نیامد، ربات بدون آن کار می‌کند."""
+    try:
+        import miniapp
+        await miniapp.start(application, globals())
+    except Exception as e:
+        log.warning("miniapp not started: %s", e)
+
+
 def main():
     if not BOT_TOKEN or not ADMIN_ID:
         raise SystemExit("❌ ابتدا BOT_TOKEN و ADMIN_ID را در بالای همین فایل (bot.py) پر کنید.")
-    app = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).post_init(start_miniapp).build()
     app.add_handler(CommandHandler("start", per_user(start)))
+    app.add_handler(CommandHandler("admin", per_user(admin_menu_cmd)))
     app.add_handler(CallbackQueryHandler(per_user(on_callback_admin), pattern=r"^(pb|pbe|pbm|apm|pl|ple):"))
     app.add_handler(CallbackQueryHandler(per_user(on_callback)))
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, per_user(on_photo)))
