@@ -501,6 +501,7 @@
     $("tabs").innerHTML = tabs.map(([k, i, l]) => `<button type="button" role="tab" aria-selected="${k === cur}" data-tab="${k}">${ic(i)}${l}</button>`).join("");
   }
   function openSend(c) {
+    S.sendC = c;
     const link = c.guide;
     $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
       <p class="soon" style="text-align:right;margin:0">یه صفحه‌ی شخصی برای <b class="num">${esc(c.username)}</b> که وضعیت سرویس، راهنمای اتصال و نصب پروفایل آیفون رو داره.</p>
@@ -579,11 +580,15 @@
     }
   }
   function showMade(made, failed) {
+    S.made = made;
     $("sheet").innerHTML = `<h3 id="sheetTitle">✅ ${num(made.length)} اکانت ساخته شد</h3>
-      ${made.map((m) => `<div class="glass cust"><div style="min-width:0"><div class="nm">${esc(m.username)}</div>${m.password ? `<div class="mt">رمز: <span class="num">${esc(m.password)}</span></div>` : ""}</div>
-        <div class="cacts">${m.guide ? `<button class="pill" type="button" data-copy="${esc(m.guide)}">کپی لینک</button>` : ""}</div></div>`).join("")}
+      ${made.map((m, i) => `<div class="glass sec" style="display:grid;gap:8px;padding:12px 14px">
+        <div class="lrow"><span class="d">${ic("user")} یوزرنیم</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.username)}</span><button class="pill ghost" type="button" data-copy="${esc(m.username)}" aria-label="کپی یوزرنیم">کپی</button></span></div>
+        ${m.password ? `<div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.password)}</span><button class="pill ghost" type="button" data-copy="${esc(m.password)}" aria-label="کپی رمز">کپی</button></span></div>` : ""}
+        ${m.guide ? `<div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill" type="button" data-mguide="${i}" style="justify-content:center">${ic("help")} راهنمای اتصال</button><button class="pill ghost" type="button" data-msend="${i}" style="justify-content:center">${ic("link")} ارسال برای مشتری</button></div>` : ""}
+      </div>`).join("")}
       ${failed ? `<p class="soon" style="color:#ff9a9a">بقیه ساخته نشد (${esc(failed)})؛ پولش به کیف پول برگشت.</p>` : ""}
-      <p class="soon">کارت هر اکانت توی چت ربات هم برات فرستاده شد که بتونی برای مشتری فوروارد کنی.</p>
+      <p class="soon">همه‌ی اطلاعات توی تب «کاربران» هم هست.</p>
       <button class="cta" type="button" data-act="close">باشه</button>`;
   }
   async function openRenew(oid) {
@@ -612,7 +617,12 @@
     btn.disabled = true; btn.textContent = "در حال تمدید…";
     try {
       const j = await api("renew", { method: "POST", body: JSON.stringify({ order_id: r.order.id, plan_id: r.pick.id }) });
-      S.me.balance = j.balance; closeSheet(); toast("✅ " + r.order.username + " تمدید شد"); reload();
+      S.me.balance = j.balance; reload();
+      $("sheet").innerHTML = `<h3 id="sheetTitle">✅ ${esc(r.order.username)} تمدید شد</h3>
+        <div class="sum"><div><span>پلن</span><span>${r.pick.gb ? `${num(r.pick.gb)} گیگ` : "نامحدود"} · ${num(r.pick.days)} روز</span></div>
+        <div><span>اعتبار جدید تا</span><span class="num">${fdate(j.expire)}</span></div>
+        <div><span>موجودی کیف پول</span><span>${toman(j.balance)}</span></div></div>
+        <button class="cta" type="button" data-act="close">باشه</button>`;
     } catch (e) { btn.disabled = false; pickRenew(r.pick.id); toast(e.message === "balance" ? "موجودی کافی نیست" : "تمدید نشد؛ پولت برگشت به کیف پول"); }
   }
   async function loadWallet() {
@@ -681,8 +691,10 @@
     if (d.send) { const c = byId(d.send); if (c) openSend(c); return; }
     if (d.guide) { const c = byId(d.guide); if (c && c.guide) openLink(c.guide); return; }
     if (d.copy) { copy(d.copy); return; }
-    if (d.shareTg) { const c = byId(d.shareTg); const u = `https://t.me/share/url?url=${encodeURIComponent(c.guide)}&text=${encodeURIComponent("اطلاعات اتصال و راهنمای سرویس " + c.username)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); return; }
-    if (d.shareWa) { const c = byId(d.shareWa); openLink(`https://wa.me/?text=${encodeURIComponent("اطلاعات اتصال و راهنمای سرویس " + c.username + ":\n" + c.guide)}`); return; }
+    if (d.mguide) { const m = S.made[+d.mguide]; if (m) openLink(m.guide); return; }
+    if (d.msend) { const m = S.made[+d.msend]; if (m) openSend(m); return; }
+    if (d.shareTg) { const c = byId(d.shareTg) || S.sendC; const u = `https://t.me/share/url?url=${encodeURIComponent(c.guide)}&text=${encodeURIComponent("اطلاعات اتصال و راهنمای سرویس " + c.username)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); return; }
+    if (d.shareWa) { const c = byId(d.shareWa) || S.sendC; openLink(`https://wa.me/?text=${encodeURIComponent("اطلاعات اتصال و راهنمای سرویس " + c.username + ":\n" + c.guide)}`); return; }
     if (b.id === "bpay") { payBuy(); return; }
     if (d.goto === "buy") { S.tab = "buy"; render(); scrollTo(0, 0); return; }
     if (d.goto === "support") { support(); return; }

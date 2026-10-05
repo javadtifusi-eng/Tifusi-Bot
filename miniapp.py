@@ -295,13 +295,10 @@ async def api_buy(request):
             made.append({"id": order["id"], "username": order["username"], "password": order["password"],
                          "guide": (order["sub_url"] or "").rstrip("/") + "/guide" if order["sub_url"] else None})
             try:
-                await ns["deliver_service"](ctx, uid, order, opanel)
+                await ns["deliver_service"](ctx, uid, order, opanel, quiet=True)
             except Exception as e:
                 log.warning("miniapp deliver %s failed: %s", order["id"], e)
         _panel_cache.pop(panel["id"], None)
-        if made:
-            await ns["notify_admin"](app.bot, f"🛍 خرید جدید از مینی‌اپ (کیف پول)\n👤 {uid}\n📦 {ns['plan_label'](plan)}"
-                                              f" × {len(made)}\n🖥 پنل: {panel['name']}")
     return web.json_response({"ok": bool(made), "made": made, "failed": failed,
                               "balance": db.get_balance(uid)}, status=200 if made else 502)
 
@@ -351,17 +348,11 @@ async def api_renew(request):
         app = request.app["tg_app"]
         ctx = SimpleNamespace(bot=app.bot, application=app, job_queue=app.job_queue, args=[])
         try:
-            await ns["do_renew_and_deliver"](None, ctx, uid, order["id"], plan["id"])
+            await ns["do_renew_and_deliver"](None, ctx, uid, order["id"], plan["id"], quiet=True)
         except Exception as e:
             db.add_balance(uid, plan["price"])
             log.warning("miniapp renew %s failed: %s", order["id"], e)
             return _err("renew", 502, detail=str(e)[:200])
-        try:
-            await app.bot.send_message(uid, f"🧾 رسید تمدید (مینی‌اپ)\n\n💰 موجودی قبل: {ns['fmt'](bal_before)} تومان\n"
-                                            f"💸 مبلغ تمدید: {ns['fmt'](plan['price'])} تومان\n"
-                                            f"💎 موجودی فعلی: {ns['fmt'](db.get_balance(uid))} تومان")
-        except Exception:
-            pass
         _panel_cache.pop(order["panel_id"], None)
     new = db.get_order(order["id"])
     return web.json_response({"ok": True, "expire": new["expire_at"], "balance": db.get_balance(uid)})
@@ -386,8 +377,8 @@ async def api_wallet(request):
 
 
 async def api_charge(request):
-    """عکس رسید از مینی‌اپ: اول در چت خود کاربر فرستاده می‌شود (تا file_id تلگرام داشته باشیم و
-    کاربر هم رسیدش را ببیند)، بعد همان مسیر رسید ربات: create_receipt و send_receipt_to_admins."""
+    """عکس رسید از مینی‌اپ: اول در گروه گزارش آپلود می‌شود (تا file_id تلگرام داشته باشیم)،
+    بعد همان مسیر رسید ربات: create_receipt و send_receipt_to_admins."""
     uid = request["uid"]
     db = ns["db"]
     try:
@@ -404,12 +395,23 @@ async def api_charge(request):
     if not data or len(data) > MAX_RECEIPT_BYTES:
         return _err("photo_size")
     bot = request.app["tg_app"].bot
-    try:
-        sent = await bot.send_photo(uid, data, caption=f"🧾 رسید شارژ کیف پول: {ns['fmt'](amount)} تومان\n"
-                                                      f"✅ ثبت شد و برای ادمین فرستاده شد؛ بعد از تأیید، کیف پول شارژ می‌شود.")
-    except Exception as e:
-        log.warning("miniapp receipt photo for %s failed: %s", uid, e)
-        return _err("telegram", 502)
+    # عکس یک بار در تاپیک «💳 رسید و پرداخت» گروه گزارش آپلود می‌شود تا file_id تلگرام را داشته باشیم؛
+    # در چت خود مشتری چیزی نمی‌آید. اگر گروه تنظیم نبود یا نشد، مثل قبل در چت خود مشتری.
+    sent = None
+    target = ns["_chat_target"](db.setting("group_id"))
+    if target is not None:
+        try:
+            sent = await bot.send_photo(target, data, message_thread_id=ns["group_thread"]("pay"),
+                                        caption=f"🧾 عکس رسید شارژ از مینی‌اپ — {ns['fmt'](amount)} تومان\n👤 {ns['who'](uid)}")
+        except Exception as e:
+            log.warning("miniapp receipt upload to group failed: %s", e)
+    if sent is None:
+        try:
+            sent = await bot.send_photo(uid, data, caption=f"🧾 رسید شارژ کیف پول: {ns['fmt'](amount)} تومان\n"
+                                                          f"✅ ثبت شد و برای ادمین فرستاده شد؛ بعد از تأیید، کیف پول شارژ می‌شود.")
+        except Exception as e:
+            log.warning("miniapp receipt photo for %s failed: %s", uid, e)
+            return _err("telegram", 502)
     photo_id = sent.photo[-1].file_id
     rid = db.create_receipt(uid, amount, "wallet_charge", photo_id)
     db.set_state(uid, "none")

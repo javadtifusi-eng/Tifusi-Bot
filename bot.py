@@ -2733,7 +2733,7 @@ def delivery_details_html(order, panel, links):
     return "\n\n".join(parts)
 
 
-async def deliver_service(context, chat_id, order, panel):
+async def deliver_service(context, chat_id, order, panel, quiet=False):
     """تحویل سرویس: کارتی با نشان و بارکد، نام و حجم و انقضا در کپشن و زیرش دکمه‌های واقعی
     (نصب پروفایل آیفون، کپی لینک اشتراک)، بعد پیام اطلاعات اتصال. اگر کارت ساخته نشد، همان
     تحویل متنی قبلی (خلاصه، بارکد، جزئیات) فرستاده می‌شود."""
@@ -2743,6 +2743,8 @@ async def deliver_service(context, chat_id, order, panel):
                  f"{'🛍 خرید جدید' if order['price'] else '🎁 اکانت تست'}\n👤 {who(order['user_id'])}\n"
                  f"🧩 {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — {order['days']} روز\n"
                  f"🔖 {order['username']} | 💰 {fmt(order['price'])} تومان", topic="sales")
+    if quiet:
+        return  # خرید از مینی‌اپ: نتیجه داخل خود مینی‌اپ نشان داده می‌شود، چیزی در چت نمی‌آید
     links = None
     if order["protocol"] in IPSEC_SERVICES:
         try:
@@ -3224,7 +3226,7 @@ async def renew_pay_menu(query, uid, oid, pid):
         reply_markup=kb)
 
 
-async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
+async def do_renew_and_deliver(query, context, uid, oid, plan_id=None, quiet=False):
     o = db.get_order(oid)
     p = user_plan(plan_id or o["plan_id"], o["user_id"])
     plan = dict(p) if p else {"id": o["plan_id"], "volume_gb": o["volume_gb"], "days": o["days"], "price": o["price"], "user_limit": None}
@@ -3234,6 +3236,8 @@ async def do_renew_and_deliver(query, context, uid, oid, plan_id=None):
     notify_group(context.bot,
                  f"♻️ تمدید سرویس\n👤 {who(new_o['user_id'])}\n🔖 {new_o['username']} — "
                  f"{vol_text(new_o['volume_gb'])} — {new_o['days']} روز | 💰 {fmt(plan['price'])} تومان", topic="sales")
+    if quiet:
+        return
     dt = datetime.datetime.fromtimestamp(new_o["expire_at"]).strftime("%Y-%m-%d %H:%M")
     try:
         await context.bot.send_message(uid,
