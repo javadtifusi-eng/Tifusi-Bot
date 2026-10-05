@@ -1204,9 +1204,9 @@ async def send_receipt_to_admins(bot, rid, photo_id, caption):
     r0 = db.get_receipt(rid)
     for aid in {ADMIN_ID, *get_admins()}:
         if is_miniapp_user(aid):
-            # ادمین مینی‌اپ: رسید در 🔔 و تب مدیریت (رسیدها) با عکس و دکمه‌ی تأیید/رد؛ چیزی در چت نمی‌آید
             add_notif(aid, "admin_receipt", f"🧾 رسید جدید R{rid} منتظر تأیید — {fmt(r0['amount'])} تومان\n👤 {who(r0['user_id'])}")
-            continue
+            if notify_app_only():
+                continue  # سرور جواد: رسید فقط در 🔔 و تب مدیریت مینی‌اپ؛ پیوی ادمین خالی می‌ماند
         try:
             m = await bot.send_photo(aid, photo_id, caption=caption,
                                      reply_markup=receipt_admin_kb(rid))
@@ -1383,11 +1383,24 @@ def add_notif(uid, kind, text, order_id=None):
          (uid, kind, text, order_id, int(time.time())))
 
 
+def notify_app_only():
+    """تنظیم notify_mode: «app» یعنی خبرها فقط در 🔔 زنگوله‌ی مینی‌اپ (سرور جواد)؛ پیش‌فرض «ping»:
+    زنگوله به‌علاوه‌ی یک خط کوتاه در چت با دکمه‌ی Open، چون مینی‌اپ بسته خودش اعلان نمی‌دهد."""
+    return db.setting("notify_mode", "ping") == "app"
+
+
 async def tell(bot, uid, text, kind="info", order_id=None, **kw):
-    """خبر به کاربر: برای کاربر مینی‌اپ (تصمیم جواد) فقط در 🔔 زنگوله‌ی مینی‌اپ و هیچ پیامی در چت؛
-    برای بقیه همان پیام چت قبلی."""
+    """خبر به کاربر: برای کاربر مینی‌اپ در 🔔 زنگوله‌ی مینی‌اپ (و اگر notify_mode = app نباشد، یک خط
+    کوتاه با دکمه‌ی Open در چت)؛ برای بقیه همان پیام چت قبلی."""
     if is_miniapp_user(uid):
         add_notif(uid, kind, text, order_id)
+        if not notify_app_only():
+            first = text.strip().split("\n")[0][:200]
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("Open", web_app=WebAppInfo(url=MINIAPP_URL), style="primary")]])
+            try:
+                await bot.send_message(uid, f"{first}\n🔔 جزئیات در اعلان‌های تیفوسی", reply_markup=kb)
+            except Exception as e:
+                log.info("notify ping to %s failed: %s", uid, e)
         return
     await bot.send_message(uid, text, **kw)
 
@@ -4153,6 +4166,8 @@ async def run_broadcast(bot, admin_id, payload):
             try:
                 if is_miniapp_user(uid) and not payload.get("photo_id"):
                     add_notif(uid, "broadcast", payload["text"])
+                    if not notify_app_only():
+                        await bot.send_message(uid, payload["text"])
                 elif payload.get("photo_id"):
                     await bot.send_photo(uid, payload["photo_id"], caption=payload.get("text") or None)
                 else:
