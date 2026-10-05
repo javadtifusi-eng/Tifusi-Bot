@@ -155,11 +155,13 @@
       <div class="amts">${[50000, 100000, 200000, 500000].map((a) => `<button type="button" data-amt="${a}" aria-pressed="${S.amt === a}">${num(a / 1000)} هزار</button>`).join("")}</div>
       <label class="field" for="camt">یا مبلغ دلخواه (تومان)<input id="camt" inputmode="numeric" placeholder="${n(w.min)} تا ${n(w.max)}" value="${S.amt && ![50000, 100000, 200000, 500000].includes(S.amt) ? S.amt : ""}"></label>
       ${w.card_number ? `<div class="glass cardno"><div style="display:flex;justify-content:space-between;color:var(--muted);font-size:.8rem"><span>شماره کارت</span><span>${esc(w.card_name)}</span></div>
-        <div class="n"><button type="button" data-copy="${esc(w.card_number.replace(/\D/g, ""))}" aria-label="کپی شماره کارت">${ic("link")}</button><span class="num">${esc(w.card_number)}</span></div>
-        <label class="upl" for="rcpt">${ic("refresh")} <span id="rname">انتخاب عکس رسید</span></label><input id="rcpt" type="file" accept="image/*" hidden></div>
+        <div class="n"><button type="button" data-copy="${esc(w.card_number.replace(/\D/g, ""))}" aria-label="کپی شماره کارت">${ic("link")}</button><span class="num">${esc(w.card_number)}</span></div></div>`
+        : `<div class="glass sec" style="display:grid;gap:10px"><b>💳 شماره کارت</b><p class="soon" style="text-align:right;margin:0">شماره کارت رو از پشتیبانی بگیر؛ پیام بده تا برات بفرستیم.</p>
+        <button class="pill ghost" type="button" data-goto="support" style="justify-content:center">💬 گرفتن شماره کارت از پشتیبانی</button></div>`}
+      <div class="glass sec" style="display:grid;gap:10px"><b>🧾 ارسال رسید</b>
+        <label class="upl" for="rcpt">${ic("refresh")} <span id="rname">انتخاب عکس رسید</span></label><input id="rcpt" type="file" accept="image/*" hidden>
         <button class="cta" type="button" id="csend">ارسال رسید برای تأیید</button>
-        <p class="soon">مبلغ رو به همین کارت بزن، عکس رسید رو انتخاب کن و بفرست. بعد از تأیید ادمین، کیف پولت خودکار شارژ می‌شه و توی چت ربات هم خبرت می‌کنیم.</p>`
-        : '<div class="empty">شماره کارت هنوز توی ربات ثبت نشده؛ به پشتیبانی پیام بده.</div>'}
+        <p class="soon" style="margin:0">مبلغ رو بالا انتخاب کن، بعد از واریز عکس رسید رو بفرست. بعد از تأیید ادمین، کیف پولت خودکار شارژ می‌شه و توی چت ربات هم خبرت می‌کنیم.</p></div>
       ${w.receipts.length ? `<div class="glass sec"><div class="sech"><b>رسیدهای اخیر</b></div>${w.receipts.map((r) => `<div class="tx"><span class="ti">${ic("wallet")}</span><div><b>${r.type === "wallet_charge" ? "شارژ کیف پول" : r.type === "purchase" ? "خرید سرویس" : "تمدید"}</b><small class="num">#${r.id}</small></div><span class="am ${(st[r.status] || ["", ""])[1] === "ok" ? "plus" : "minus"}"><span class="num">${n(r.amount)}</span><br><small>${(st[r.status] || [r.status])[0]}</small></span></div>`).join("")}</div>` : ""}`;
     },
     admin: () => {
