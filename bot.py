@@ -479,6 +479,16 @@ class DB:
                 reply TEXT,
                 created_at INTEGER
             );
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                kind TEXT,
+                text TEXT,
+                order_id INTEGER,
+                created_at INTEGER,
+                seen INTEGER DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, id);
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
@@ -1191,7 +1201,12 @@ def notify_group(bot, text, topic=None):
 async def send_receipt_to_admins(bot, rid, photo_id, caption):
     """ارسال رسید به همه ادمین‌ها + ذخیره آیدی پیام‌ها تا بعداً برای بقیه بسته شود."""
     msgs = []
+    r0 = db.get_receipt(rid)
     for aid in {ADMIN_ID, *get_admins()}:
+        if is_miniapp_user(aid):
+            # ادمین مینی‌اپ: رسید در 🔔 و تب مدیریت (رسیدها) با عکس و دکمه‌ی تأیید/رد؛ چیزی در چت نمی‌آید
+            add_notif(aid, "admin_receipt", f"🧾 رسید جدید R{rid} منتظر تأیید — {fmt(r0['amount'])} تومان\n👤 {who(r0['user_id'])}")
+            continue
         try:
             m = await bot.send_photo(aid, photo_id, caption=caption,
                                      reply_markup=receipt_admin_kb(rid))
@@ -1360,6 +1375,21 @@ MINIAPP_URL = "https://app.bomalo.ir/"
 def is_miniapp_user(uid):
     """فقط مینی‌اپ: یا برای همه روشن است (تنظیم miniapp_all = 1) یا این کاربر در لیست تست است."""
     return db.setting("miniapp_all", "0") == "1" or uid in miniapp_only_ids()
+
+
+def add_notif(uid, kind, text, order_id=None):
+    """یک خبر در 🔔 زنگوله‌ی مینی‌اپ همان کاربر."""
+    db.x("INSERT INTO notifications (user_id,kind,text,order_id,created_at,seen) VALUES (?,?,?,?,?,0)",
+         (uid, kind, text, order_id, int(time.time())))
+
+
+async def tell(bot, uid, text, kind="info", order_id=None, **kw):
+    """خبر به کاربر: برای کاربر مینی‌اپ (تصمیم جواد) فقط در 🔔 زنگوله‌ی مینی‌اپ و هیچ پیامی در چت؛
+    برای بقیه همان پیام چت قبلی."""
+    if is_miniapp_user(uid):
+        add_notif(uid, kind, text, order_id)
+        return
+    await bot.send_message(uid, text, **kw)
 
 
 def miniapp_only_ids():
@@ -3127,6 +3157,8 @@ def clear_pending_buy(uid):
 
 async def offer_pending_buy(bot, uid):
     """بعد از شارژ کیف پول: اگر خرید نیمه‌کاره‌ای هست، پیشنهاد ادامه‌اش را بفرست."""
+    if is_miniapp_user(uid):
+        return  # خرید نیمه‌کاره مال منوی قدیمی است؛ کاربر مینی‌اپ از خود مینی‌اپ می‌خرد
     data = load_pending_buy(uid)
     plan = user_plan(data["plan_id"], uid) if data else None
     if not plan or not plan["active"]:
@@ -3393,10 +3425,10 @@ async def rc_approve(query, context, rid):
     notify_group(context.bot, f"✅ رسید R{rid} تأیید شد\n👤 {who(r['user_id'])} | 💸 {fmt(r['amount'])} تومان", topic="pay")
     if r["rtype"] == "wallet_charge":
         db.add_balance(r["user_id"], r["amount"])
-        await context.bot.send_message(r["user_id"],
-            f"💎 کاربر گرامی مبلغ {fmt(r['amount'])} تومان به کیف پول شما واریز گردید. با تشکر از پرداخت شما 🙏\n\n"
+        await tell(context.bot, r["user_id"],
+            f"💎 مبلغ {fmt(r['amount'])} تومان به کیف پول شما واریز شد. با تشکر از پرداخت شما 🙏\n\n"
             f"🛒 کد پیگیری شما: R{r['id']}\n"
-            f"💰 موجودی فعلی: {fmt(db.get_balance(r['user_id']))} تومان")
+            f"💰 موجودی فعلی: {fmt(db.get_balance(r['user_id']))} تومان", kind="wallet")
         await offer_pending_buy(context.bot, r["user_id"])
         await query.message.reply_text(f"✅ رسید #{rid} تایید شد — کیف پول کاربر شارژ شد.",
             reply_markup=InlineKeyboardMarkup([[btn("⚙️ مدیریت کاربر", f"au:panel:{r['user_id']}")]]))
@@ -3414,8 +3446,8 @@ async def rc_approve(query, context, rid):
                 meta.get("ipsec_password"))
         except Exception as e:
             db.add_balance(r["user_id"], r["amount"])  # بازگشت خودکار وجه
-            await context.bot.send_message(r["user_id"],
-                f"❌ خطا در ساخت سرویس: {e}\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما برگشت.")
+            await tell(context.bot, r["user_id"],
+                f"❌ خطا در ساخت سرویس: {e}\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما برگشت.", kind="refund")
             await query.message.reply_text(f"⚠️ ساخت سرویس ناموفق ({e})\n💰 وجه به‌صورت خودکار به کیف پول کاربر برگشت.")
             return
         await deliver_service(context, r["user_id"], order, panel)
@@ -3426,8 +3458,8 @@ async def rc_approve(query, context, rid):
             # سرویس در این فاصله حذف/بایگانی شده: تمدید نمی‌شود و مبلغ به کیف پول برمی‌گردد
             db.add_balance(r["user_id"], r["amount"])
             try:
-                await context.bot.send_message(r["user_id"],
-                    f"❌ سرویسی که برای تمدیدش پرداخت کردید دیگر فعال نیست.\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما برگشت.")
+                await tell(context.bot, r["user_id"],
+                    f"❌ سرویسی که برای تمدیدش پرداخت کردید دیگر فعال نیست.\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما برگشت.", kind="refund")
             except Exception:
                 pass
             await query.message.reply_text(f"⚠️ سفارش رسید #{rid} فعال نیست؛ تمدید انجام نشد و وجه به کیف پول کاربر برگشت.")
@@ -3436,8 +3468,8 @@ async def rc_approve(query, context, rid):
             await do_renew_and_deliver(query, context, r["user_id"], o["id"], meta.get("plan_id"))
         except Exception as e:
             db.add_balance(r["user_id"], r["amount"])  # بازگشت خودکار وجه
-            await context.bot.send_message(r["user_id"],
-                f"❌ خطا در تمدید سرویس: {e}\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما برگشت.")
+            await tell(context.bot, r["user_id"],
+                f"❌ خطا در تمدید سرویس: {e}\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما برگشت.", kind="refund")
             await query.message.reply_text(f"⚠️ تمدید ناموفق ({e})\n💰 وجه به‌صورت خودکار به کیف پول کاربر برگشت.")
             return
         await query.message.reply_text(f"✅ رسید #{rid} تایید شد — سرویس تمدید شد.")
@@ -3460,9 +3492,9 @@ async def rc_reject(query, context, rid):
         await query.message.delete()
     except Exception:
         pass
-    await context.bot.send_message(r["user_id"],
-        f"❌ رسید شما (مبلغ {fmt(r['amount'])} تومان) تایید نشد.\n"
-        f"در صورت نیاز با پشتیبانی در تماس باشید: {db.setting('support_id', '-')}")
+    await tell(context.bot, r["user_id"],
+        f"❌ رسید شما (مبلغ {fmt(r['amount'])} تومان) تأیید نشد.\n"
+        f"اگر سؤالی داری به پشتیبانی پیام بده.", kind="reject")
     await query.message.reply_text(f"❌ رسید #{rid} رد شد.")
 
 
@@ -4119,7 +4151,9 @@ async def run_broadcast(bot, admin_id, payload):
     for i, uid in enumerate(ids):
         for attempt in range(3):
             try:
-                if payload.get("photo_id"):
+                if is_miniapp_user(uid) and not payload.get("photo_id"):
+                    add_notif(uid, "broadcast", payload["text"])
+                elif payload.get("photo_id"):
                     await bot.send_photo(uid, payload["photo_id"], caption=payload.get("text") or None)
                 else:
                     await bot.send_message(uid, payload["text"])
@@ -4142,7 +4176,7 @@ async def run_broadcast(bot, admin_id, payload):
             except Exception:
                 pass
     try:
-        await bot.send_message(admin_id, f"✅ پیام همگانی تمام شد.\n📨 موفق: {sent}\n❌ ناموفق (ربات بلاک/حذف شده): {failed}")
+        await tell(bot, admin_id, f"✅ پیام همگانی تمام شد.\n📨 موفق: {sent}\n❌ ناموفق (ربات بلاک/حذف شده): {failed}", kind="admin")
     except Exception:
         pass
 
@@ -4763,12 +4797,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.update_order(oid, status="deleted")
                 if refund:
                     db.add_balance(o["user_id"], refund)
-                await context.bot.send_message(o["user_id"],
-                    f"🗑 سرویس {o['username']} حذف شد.\n💰 مبلغ {fmt(refund)} تومان به کیف پول شما برگشت.")
+                await tell(context.bot, o["user_id"],
+                    f"🗑 سرویس {o['username']} حذف شد.\n💰 مبلغ {fmt(refund)} تومان به کیف پول شما برگشت.", kind="refund")
                 await safe_edit(query, f"✅ سرویس #{oid} حذف شد و {fmt(refund)} تومان برگشت." +
                                 ("" if panel else "\n⚠️ پنل این سرویس در ربات وجود ندارد؛ اگر کاربر روی سرور مانده دستی حذفش کنید."))
             else:
-                await context.bot.send_message(o["user_id"], "❌ درخواست حذف سرویس شما توسط ادمین رد شد.")
+                await tell(context.bot, o["user_id"], f"❌ درخواست حذف سرویس {o['username']} رد شد.", kind="reject")
                 await safe_edit(query, f"❌ درخواست حذف سرویس #{oid} رد شد.")
             return
     except Exception as e:
@@ -5069,7 +5103,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
             db.set_state(uid, "none")
             await msg.reply_text(f"✅ {fmt(amount)} تومان به کیف پول کاربر اضافه شد.")
             try:
-                await context.bot.send_message(target, f"💰 کیف پول شما {fmt(amount)} تومان شارژ شد (شارژ دستی).")
+                await tell(context.bot, target, f"💰 کیف پول شما {fmt(amount)} تومان شارژ شد (شارژ دستی).", kind="wallet")
             except Exception:
                 pass
             await offer_pending_buy(context.bot, target)
@@ -5107,7 +5141,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         num = text.strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
         if state == "au_msg":
             try:
-                await context.bot.send_message(target, f"📩 پیام از پشتیبانی:\n\n{text}")
+                await tell(context.bot, target, f"📩 پیام از پشتیبانی:\n\n{text}", kind="support")
                 await msg.reply_text("✅ پیام برای کاربر ارسال شد.")
             except Exception as e:
                 await msg.reply_text(f"❌ ارسال نشد (احتمالاً کاربر ربات را بلاک کرده): {e}")
@@ -5169,8 +5203,8 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
         db.set_state(uid, "none")
         if t:
             try:
-                await context.bot.send_message(t["user_id"],
-                    f"☎️ پاسخ پشتیبانی به تیکت #{t['id']}:\n\n{text}")
+                await tell(context.bot, t["user_id"],
+                    f"☎️ پاسخ پشتیبانی به تیکت #{t['id']}:\n\n{text}", kind="support")
             except Exception:
                 pass
         await msg.reply_text("✅ پاسخ ارسال و تیکت بسته شد.")
@@ -5604,7 +5638,7 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
         else:
             continue
         try:
-            await context.bot.send_message(o["user_id"], text, reply_markup=InlineKeyboardMarkup([
+            await tell(context.bot, o["user_id"], text, kind="expiry", order_id=o["id"], reply_markup=InlineKeyboardMarkup([
                 [btn("♻️ تمدید سرویس", f"renew:{o['id']}")]]))
         except Exception as e:
             log.info("reminder to %s failed: %s", o["user_id"], e)
