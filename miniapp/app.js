@@ -113,7 +113,7 @@
   }
   const V = {
     home: () => `
-      <div class="bar"><button class="iconbtn" type="button" data-act="support" aria-label="پشتیبانی">${ic("chat")}</button><button class="pill ghost addhome" type="button" data-act="addhome">${ic("phone")} افزودن به صفحه‌ی گوشی</button></div>
+      <div class="bar"><span style="display:flex;gap:8px"><button class="iconbtn" type="button" data-act="notifs" aria-label="اعلان‌ها${S.me.unread ? ` (${S.me.unread} تازه)` : ""}">${ic("bell")}${S.me.unread ? '<span class="badge"></span>' : ""}</button><button class="iconbtn" type="button" data-act="support" aria-label="پشتیبانی">${ic("chat")}</button></span><button class="pill ghost addhome" type="button" data-act="addhome">${ic("phone")} افزودن به صفحه‌ی گوشی</button></div>
       <div class="herospace" role="img" aria-label="Tifusi"></div>
       <div class="glass wallet"><div class="w"><div class="wicon" aria-hidden="true"></div><div><div class="k">موجودی کیف پول</div><div class="v">${num(n(S.me.balance))}</div></div></div><button class="pill" type="button" data-go="wallet">${ic("refresh")} شارژ کیف پول</button></div>
       <div class="stats">
@@ -163,7 +163,7 @@
       <div class="glass sec" style="display:grid;gap:10px"><b>🧾 ارسال رسید</b>
         <label class="upl" for="rcpt">${ic("refresh")} <span id="rname">انتخاب عکس رسید</span></label><input id="rcpt" type="file" accept="image/*" hidden>
         <button class="cta" type="button" id="csend">ارسال رسید برای تأیید</button>
-        <p class="soon" style="margin:0">مبلغ رو بالا انتخاب کن، بعد از واریز عکس رسید رو بفرست. بعد از تأیید ادمین، کیف پولت خودکار شارژ می‌شه و توی چت ربات هم خبرت می‌کنیم.</p></div>
+        <p class="soon" style="margin:0">مبلغ رو بالا انتخاب کن، بعد از واریز عکس رسید رو بفرست. بعد از تأیید ادمین، کیف پولت خودکار شارژ می‌شه و توی 🔔 اعلان‌ها خبرت می‌کنیم.</p></div>
       ${w.receipts.length ? `<div class="glass sec"><div class="sech"><b>رسیدهای اخیر</b></div>${w.receipts.map((r) => `<div class="tx"><span class="ti">${ic("wallet")}</span><div><b>${r.type === "wallet_charge" ? "شارژ کیف پول" : r.type === "purchase" ? "خرید سرویس" : "تمدید"}</b><small class="num">#${r.id}</small></div><span class="am ${(st[r.status] || ["", ""])[1] === "ok" ? "plus" : "minus"}"><span class="num">${n(r.amount)}</span><br><small>${(st[r.status] || [r.status])[0]}</small></span></div>`).join("")}</div>` : ""}`;
     },
     admin: () => {
@@ -473,7 +473,7 @@
       S.bcn = j.count;
       $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال پیام همگانی</h3>
         <div class="glass sec" dir="auto" style="white-space:pre-wrap;line-height:1.9">${esc(S.bct)}</div>
-        <p style="margin:0">این پیام برای <b class="num">${n(j.count)}</b> کاربر فرستاده می‌شه و برگشت نداره. گزارش پایانش توی چت ربات میاد.</p>
+        <p style="margin:0">این پیام برای <b class="num">${n(j.count)}</b> کاربر فرستاده می‌شه و برگشت نداره. گزارش پایانش توی 🔔 اعلان‌ها میاد.</p>
         <button class="cta" type="button" id="bcsend">📣 ارسال به ${num(n(j.count))} کاربر</button>
         <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
       $("sheet").classList.add("open"); $("scrim").classList.add("open");
@@ -490,6 +490,27 @@
       if (e.message === "count_changed") closeSheet();
     }
   }
+
+  // ---------- 🔔 اعلان‌ها ----------
+  const NK = { wallet: "💰", reject: "❌", refund: "↩️", expiry: "⏳", support: "📩", broadcast: "📣", admin_receipt: "🧾", admin: "👑", info: "🔔" };
+  async function openNotifs() {
+    $("sheet").innerHTML = '<h3 id="sheetTitle">اعلان‌ها</h3>' + LOADING;
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+    try {
+      const j = await api("notifs");
+      $("sheet").innerHTML = `<h3 id="sheetTitle">🔔 اعلان‌ها</h3>
+        ${j.items.map((x) => `<div class="glass sec" style="display:grid;gap:8px;padding:12px 14px${x.seen ? "" : ";border-color:var(--cyan)"}">
+          <div dir="auto" style="white-space:pre-wrap;line-height:1.8">${esc(x.text)}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><small style="color:var(--muted)" class="num">${fdate(x.at)}</small>
+          ${x.kind === "expiry" && x.order_id && byId(x.order_id) ? `<button class="pill" type="button" data-renew="${x.order_id}">تمدید</button>` : ""}
+          ${x.kind === "admin_receipt" ? '<button class="pill" type="button" data-nrc="1">بررسی رسید</button>' : ""}
+          ${(x.kind === "wallet" || x.kind === "refund") ? '<button class="pill ghost" type="button" data-tab="wallet">کیف پول</button>' : ""}</div>
+        </div>`).join("") || '<div class="empty">هنوز اعلانی نداری.</div>'}
+        <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
+      if (S.me.unread) { S.me.unread = 0; api("notifs/seen", { method: "POST", body: "{}" }).catch(() => {}); if (S.tab === "home") render(); }
+    } catch (e) { closeSheet(); toast("الان نشد اعلان‌ها رو بگیرم"); }
+  }
+  setInterval(() => { if (document.visibilityState === "visible" && S.me) api("me").then((me) => { const ch = me.unread !== S.me.unread; S.me = me; if (ch && S.tab === "home" && !$("sheet").classList.contains("open")) render(); }).catch(() => {}); }, 60000);
 
   function render() {
     $("app").innerHTML = V[S.tab]();
@@ -682,7 +703,7 @@
 
   document.addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
-    if (d.tab) { S.tab = d.tab; render(); scrollTo(0, 0); return; }
+    if (d.tab) { closeSheet(); S.tab = d.tab; render(); scrollTo(0, 0); return; }
     if (d.cardlist) { S.card = null; render(); scrollTo(0, 0); return; }
     if (d.go) { S.tab = d.go; render(); scrollTo(0, 0); return; }
     if (d.f) { S.filt = d.f; S.tab = "customers"; render(); return; }
@@ -691,6 +712,7 @@
     if (d.send) { const c = byId(d.send); if (c) openSend(c); return; }
     if (d.guide) { const c = byId(d.guide); if (c && c.guide) openLink(c.guide); return; }
     if (d.copy) { copy(d.copy); return; }
+    if (d.nrc) { closeSheet(); S.tab = "admin"; S.asec = "rc"; S.admin = null; render(); scrollTo(0, 0); return; }
     if (d.mguide) { const m = S.made[+d.mguide]; if (m) openLink(m.guide); return; }
     if (d.msend) { const m = S.made[+d.msend]; if (m) openSend(m); return; }
     if (d.shareTg) { const c = byId(d.shareTg) || S.sendC; const u = `https://t.me/share/url?url=${encodeURIComponent(c.guide)}&text=${encodeURIComponent("اطلاعات اتصال و راهنمای سرویس " + c.username)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); return; }
@@ -739,6 +761,7 @@
     if (a === "close") closeSheet();
     else if (a === "charge") { S.tab = "wallet"; render(); }
     else if (a === "support") support();
+    else if (a === "notifs") openNotifs();
     else if (a === "addhome") { if (!tg("web_app_add_to_home_screen")) toast("از داخل تلگرام روی گوشی باز کن"); }
   });
   document.addEventListener("input", (e) => {

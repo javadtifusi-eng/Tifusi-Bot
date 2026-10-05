@@ -128,7 +128,22 @@ async def api_me(request):
         # پشتیبانی و گرفتن شماره کارت: چت مستقیم تلگرام با همین یوزرنیم (تنظیم support_username)
         "support": (db.setting("support_username", "") or "").lstrip("@"),
         "test_enabled": db.setting("test_enabled", "0") == "1",
+        "unread": db.one("SELECT COUNT(*) c FROM notifications WHERE user_id=? AND seen=0", (uid,))["c"],
     })
+
+
+# ---------- 🔔 زنگوله: خبرهای مهم (تأیید رسید، انقضا، شارژ دستی، پیام پشتیبانی، …) به‌جای پیام چت ----------
+async def api_notifs(request):
+    uid = request["uid"]
+    db = ns["db"]
+    rows = db.q("SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 50", (uid,))
+    return web.json_response({"items": [{"id": r["id"], "kind": r["kind"], "text": r["text"], "order_id": r["order_id"],
+                                         "at": r["created_at"], "seen": bool(r["seen"])} for r in rows]})
+
+
+async def api_notifs_seen(request):
+    ns["db"].x("UPDATE notifications SET seen=1 WHERE user_id=? AND seen=0", (request["uid"],))
+    return web.json_response({"ok": True})
 
 
 async def api_customers(request):
@@ -609,7 +624,7 @@ async def api_admin_user_action(request):
             db.add_balance(target, amount)
             _admin_log(request, f"➕ {fmt(amount)} تومان به کیف پول {label} اضافه شد")
             try:
-                await bot.send_message(target, f"💰 کیف پول شما {fmt(amount)} تومان شارژ شد (شارژ دستی).")
+                await ns["tell"](bot, target, f"💰 کیف پول شما {fmt(amount)} تومان شارژ شد (شارژ دستی).", kind="wallet")
             except Exception:
                 pass
             try:
@@ -632,7 +647,7 @@ async def api_admin_user_action(request):
         if not text or len(text) > 3500:
             return _err("text")
         try:
-            await bot.send_message(target, f"📩 پیام از پشتیبانی:\n\n{text}")
+            await ns["tell"](bot, target, f"📩 پیام از پشتیبانی:\n\n{text}", kind="support")
         except Exception as e:
             return _err("send", 502, detail=str(e)[:200])
         _admin_log(request, f"📩 پیام به {label}")
@@ -742,7 +757,7 @@ async def api_admin_ticket(request):
         db.set_ticket(t["id"], "closed", reply=text)
         sent = True
         try:
-            await request.app["tg_app"].bot.send_message(t["user_id"], f"☎️ پاسخ پشتیبانی به تیکت #{t['id']}:\n\n{text}")
+            await ns["tell"](request.app["tg_app"].bot, t["user_id"], f"☎️ پاسخ پشتیبانی به تیکت #{t['id']}:\n\n{text}", kind="support")
         except Exception:
             sent = False
         _admin_log(request, f"🎫 تیکت #{t['id']} پاسخ داده و بسته شد ({ns['who'](t['user_id'])})")
@@ -898,6 +913,8 @@ async def start(application, bot_globals):
     app.router.add_get("/app.js", app_js)
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/customers", api_customers)
+    app.router.add_get("/api/notifs", api_notifs)
+    app.router.add_post("/api/notifs/seen", api_notifs_seen)
     app.router.add_get("/api/plans", api_plans)
     app.router.add_post("/api/goto", api_goto)
     app.router.add_post("/api/toggle", api_toggle)
