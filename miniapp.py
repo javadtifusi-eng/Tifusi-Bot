@@ -13,7 +13,10 @@ import hashlib
 import hmac
 import json
 import logging
+import re
+import secrets
 import time
+from types import SimpleNamespace
 from pathlib import Path
 from urllib.parse import parse_qsl
 
@@ -28,6 +31,8 @@ PANEL_CACHE_SECONDS = 30
 STATIC_DIR = Path(__file__).resolve().parent / "miniapp"
 # سرویس‌هایی که مینی‌اپ می‌فروشد؛ «ikev2» همان پلن یکی برای IKEv2، L2TP و PPTP است
 SHOP_SERVICES = {"ikev2": "L2TP و IKEv2", "xray": "V2Ray"}
+# همان وضعیت‌هایی که db.get_user_orders نشان می‌دهد
+LIVE_ORDER_STATUSES = ("active", "delreq_pending")
 
 ns = {}
 _panel_cache = {}  # panel_id -> (time, {username: panel user})
@@ -161,6 +166,407 @@ async def api_plans(request):
     return web.json_response({"services": shop})
 
 
+async def api_toggle(request):
+    """کلید سبز/قرمز: روشن یا خاموش کردن یک سرویس خود همین کاربر روی پنل.
+    سرویس تمام‌شده (حجم یا تاریخ) روشن نمی‌شود؛ باید تمدید شود."""
+    uid = request["uid"]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    db = ns["db"]
+    order = db.get_order(int(body.get("order_id") or 0))
+    # فقط سفارش‌های زنده‌ی خود همین کاربر (همان‌هایی که در لیست مشتری‌ها دیده می‌شوند)؛
+    # سفارش حذف‌شده‌ای که هنوز کاربرش روی پنل هست نباید از اینجا خاموش شود
+    if not order or order["user_id"] != uid or order["status"] not in LIVE_ORDER_STATUSES:
+        return web.json_response({"error": "not_found"}, status=404)
+    turn_on = bool(body.get("on"))
+    panel = db.get_panel(order["panel_id"])
+    if not panel:
+        return web.json_response({"error": "panel"}, status=503)
+    if turn_on:
+        expire = int(order["expire_at"] or 0)
+        pu = (await asyncio.to_thread(_panel_users, panel)).get(order["username"]) or {}
+        if (expire and expire < time.time()) or pu.get("status") in ("limited", "expired"):
+            return web.json_response({"error": "finished"}, status=409)
+    client = ns["panel_client"](panel)
+    try:
+        ok = await asyncio.to_thread(client.set_status, order["username"], "active" if turn_on else "disabled")
+    except Exception as e:
+        log.warning("miniapp toggle %s failed: %s", order["id"], e)
+        return web.json_response({"error": "panel"}, status=502)
+    if not ok:
+        return web.json_response({"error": "not_on_panel"}, status=404)
+    _panel_cache.pop(panel["id"], None)
+    ns["notify_group"](request.app["tg_app"].bot,
+                       f"{'🟢 روشن' if turn_on else '🔴 خاموش'} شد از مینی‌اپ: {order['username']}\n👤 {ns['who'](uid)}",
+                       topic="sales")
+    return web.json_response({"ok": True, "on": turn_on})
+
+
+# ---------- خرید داخل مینی‌اپ (کیف پول) ----------
+USERNAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,19}")
+MAX_BULK = 20
+_buy_locks = {}
+
+
+def _err(code, status=400, **extra):
+    return web.json_response(dict(error=code, **extra), status=status)
+
+
+async def _free_username(client, base, taken):
+    """base اگر آزاد بود همان، وگرنه base2، base3…؛ taken یوزرنیم‌هایی است که همین خرید گرفته."""
+    for i in range(0, 200):
+        name = base if i == 0 else f"{base[:17]}{i + 1}"
+        if name in taken:
+            continue
+        if not await asyncio.to_thread(client.find_user, name):
+            return name
+    return None
+
+
+async def api_buy(request):
+    """خرید از کیف پول، مثل finalize_wallet_purchase ربات: کسر اتمیک، ساخت روی پنل، برگشت وجه اگر نشد،
+    کارت تحویل در چت. موبایل‌فروش می‌تواند چند اکانت با هم بسازد (qty) که پشت سر هم نام‌گذاری می‌شوند."""
+    uid = request["uid"]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    db = ns["db"]
+    service = str(body.get("service") or "")
+    plan = ns["user_plan"](int(body.get("plan_id") or 0), uid)
+    if service not in SHOP_SERVICES or service not in ns["SERVICES"] or not plan or not plan["active"] \
+            or not ns["plan_fits"](plan, service):
+        return _err("plan")
+    try:
+        qty = max(1, min(MAX_BULK, int(body.get("qty") or 1)))
+    except (TypeError, ValueError):
+        qty = 1
+    base = str(body.get("username") or "").strip()
+    if base and not USERNAME_RE.fullmatch(base):
+        return _err("username")
+    password = str(body.get("password") or "").strip().translate(
+        str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    ipsec = service in ns["IPSEC_SERVICES"]
+    if ipsec and password and not ns["IPSEC_PASSWORD_RE"].fullmatch(password):
+        return _err("password")
+    total = plan["price"] * qty
+    if db.get_balance(uid) < total:
+        return _err("balance", 402, need=total - db.get_balance(uid))
+    panel = ns["pick_panel"](service)
+    if not panel:
+        return _err("capacity", 503)
+
+    lock = _buy_locks.setdefault(uid, asyncio.Lock())
+    if lock.locked():
+        return _err("busy", 429)
+    async with lock:
+        client = ns["panel_client"](panel)
+        if not base:
+            base = "u" + "".join(secrets.choice("abcdefghjkmnpqrstuvwxyz23456789") for _ in range(6))
+        app = request.app["tg_app"]
+        ctx = SimpleNamespace(bot=app.bot, application=app, job_queue=app.job_queue, args=[])
+        made, taken, failed = [], set(), None
+        for _ in range(qty):
+            try:
+                name = await _free_username(client, base, taken)
+            except Exception as e:
+                failed = f"panel: {e}"
+                break
+            if not name:
+                failed = "username_taken"
+                break
+            if not db.try_spend(uid, plan["price"]):
+                failed = "balance"
+                break
+            pw = password if (password and qty == 1) else (ns["random_ipsec_password"]() if ipsec else None)
+            try:
+                order, opanel = await asyncio.to_thread(
+                    ns["create_service_on_panel"], uid, plan, service, name, panel["id"], pw)
+            except Exception as e:
+                db.add_balance(uid, plan["price"])  # بازگشت وجه
+                failed = str(e)[:200]
+                break
+            taken.add(name)
+            made.append({"id": order["id"], "username": order["username"], "password": order["password"],
+                         "guide": (order["sub_url"] or "").rstrip("/") + "/guide" if order["sub_url"] else None})
+            try:
+                await ns["deliver_service"](ctx, uid, order, opanel)
+            except Exception as e:
+                log.warning("miniapp deliver %s failed: %s", order["id"], e)
+        _panel_cache.pop(panel["id"], None)
+        if made:
+            await ns["notify_admin"](app.bot, f"🛍 خرید جدید از مینی‌اپ (کیف پول)\n👤 {uid}\n📦 {ns['plan_label'](plan)}"
+                                              f" × {len(made)}\n🖥 پنل: {panel['name']}")
+    return web.json_response({"ok": bool(made), "made": made, "failed": failed,
+                              "balance": db.get_balance(uid)}, status=200 if made else 502)
+
+
+# ---------- تمدید داخل مینی‌اپ (کیف پول) ----------
+def _live_order(db, uid, order_id):
+    order = db.get_order(int(order_id or 0))
+    if not order or order["user_id"] != uid or order["status"] != "active":
+        return None
+    return order
+
+
+async def api_renew_plans(request):
+    uid = request["uid"]
+    db = ns["db"]
+    order = _live_order(db, uid, request.query.get("order_id"))
+    if not order:
+        return _err("not_found", 404)
+    plans = [ns["user_plan"](p["id"], uid) for p in db.get_plans(active_only=True, service=order["protocol"])]
+    plans = [p for p in plans if p and ns["plan_fits"](p, order["protocol"])]
+    return web.json_response({"order": {"id": order["id"], "username": order["username"]}, "plans": [
+        {"id": p["id"], "gb": p["volume_gb"], "days": p["days"], "price": p["price"], "users": p["user_limit"] or 0}
+        for p in plans]})
+
+
+async def api_renew(request):
+    """مثل دکمه‌ی rnw:w ربات: پلن واقعی و فعال همان سرویس، کسر اتمیک، تمدید، برگشت وجه اگر نشد."""
+    uid = request["uid"]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    db = ns["db"]
+    order = _live_order(db, uid, body.get("order_id"))
+    if not order:
+        return _err("not_found", 404)
+    plan = ns["user_plan"](int(body.get("plan_id") or 0), uid)
+    if not plan or not plan["active"] or not ns["plan_fits"](plan, order["protocol"]):
+        return _err("plan")
+    lock = _buy_locks.setdefault(uid, asyncio.Lock())
+    if lock.locked():
+        return _err("busy", 429)
+    async with lock:
+        bal_before = db.get_balance(uid)
+        if not db.try_spend(uid, plan["price"]):
+            return _err("balance", 402, need=plan["price"] - bal_before)
+        app = request.app["tg_app"]
+        ctx = SimpleNamespace(bot=app.bot, application=app, job_queue=app.job_queue, args=[])
+        try:
+            await ns["do_renew_and_deliver"](None, ctx, uid, order["id"], plan["id"])
+        except Exception as e:
+            db.add_balance(uid, plan["price"])
+            log.warning("miniapp renew %s failed: %s", order["id"], e)
+            return _err("renew", 502, detail=str(e)[:200])
+        try:
+            await app.bot.send_message(uid, f"🧾 رسید تمدید (مینی‌اپ)\n\n💰 موجودی قبل: {ns['fmt'](bal_before)} تومان\n"
+                                            f"💸 مبلغ تمدید: {ns['fmt'](plan['price'])} تومان\n"
+                                            f"💎 موجودی فعلی: {ns['fmt'](db.get_balance(uid))} تومان")
+        except Exception:
+            pass
+        _panel_cache.pop(order["panel_id"], None)
+    new = db.get_order(order["id"])
+    return web.json_response({"ok": True, "expire": new["expire_at"], "balance": db.get_balance(uid)})
+
+
+# ---------- کیف پول و شارژ کارت به کارت داخل مینی‌اپ ----------
+CHARGE_MIN, CHARGE_MAX = 20000, 50000000
+MAX_RECEIPT_BYTES = 8 * 1024 * 1024
+
+
+async def api_wallet(request):
+    uid = request["uid"]
+    db = ns["db"]
+    rows = db.q("SELECT id, amount, rtype, status, created_at FROM receipts WHERE user_id=? ORDER BY id DESC LIMIT 10", (uid,))
+    return web.json_response({
+        "balance": db.get_balance(uid),
+        "card_number": db.setting("card_number", ""), "card_name": db.setting("card_name", ""),
+        "min": CHARGE_MIN, "max": CHARGE_MAX,
+        "receipts": [{"id": r["id"], "amount": r["amount"], "type": r["rtype"], "status": r["status"],
+                      "at": r["created_at"]} for r in rows],
+    })
+
+
+async def api_charge(request):
+    """عکس رسید از مینی‌اپ: اول در چت خود کاربر فرستاده می‌شود (تا file_id تلگرام داشته باشیم و
+    کاربر هم رسیدش را ببیند)، بعد همان مسیر رسید ربات: create_receipt و send_receipt_to_admins."""
+    uid = request["uid"]
+    db = ns["db"]
+    try:
+        form = await request.post()
+        amount = int(str(form.get("amount") or "0").replace(",", ""))
+        photo = form.get("photo")
+    except Exception:
+        return _err("form")
+    if not (CHARGE_MIN <= amount <= CHARGE_MAX):
+        return _err("amount", min=CHARGE_MIN, max=CHARGE_MAX)
+    if photo is None or not hasattr(photo, "file"):
+        return _err("photo")
+    data = photo.file.read(MAX_RECEIPT_BYTES + 1)
+    if not data or len(data) > MAX_RECEIPT_BYTES:
+        return _err("photo_size")
+    bot = request.app["tg_app"].bot
+    try:
+        sent = await bot.send_photo(uid, data, caption=f"🧾 رسید شارژ کیف پول: {ns['fmt'](amount)} تومان\n"
+                                                      f"✅ ثبت شد و برای ادمین فرستاده شد؛ بعد از تأیید، کیف پول شارژ می‌شود.")
+    except Exception as e:
+        log.warning("miniapp receipt photo for %s failed: %s", uid, e)
+        return _err("telegram", 502)
+    photo_id = sent.photo[-1].file_id
+    rid = db.create_receipt(uid, amount, "wallet_charge", photo_id)
+    db.set_state(uid, "none")
+    r = db.get_receipt(rid)
+    await ns["send_receipt_to_admins"](bot, rid, photo_id,
+                                       ns["receipt_caption"](r, "یک پرداخت جدید انجام شده است — افزایش موجودی (مینی‌اپ)"))
+    return web.json_response({"ok": True, "receipt": rid})
+
+
+# ---------- تب مدیریت (فقط ادمین) ----------
+class _AdminMsg:
+    """جای query.message در rc_approve/rc_reject. chat_id صفر است تا پیام رسید پیش همه‌ی ادمین‌ها
+    بسته شود (close_receipt_for_others)، و جواب‌ها به‌جای چت به مینی‌اپ برمی‌گردند."""
+    chat_id = 0
+    photo = None
+    caption = None
+
+    def __init__(self, notes):
+        self.notes = notes
+
+    async def reply_text(self, text, **kw):
+        self.notes.append(text)
+
+    async def edit_reply_markup(self, **kw):
+        return True
+
+    async def delete(self):
+        return True
+
+
+class _AdminQuery:
+    def __init__(self):
+        self.notes = []
+        self.message = _AdminMsg(self.notes)
+
+    async def answer(self, text=None, **kw):
+        if text:
+            self.notes.append(text)
+
+    async def edit_message_text(self, text, **kw):
+        self.notes.append(text)
+
+
+def _admin_only(request):
+    return ns["is_admin"](request["uid"])
+
+
+async def api_admin_summary(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db = ns["db"]
+    now = time.time()
+    span = {k: db.stats_since(int(now - d * 86400)) for k, d in (("day", 1), ("week", 7), ("month", 30))}
+    pending = []
+    for r in db.pending_receipts():
+        u = db.get_user(r["user_id"])
+        meta = json.loads(r["meta"] or "{}")
+        pending.append({"id": r["id"], "user_id": r["user_id"], "amount": r["amount"], "type": r["rtype"],
+                        "at": r["created_at"], "user": (u["full_name"] or "") if u else "",
+                        "uname": (u["username"] or "") if u else "", "username": meta.get("username") or ""})
+    return web.json_response({"span": span, "totals": db.totals(), "pending": pending})
+
+
+async def api_admin_receipt_photo(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    r = ns["db"].get_receipt(int(request.query.get("id") or 0))
+    if not r or not r["photo_id"]:
+        return _err("not_found", 404)
+    try:
+        f = await request.app["tg_app"].bot.get_file(r["photo_id"])
+        data = bytes(await f.download_as_bytearray())
+    except Exception as e:
+        log.warning("miniapp receipt photo %s failed: %s", r["id"], e)
+        return _err("telegram", 502)
+    return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
+async def api_admin_receipt(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    rid, action = int(body.get("id") or 0), body.get("action")
+    if action not in ("ok", "no"):
+        return _err("action")
+    app = request.app["tg_app"]
+    ctx = SimpleNamespace(bot=app.bot, application=app, job_queue=app.job_queue, args=[])
+    q = _AdminQuery()
+    fn = ns["rc_approve"] if action == "ok" else ns["rc_reject"]
+    try:
+        await fn(q, ctx, rid)
+    except Exception as e:
+        log.warning("miniapp receipt %s %s failed: %s", rid, action, e)
+        return _err("failed", 502, detail=str(e)[:200])
+    r = ns["db"].get_receipt(rid)
+    ns["notify_group"](app.bot, f"👑 رسید R{rid} از مینی‌اپ {'تأیید' if action == 'ok' else 'رد'} شد — ادمین: {ns['who'](request['uid'])}",
+                       topic="pay")
+    return web.json_response({"ok": True, "status": r["status"] if r else None, "notes": q.notes})
+
+
+# ---------- پل موقت: دکمه‌های مینی‌اپ همان مسیرهای امتحان‌پس‌داده‌ی ربات را در چت باز می‌کنند ----------
+class ChatMessage:
+    """جای update.message برای توابع منوی ربات: هر جوابی مستقیم در چت همان کاربر فرستاده می‌شود."""
+    photo = None
+    caption = None
+
+    def __init__(self, bot, chat_id):
+        self._bot, self.chat_id = bot, chat_id
+
+    async def reply_text(self, text, **kw):
+        return await self._bot.send_message(self.chat_id, text, **kw)
+
+    async def reply_photo(self, photo, **kw):
+        return await self._bot.send_photo(self.chat_id, photo, **kw)
+
+    async def reply_document(self, document, **kw):
+        return await self._bot.send_document(self.chat_id, document, **kw)
+
+    async def delete(self):
+        return True
+
+
+GOTO_ACTIONS = {"buy", "renew_menu", "test", "services", "wallet", "support", "tutorial", "tariff"}
+
+
+async def api_goto(request):
+    uid = request["uid"]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    action = str(body.get("action") or "")
+    app = request.app["tg_app"]
+    msg = ChatMessage(app.bot, uid)
+    db = ns["db"]
+    if action == "renew":
+        order = db.get_order(int(body.get("order_id") or 0))
+        if not order or order["user_id"] != uid or order["status"] not in LIVE_ORDER_STATUSES:
+            return web.json_response({"error": "not_found"}, status=404)
+        coro = msg.reply_text(f"♻️ تمدید سرویس <b>{order['username']}</b>", parse_mode="HTML",
+                              reply_markup=ns["InlineKeyboardMarkup"]([[ns["btn"]("♻️ تمدید این سرویس", f"renew:{order['id']}")]]))
+    elif action in GOTO_ACTIONS:
+        db.set_state(uid, "none")
+        ctx = SimpleNamespace(bot=app.bot, application=app, job_queue=app.job_queue, args=[])
+        coro = ns["run_menu_action"](msg, ctx, uid, action)
+    else:
+        return web.json_response({"error": "action"}, status=400)
+
+    async def run():
+        try:
+            await coro
+        except Exception as e:
+            log.warning("miniapp goto %s for %s failed: %s", action, uid, e)
+    asyncio.create_task(run())
+    return web.json_response({"ok": True})
+
+
 async def index(request):
     return web.FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
@@ -178,6 +584,17 @@ async def start(application, bot_globals):
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/customers", api_customers)
     app.router.add_get("/api/plans", api_plans)
+    app.router.add_post("/api/goto", api_goto)
+    app.router.add_post("/api/toggle", api_toggle)
+    app.router.add_post("/api/buy", api_buy)
+    app.router.add_get("/api/renew_plans", api_renew_plans)
+    app.router.add_post("/api/renew", api_renew)
+    app.router.add_get("/api/wallet", api_wallet)
+    app.router.add_post("/api/charge", api_charge)
+    app.router.add_get("/api/admin/summary", api_admin_summary)
+    app.router.add_get("/api/admin/receipt_photo", api_admin_receipt_photo)
+    app.router.add_post("/api/admin/receipt", api_admin_receipt)
+    app["tg_app"] = application
     if (STATIC_DIR / "assets").is_dir():
         app.router.add_static("/assets/", STATIC_DIR / "assets", append_version=False)
     runner = web.AppRunner(app, access_log=None)
@@ -192,9 +609,17 @@ async def set_tester_buttons(bot):
     """دوره‌ی تست: دکمه‌ی منوی مینی‌اپ (کنار کادر پیام) فقط برای ادمین‌های اضافه‌شده (حساب‌های جواد).
     مشتری‌ها تا تأیید جواد چیزی نمی‌بینند."""
     from telegram import MenuButtonWebApp, WebAppInfo
+    button = MenuButtonWebApp(text="Tifusi", web_app=WebAppInfo(url=MINIAPP_URL))
+    if ns["db"].setting("miniapp_all", "0") == "1":
+        # برای همه روشن است: دکمه‌ی منوی پیش‌فرض همه‌ی چت‌های ربات
+        try:
+            await bot.set_chat_menu_button(menu_button=button)
+            log.info("miniapp default menu button set for everyone")
+        except Exception as e:
+            log.warning("miniapp default menu button failed: %s", e)
+        return
     for uid in ns["get_admins"]():
         try:
-            await bot.set_chat_menu_button(chat_id=uid, menu_button=MenuButtonWebApp(
-                text="Tifusi", web_app=WebAppInfo(url=MINIAPP_URL)))
+            await bot.set_chat_menu_button(chat_id=uid, menu_button=button)
         except Exception as e:  # کسی که هنوز ربات را استارت نکرده
             log.info("miniapp menu button for %s skipped: %s", uid, e)

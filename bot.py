@@ -1230,7 +1230,10 @@ async def close_receipt_for_others(bot, rid, except_chat_id, note):
 
 
 # ---------- کیبوردها ----------
-def main_menu_kb(uid):
+def main_menu_kb(uid, force=False):
+    """منوی پایین قدیمی. کاربرهای مینی‌اپ (is_miniapp_user) آن را نمی‌بینند، مگر ادمین با /admin (force)."""
+    if not force and is_miniapp_user(uid):
+        return ReplyKeyboardRemove()
     rows = [
         ["🔐 خرید اشتراک", "♻️ تمدید سرویس"],
         ["🔑 اکانت تست"],
@@ -1343,7 +1346,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"آیدی: `{u.id}`", )
         notify_group(context.bot, f"👤 عضو جدید ربات: {who(u.id)}", topic="users")
     db.set_state(u.id, "none")
-    if u.id in miniapp_only_ids():
+    if is_miniapp_user(u.id):
         await send_miniapp_only(update.message)
         return
     await update.message.reply_text(
@@ -1352,6 +1355,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 MINIAPP_URL = "https://app.bomalo.ir/"
+
+
+def is_miniapp_user(uid):
+    """فقط مینی‌اپ: یا برای همه روشن است (تنظیم miniapp_all = 1) یا این کاربر در لیست تست است."""
+    return db.setting("miniapp_all", "0") == "1" or uid in miniapp_only_ids()
 
 
 def miniapp_only_ids():
@@ -1394,7 +1402,7 @@ async def admin_menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(u.id):
         return
     db.set_state(u.id, "none")
-    await update.message.reply_text("👑 منوی ربات:", reply_markup=main_menu_kb(u.id))
+    await update.message.reply_text("👑 منوی ربات:", reply_markup=main_menu_kb(u.id, force=True))
 
 
 # ---------- فلوی کاربر: منوها ----------
@@ -5366,7 +5374,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_admin(uid) and (text in ADMIN_MENU_ACTIONS or text == ADMIN_HOME):
         db.set_state(uid, "none")
         if text == ADMIN_HOME:
-            await msg.reply_text("🏠 منوی اصلی\n\nاز منوی زیر انتخاب کنید:", reply_markup=main_menu_kb(uid))
+            await msg.reply_text("🏠 منوی اصلی\n\nاز منوی زیر انتخاب کنید:", reply_markup=main_menu_kb(uid, force=True))
         else:
             await admin_dispatch(FakeQuery(msg), uid, ["admin", *ADMIN_MENU_ACTIONS[text].split(":")])
         return
@@ -5390,10 +5398,17 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = MENU_ACTIONS.get((msg.text or "").strip())
     if not action:
         if state == "none":
+            if is_miniapp_user(uid) and not is_admin(uid):
+                await send_miniapp_only(msg)
+                return
             await msg.reply_text("🏠 منوی اصلی\n\nاز منوی زیر انتخاب کنید:",
                                  reply_markup=main_menu_kb(uid))
         return
+    await run_menu_action(msg, context, uid, action)
 
+
+async def run_menu_action(msg, context, uid, action):
+    """یک دکمه‌ی منوی اصلی؛ هم از منوی پایین ربات صدا زده می‌شود و هم از مینی‌اپ (پل /api/goto)."""
     fq = FakeQuery(msg)
     if action == "buy":
         await show_buy_services(fq, uid)
