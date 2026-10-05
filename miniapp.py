@@ -373,6 +373,65 @@ async def api_renew(request):
     return web.json_response({"ok": True, "expire": new["expire_at"], "balance": db.get_balance(uid)})
 
 
+# ---------- اطلاعات اتصال و نصب پروفایل داخل مینی‌اپ (کار حضوری موبایل‌فروش) ----------
+def _own_order(db, uid, order_id):
+    order = db.get_order(_int(order_id))
+    if not order or order["user_id"] != uid or order["status"] not in LIVE_ORDER_STATUSES:
+        return None
+    return order
+
+
+async def _order_connect(order):
+    """اطلاعات اتصال همان‌طور که پنل الان می‌دهد (رمز از پنل، نه از سفارش، تا همانی باشد که نود چک می‌کند)."""
+    info = {"id": order["id"], "username": order["username"], "service": order["protocol"],
+            "password": order["password"] or "", "sub": order["sub_url"] or "",
+            "guide": (order["sub_url"] or "").rstrip("/") + "/guide" if (order["sub_url"] or "").startswith("https://") else None,
+            "ikev2": None, "l2tp": None}
+    if order["protocol"] not in ns["IPSEC_SERVICES"]:
+        return info
+    panel = ns["db"].get_panel(order["panel_id"])
+    links = None
+    if panel:
+        try:
+            links = await asyncio.to_thread(ns["panel_client"](panel).links, order["username"])
+        except Exception as e:
+            log.warning("miniapp connect links %s: %s", order["username"], e)
+    for kind in ("ikev2", "l2tp"):
+        cfgs = (links or {}).get(f"{kind}_configs") or []
+        if cfgs:
+            c = cfgs[0]
+            info["password"] = c.get("password") or info["password"]
+            info[kind] = {"server": c.get("server") or "", "remote_id": c.get("remote_id") or "",
+                          "secret": c.get("psk") or "" if kind == "l2tp" else "",
+                          "install": c.get("install_url") or c.get("mobileconfig_url") or ""}
+    return info
+
+
+async def api_connect(request):
+    order = _own_order(ns["db"], request["uid"], request.query.get("order_id"))
+    if not order:
+        return _err("not_found", 404)
+    return web.json_response(await _order_connect(order))
+
+
+async def api_qr(request):
+    """QR لینک نصب پروفایل آیفون (kind=ikev2|l2tp) یا لینک اشتراک (kind=sub)، تا مشتری حضوری با دوربین
+    گوشی خودش اسکن کند و پروفایل روی گوشی خودش نصب شود."""
+    order = _own_order(ns["db"], request["uid"], request.query.get("order_id"))
+    if not order:
+        return _err("not_found", 404)
+    info = await _order_connect(order)
+    kind = request.query.get("kind")
+    data = info["sub"] if kind == "sub" else (info.get(kind) or {}).get("install") if kind in ("ikev2", "l2tp") else None
+    if not data:
+        return _err("no_link", 404)
+    png = await asyncio.to_thread(ns["qr_png"], data)
+    if png is None:
+        return _err("qr", 500)
+    png = png.getvalue()
+    return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
+
+
 # ---------- کیف پول و شارژ کارت به کارت داخل مینی‌اپ ----------
 CHARGE_MIN, CHARGE_MAX = 20000, 50000000
 MAX_RECEIPT_BYTES = 8 * 1024 * 1024
@@ -1181,6 +1240,8 @@ async def start(application, bot_globals):
     app.router.add_get("/app.js", app_js)
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/customers", api_customers)
+    app.router.add_get("/api/connect", api_connect)
+    app.router.add_get("/api/qr", api_qr)
     app.router.add_get("/api/notifs", api_notifs)
     app.router.add_post("/api/notifs/seen", api_notifs_seen)
     app.router.add_get("/api/plans", api_plans)

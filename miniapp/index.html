@@ -250,6 +250,10 @@ body{background:
 .field textarea{font:inherit;padding:12px;border-radius:14px;border:1px solid var(--edge);background:var(--glass);color:var(--fg);resize:vertical;line-height:1.8}
 .sheet{max-height:88vh;overflow-y:auto}
 .amenu{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+[hidden]{display:none!important}
+.cust2{grid-template-columns:minmax(0,1fr) auto}
+.cust2 .cacts{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr)}
+.cust2 .cacts .pill{justify-content:center}
 .amenu .tile small{line-height:1.6}
 </style>
 </head>

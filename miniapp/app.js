@@ -132,10 +132,10 @@
       return `<div class="ptitle"><b>کاربران</b><small>وضعیت، تمدید، روشن/خاموش و ارسال</small></div>
       <label class="glass search">${ic("search")}<input id="q" type="search" placeholder="جستجوی یوزرنیم…" value="${esc(S.q)}" aria-label="جستجو"></label>
       <div class="filters">${[["all", "همه"], ["warn", "رو به اتمام"], ["bad", "تموم شده"], ["ok", "فعال"], ["off", "خاموش"]].map(([k, l]) => `<button type="button" data-f="${k}" aria-pressed="${k === S.filt}">${l} · ${num(cnt(k))}</button>`).join("")}</div>
-      ${list.map((c) => `<div class="glass cust${c.on ? "" : " off"}"><div style="min-width:0"><button type="button" class="nm nmbtn" data-card="${c.id}">${esc(c.username)} ›</button>
+      ${list.map((c) => `<div class="glass cust cust2${c.on ? "" : " off"}"><div style="min-width:0"><button type="button" class="nm nmbtn" data-card="${c.id}">${esc(c.username)} ›</button>
         <div class="mt"><span class="dot ${c.on ? c.state : "bad"}"></span><span>${c.on ? custLine(c) : '<span class="offtag">غیرفعال</span>'}</span></div></div>
-        <div class="cacts"><button class="pill" type="button" data-send="${c.id}">ارسال</button><button class="pill dark" type="button" data-renew="${c.id}">تمدید</button></div>
-        <button class="sw" type="button" role="switch" aria-checked="${c.on}" aria-label="روشن یا خاموش" data-sw="${c.id}"></button></div>`).join("") || '<div class="empty">مشتری‌ای پیدا نشد.</div>'}`;
+        <button class="sw" type="button" role="switch" aria-checked="${c.on}" aria-label="روشن یا خاموش" data-sw="${c.id}"></button>
+        <div class="cacts"><button class="pill" type="button" data-conn="${c.id}">📲 نصب</button><button class="pill ghost" type="button" data-send="${c.id}">ارسال</button><button class="pill dark" type="button" data-renew="${c.id}">تمدید</button></div></div>`).join("") || '<div class="empty">مشتری‌ای پیدا نشد.</div>'}`;
     },
     buy: () => {
       if (!S.shop.length) return '<div class="empty">فعلاً پلنی برای فروش نیست.</div>';
@@ -212,9 +212,11 @@
           <div class="c"><div>${c.limit ? `<b class="num">${gb(Math.max(0, c.limit - c.used))} GB</b><br><small>مونده از ${num(gb(c.limit))} گیگ</small>` : `<b>∞</b><br><small>نامحدود</small>`}</div></div></div>
         <div><h3 style="direction:ltr;text-align:right">${esc(c.username)}</h3><div class="pl">${esc(c.service_name)}</div><div class="chips">${c.service === "xray" ? '<span class="chip">VLESS</span>' : '<span class="chip">IKEv2</span><span class="chip">L2TP</span>'}</div></div></div>
         <div class="days"><span>${c.days_left === null ? "بدون انقضا" : `${num(c.days_left)} روز مانده`}</span></div><div class="dbar"><i style="width:${c.days_left === null ? 100 : Math.min(100, (c.days_left / 30) * 100)}%"></i></div>
+        <button class="cta" type="button" data-conn="${c.id}">📲 نصب پروفایل و اطلاعات اتصال</button>
         <div class="sacts"><button class="pill" type="button" data-renew="${c.id}">تمدید</button><button class="pill ghost" type="button" data-send="${c.id}">${ic("link")} ارسال</button><button class="pill ghost" type="button" data-guide="${c.id}">${ic("help")} راهنما</button></div></div>
       <div class="glass sec info">
         <div class="lrow"><span class="d">${ic("user")} نام کاربری</span><span class="v">${esc(c.username)}</span></div>
+        <div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="v num" id="cpw">…</span><button class="pill ghost" type="button" id="cpwcopy" hidden>کپی</button></span></div>
         <div class="lrow"><span class="d">${ic("layers")} سرویس</span><span class="v">${esc(c.service_name)}</span></div>
         <div class="lrow"><span class="d">${ic("check")} وضعیت</span><span style="color:${c.on ? "var(--ok)" : "#ff7b7b"};font-weight:700">${c.on ? "فعال" : "غیرفعال"}</span></div>
       </div>`;
@@ -751,23 +753,88 @@
   function render() {
     $("app").innerHTML = V[S.tab]();
     if (S.tab === "admin") loadReceiptImages();
+    if (S.tab === "card" && S.card) loadCardPw(S.card);
     $("bgart").classList.toggle("dim", S.tab !== "home");
     const tabs = S.me && S.me.is_admin ? TABS.concat([["admin", "crown", "مدیریت"]]) : TABS;
     $("tabs").style.gridTemplateColumns = `repeat(${tabs.length},1fr)`;
     const cur = S.tab === "card" ? "customers" : S.tab;
     $("tabs").innerHTML = tabs.map(([k, i, l]) => `<button type="button" role="tab" aria-selected="${k === cur}" data-tab="${k}">${ic(i)}${l}</button>`).join("");
   }
-  function openSend(c) {
-    S.sendC = c;
-    const link = c.guide;
+  // ---------- نصب پروفایل و اطلاعات اتصال (حضوری) و ارسال کامل برای مشتری ----------
+  const connCache = {};
+  async function getConn(id) {
+    if (!connCache[id]) connCache[id] = await api("connect?order_id=" + id);
+    return connCache[id];
+  }
+  const TYPE = { ikev2: "IKEv2/IPSec MSCHAPv2", l2tp: "L2TP/IPSec PSK" };
+  function shareText(x) {
+    const srv = (x.ikev2 || x.l2tp || {}).server;
+    const lines = ["🔐 اطلاعات اتصال تیفوسی", `👤 نام کاربری: ${x.username}`];
+    if (x.password && (x.ikev2 || x.l2tp)) lines.push(`🔑 رمز: ${x.password}`);
+    if (srv) lines.push(`🌐 سرور: ${srv}`);
+    if (x.l2tp && x.l2tp.secret) lines.push(`🗝 کلید L2TP (Secret): ${x.l2tp.secret}`);
+    if (!x.ikev2 && !x.l2tp && x.sub) lines.push(`🔗 لینک اشتراک: ${x.sub}`);
+    const link = x.guide || "";
+    if (link) lines.push("", `📲 نصب و راهنما: ${link}`);
+    return lines.join("\n");
+  }
+  const crow = (label, v) => `<div class="lrow"><span class="d">${label}</span><span class="cacts"><span class="num" style="font-weight:700;direction:ltr">${esc(v)}</span><button class="pill ghost" type="button" data-copy="${esc(v)}">کپی</button></span></div>`;
+  async function openConnect(id) {
+    $("sheet").innerHTML = '<h3 id="sheetTitle">📲 نصب و اطلاعات اتصال</h3>' + LOADING;
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+    let x;
+    try { x = await getConn(id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
+    const ios = (k, title) => x[k] && x[k].install ? `<div class="glass sec" style="display:grid;gap:10px;justify-items:center;text-align:center">
+        <b>${title}</b>
+        <img data-qr="${k}" data-qid="${x.id}" alt="QR نصب ${title}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
+        <small style="color:var(--muted);line-height:1.8">آیفون مشتری: دوربین رو باز کنه و این QR رو اسکن کنه، پروفایل روی گوشی خودش نصب می‌شه.</small>
+        <button class="pill" type="button" data-install="${esc(x[k].install)}" style="justify-content:center;width:100%">📲 نصب روی همین گوشی</button></div>` : "";
+    const andr = (k) => x[k] ? `<div class="glass sec" style="padding:8px 14px"><b style="font-size:.88rem">${k === "ikev2" ? "IKEv2 (پیشنهادی)" : "L2TP (گوشی‌های قدیمی‌تر)"}</b>
+        ${crow("نوع", TYPE[k])}${crow("سرور", x[k].server)}${crow("نام کاربری", x.username)}${x.password ? crow("رمز", x.password) : ""}
+        ${k === "l2tp" && x.l2tp.secret ? crow("کلید IPSec (Secret)", x.l2tp.secret) + '<small style="color:var(--muted)">«شناسه IPSec» خالی بمونه.</small>' : ""}</div>` : "";
+    const ipsec = x.ikev2 || x.l2tp;
+    $("sheet").innerHTML = `<h3 id="sheetTitle">📲 ${esc(x.username)}</h3>
+      ${ipsec ? `<div class="filters"><button type="button" aria-pressed="${S.cos !== "android"}" data-cos="ios">🍎 آیفون</button><button type="button" aria-pressed="${S.cos === "android"}" data-cos="android">🤖 اندروید</button></div>
+        <div data-cpane="ios"${S.cos === "android" ? " hidden" : ""} style="display:grid;gap:10px">${ios("ikev2", "IKEv2 (پیشنهادی)")}${ios("l2tp", "L2TP")}</div>
+        <div data-cpane="android"${S.cos === "android" ? "" : " hidden"} style="display:grid;gap:10px">${andr("ikev2")}${andr("l2tp")}<small style="color:var(--muted);line-height:1.8">تنظیمات گوشی ← اتصال‌ها ← VPN ← افزودن، و همین‌ها رو وارد کن.</small></div>`
+      : `<div class="glass sec" style="display:grid;gap:10px;justify-items:center"><img data-qr="sub" data-qid="${x.id}" alt="QR لینک اشتراک" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">${x.sub ? crow("لینک اشتراک", x.sub) : ""}</div>`}
+      ${x.guide ? `<button class="pill ghost" type="button" data-openurl="${esc(x.guide)}" style="justify-content:center">${ic("help")} راهنمای تصویری قدم‌به‌قدم</button>` : ""}
+      <button class="cta" type="button" data-send="${x.id}">📤 ارسال برای مشتری</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
+    loadQrs();
+  }
+  const qrCache = {};
+  function loadQrs() {
+    document.querySelectorAll("[data-qr]").forEach(async (img) => {
+      const key = img.dataset.qid + ":" + img.dataset.qr;
+      if (!qrCache[key]) {
+        try { const r = await fetch(`api/qr?order_id=${img.dataset.qid}&kind=${img.dataset.qr}`, { headers: { "X-Init-Data": INIT } }); if (!r.ok) { img.hidden = true; return; } qrCache[key] = URL.createObjectURL(await r.blob()); }
+        catch (e) { img.hidden = true; return; }
+      }
+      img.src = qrCache[key];
+    });
+  }
+  async function loadCardPw(id) {
+    try {
+      const x = await getConn(id), el = $("cpw"), b = $("cpwcopy");
+      if (!el || S.card !== id) return;
+      el.textContent = x.password || "—";
+      if (x.password && b) { b.hidden = false; b.dataset.copy = x.password; }
+    } catch (e) { const el = $("cpw"); if (el) el.textContent = "—"; }
+  }
+  async function openSend(c) {
+    $("sheet").innerHTML = '<h3 id="sheetTitle">ارسال برای مشتری</h3>' + LOADING;
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+    let x;
+    try { x = await getConn(c.id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
+    S.sendText = shareText(x); S.sendLink = x.guide || x.sub || "";
     $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
-      <p class="soon" style="text-align:right;margin:0">یه صفحه‌ی شخصی برای <b class="num">${esc(c.username)}</b> که وضعیت سرویس، راهنمای اتصال و نصب پروفایل آیفون رو داره.</p>
-      ${link ? `<button class="cta" type="button" data-share-tg="${c.id}">ارسال در تلگرام</button>
-      <button class="pill ghost" type="button" data-share-wa="${c.id}" style="justify-content:center">ارسال در واتساپ</button>
-      <button class="pill ghost" type="button" data-copy="${esc(link)}" style="justify-content:center">${ic("link")} کپی لینک</button>` : '<div class="empty">لینک این سرویس آماده نیست.</div>'}
+      <div class="glass sec" dir="auto" style="white-space:pre-wrap;line-height:1.9;font-size:.85rem">${esc(S.sendText)}</div>
+      <button class="cta" type="button" data-share="tg">ارسال در تلگرام</button>
+      <button class="pill ghost" type="button" data-share="wa" style="justify-content:center">ارسال در واتساپ</button>
+      <button class="pill ghost" type="button" data-copy="${esc(S.sendText)}" style="justify-content:center">${ic("link")} کپی همه</button>
       <p class="soon">اطلاعات اتصال رو فقط توی تلگرام یا واتساپ بفرست؛ پیام‌رسان‌های داخلی پیام‌ها رو می‌خونن.</p>
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
-    $("sheet").classList.add("open"); $("scrim").classList.add("open");
   }
   function support() {
     const u = S.me && S.me.support;
@@ -844,7 +911,8 @@
       ${made.map((m, i) => `<div class="glass sec" style="display:grid;gap:8px;padding:12px 14px">
         <div class="lrow"><span class="d">${ic("user")} یوزرنیم</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.username)}</span><button class="pill ghost" type="button" data-copy="${esc(m.username)}" aria-label="کپی یوزرنیم">کپی</button></span></div>
         ${m.password ? `<div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.password)}</span><button class="pill ghost" type="button" data-copy="${esc(m.password)}" aria-label="کپی رمز">کپی</button></span></div>` : ""}
-        ${m.guide ? `<div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill" type="button" data-mguide="${i}" style="justify-content:center">${ic("help")} راهنمای اتصال</button><button class="pill ghost" type="button" data-msend="${i}" style="justify-content:center">${ic("link")} ارسال برای مشتری</button></div>` : ""}
+        <button class="cta" type="button" data-conn="${m.id}" style="padding:13px">📲 نصب پروفایل و اطلاعات اتصال</button>
+        <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill ghost" type="button" data-send="${m.id}" style="justify-content:center">${ic("link")} ارسال برای مشتری</button>${m.guide ? `<button class="pill ghost" type="button" data-mguide="${i}" style="justify-content:center">${ic("help")} راهنما</button>` : ""}</div>
       </div>`).join("")}
       ${failed ? `<p class="soon" style="color:#ff9a9a">بقیه ساخته نشد (${esc(failed)})؛ پولش به کیف پول برگشت.</p>` : ""}
       <p class="soon">همه‌ی اطلاعات توی تب «کاربران» هم هست.</p>
@@ -947,14 +1015,17 @@
     if (d.f) { S.filt = d.f; S.tab = "customers"; render(); return; }
     if (d.kind) { S.kind = d.kind; render(); return; }
     if (d.card) { S.card = +d.card; S.tab = "card"; render(); scrollTo(0, 0); return; }
-    if (d.send) { const c = byId(d.send); if (c) openSend(c); return; }
+    if (d.send) { openSend({ id: +d.send }); return; }
+    if (d.conn) { openConnect(+d.conn); return; }
+    if (d.cos) { S.cos = d.cos; document.querySelectorAll("[data-cos]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.cos === d.cos))); document.querySelectorAll("[data-cpane]").forEach((x) => { x.hidden = x.dataset.cpane !== d.cos; }); return; }
+    if (d.install) { if (!tg("web_app_open_link", { url: d.install, try_browser: "safari" })) window.open(d.install, "_blank"); return; }
+    if (d.openurl) { openLink(d.openurl); return; }
+    if (d.share) { const t = S.sendText; if (d.share === "tg") { const u = `https://t.me/share/url?url=${encodeURIComponent(S.sendLink)}&text=${encodeURIComponent(t)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); } else openLink(`https://wa.me/?text=${encodeURIComponent(t)}`); return; }
     if (d.guide) { const c = byId(d.guide); if (c && c.guide) openLink(c.guide); return; }
     if (d.copy) { copy(d.copy); return; }
     if (d.nrc) { closeSheet(); S.tab = "admin"; S.asec = "rc"; S.admin = null; render(); scrollTo(0, 0); return; }
     if (d.mguide) { const m = S.made[+d.mguide]; if (m) openLink(m.guide); return; }
-    if (d.msend) { const m = S.made[+d.msend]; if (m) openSend(m); return; }
-    if (d.shareTg) { const c = byId(d.shareTg) || S.sendC; const u = `https://t.me/share/url?url=${encodeURIComponent(c.guide)}&text=${encodeURIComponent("اطلاعات اتصال و راهنمای سرویس " + c.username)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); return; }
-    if (d.shareWa) { const c = byId(d.shareWa) || S.sendC; openLink(`https://wa.me/?text=${encodeURIComponent("اطلاعات اتصال و راهنمای سرویس " + c.username + ":\n" + c.guide)}`); return; }
+    if (d.msend) { const m = S.made[+d.msend]; if (m) openSend({ id: m.id }); return; }
     if (b.id === "bpay") { payBuy(); return; }
     if (d.goto === "buy") { S.tab = "buy"; render(); scrollTo(0, 0); return; }
     if (d.goto === "support") { support(); return; }
