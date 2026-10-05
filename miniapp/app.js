@@ -101,7 +101,7 @@
   }
 
   const S = { me: null, customers: [], stats: { ok: 0, warn: 0, bad: 0 }, shop: [], tab: "home", filt: "all", q: "", kind: null, card: null };
-  const TABS = [["home", "home", "خانه"], ["customers", "users", "مشتری‌ها"], ["buy", "bag", "خرید"], ["wallet", "wallet", "کیف پول"], ["card", "card", "کارت سرویس"]];
+  const TABS = [["home", "home", "خانه"], ["customers", "users", "کاربران"], ["buy", "bag", "خرید"], ["wallet", "wallet", "کیف پول"], ["help", "help", "آموزش"]];
 
   function custLine(c) {
     const vol = c.limit ? `${num(gb(c.used))} گیگ از ${num(gb(c.limit))} گیگ` : `نامحدود · ${num(gb(c.used))} گیگ`;
@@ -126,7 +126,7 @@
       const q = S.q.toLowerCase();
       const list = S.customers.filter((c) => (S.filt === "all" || (S.filt === "off" ? !c.on : c.state === S.filt)) && c.username.toLowerCase().includes(q));
       const cnt = (k) => (k === "all" ? S.customers.length : k === "off" ? S.customers.filter((c) => !c.on).length : S.stats[k]);
-      return `<div class="ptitle"><b>مشتری‌ها</b><small>مدیریت مشتریان و وضعیت سرویس‌ها</small></div>
+      return `<div class="ptitle"><b>کاربران</b><small>وضعیت، تمدید، روشن/خاموش و ارسال</small></div>
       <label class="glass search">${ic("search")}<input id="q" type="search" placeholder="جستجوی یوزرنیم…" value="${esc(S.q)}" aria-label="جستجو"></label>
       <div class="filters">${[["all", "همه"], ["warn", "رو به اتمام"], ["bad", "تموم شده"], ["ok", "فعال"], ["off", "خاموش"]].map(([k, l]) => `<button type="button" data-f="${k}" aria-pressed="${k === S.filt}">${l} · ${num(cnt(k))}</button>`).join("")}</div>
       ${list.map((c) => `<div class="glass cust${c.on ? "" : " off"}"><div style="min-width:0"><button type="button" class="nm nmbtn" data-card="${c.id}">${esc(c.username)} ›</button>
@@ -188,6 +188,28 @@
       </div>`).join("") || '<div class="empty">رسید در انتظاری نیست ✓</div>'}
       <p class="soon">بقیه‌ی بخش‌های مدیریت فعلاً با دستور /admin توی چت ربات.</p>`;
     },
+    help: () => {
+      const q = (S.hq || "").toLowerCase();
+      const withGuide = S.customers.filter((x) => x.guide && x.username.toLowerCase().includes(q));
+      return `<div class="ptitle"><b>آموزش</b><small>وصل شدن قدم‌به‌قدم، برای هر گوشی</small></div>
+      <div class="glass sec" style="display:grid;gap:10px"><b>📖 راهنمای اتصال با عکس گوشی</b>
+        <p class="soon" style="text-align:right;margin:0">برای هر کاربر یه صفحه‌ی آماده با اطلاعات خودش هست: مدل گوشی رو انتخاب می‌کنه و قدم‌به‌قدم وصل می‌شه (سامسونگ، شیائومی، آیفون و…). روی آیفون نصب یک‌لمسی هم داره.</p>
+        ${S.customers.length > 4 ? `<label class="glass search">${ic("search")}<input id="hq" type="search" placeholder="یوزرنیم کاربر…" value="${esc(S.hq || "")}" aria-label="جستجو"></label>` : ""}
+        ${withGuide.slice(0, 6).map((x) => `<div class="lrow"><span class="u">${esc(x.username)}</span><span class="cacts"><button class="pill" type="button" data-guide="${x.id}">باز کردن</button><button class="pill ghost" type="button" data-send="${x.id}">ارسال</button></span></div>`).join("") || '<div class="empty">کاربری با راهنمای IKEv2/L2TP پیدا نشد.</div>'}
+      </div>
+      <div class="glass sec" style="display:grid;gap:8px"><b>📱 کدوم نوع اتصال؟</b>
+        <div class="lrow"><span class="d">اندروید ۱۱ به بالا و آیفون</span><span class="v">IKEv2</span></div>
+        <div class="lrow"><span class="d">آیفون و اندرویدهای قدیمی‌تر</span><span class="v">L2TP</span></div>
+        <div class="lrow"><span class="d">کامپیوتر، یا شبکه‌ای که IKEv2 رو می‌بنده</span><span class="v">V2Ray</span></div>
+      </div>
+      <div class="glass sec" style="display:grid;gap:8px"><b>🛠 وصل نشد؟ اینا رو چک کن</b>
+        <div class="lrow"><span class="d">یوزرنیم و رمز دقیقاً مثل کارت باشه (رمز ۶ رقمه)</span></div>
+        <div class="lrow"><span class="d">«شناسه IPSec» توی L2TP خالی بمونه</span></div>
+        <div class="lrow"><span class="d">برنامه‌های VPN دیگه و Always-on خاموش باشن، فقط یه پروفایل</span></div>
+        <div class="lrow"><span class="d">بعضی اپراتورها و شهرها IKEv2 رو می‌بندن؛ با یه شبکه‌ی دیگه یا V2Ray امتحان کن</span></div>
+        <button class="pill ghost" type="button" data-act="support" style="justify-content:center">💬 بازم نشد؟ پیام به پشتیبانی</button>
+      </div>`;
+    },
     card: () => {
       if (!S.customers.length) return '<div class="empty">هنوز سرویسی نداری. از تب «خرید» شروع کن.</div>';
       const c = S.customers.find((x) => x.id === S.card);
@@ -200,7 +222,7 @@
           <div class="mt"><span class="dot ${x.on ? x.state : "bad"}"></span><span>${x.on ? custLine(x) : '<span class="offtag">غیرفعال</span>'}</span></div></div><span style="color:var(--muted)">‹</span></button>`).join("") || '<div class="empty">سرویسی پیدا نشد.</div>'}`;
       }
       const C = 2 * Math.PI * 50, frac = c.limit ? Math.min(c.used / c.limit, 1) : 1;
-      return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small><button class="iconbtn back" type="button" data-cardlist="1" aria-label="همه‌ی سرویس‌ها">${ic("back")}</button></div>
+      return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small><button class="iconbtn back" type="button" data-tab="customers" aria-label="برگشت به کاربران">${ic("back")}</button></div>
       <div class="glass svc"><div class="svctop">
         <div class="ring"><svg viewBox="0 0 118 118"><circle cx="59" cy="59" r="50" fill="none" stroke="var(--track)" stroke-width="9"/><circle cx="59" cy="59" r="50" fill="none" stroke="${frac > 0.85 && c.limit ? "#f0a43a" : "var(--cyan)"}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C * frac} ${C}"/></svg>
           <div class="c"><div>${c.limit ? `<b class="num">${gb(Math.max(0, c.limit - c.used))} GB</b><br><small>مونده از ${num(gb(c.limit))} گیگ</small>` : `<b>∞</b><br><small>نامحدود</small>`}</div></div></div>
@@ -221,7 +243,8 @@
     $("bgart").classList.toggle("dim", S.tab !== "home");
     const tabs = S.me && S.me.is_admin ? TABS.concat([["admin", "crown", "مدیریت"]]) : TABS;
     $("tabs").style.gridTemplateColumns = `repeat(${tabs.length},1fr)`;
-    $("tabs").innerHTML = tabs.map(([k, i, l]) => `<button type="button" role="tab" aria-selected="${k === S.tab}" data-tab="${k}">${ic(i)}${l}</button>`).join("");
+    const cur = S.tab === "card" ? "customers" : S.tab;
+    $("tabs").innerHTML = tabs.map(([k, i, l]) => `<button type="button" role="tab" aria-selected="${k === cur}" data-tab="${k}">${ic(i)}${l}</button>`).join("");
   }
   function openSend(c) {
     const link = c.guide;
@@ -395,7 +418,7 @@
 
   document.addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
-    if (d.tab) { S.tab = d.tab; if (d.tab === "card") S.card = null; render(); scrollTo(0, 0); return; }
+    if (d.tab) { S.tab = d.tab; render(); scrollTo(0, 0); return; }
     if (d.cardlist) { S.card = null; render(); scrollTo(0, 0); return; }
     if (d.go) { S.tab = d.go; render(); scrollTo(0, 0); return; }
     if (d.f) { S.filt = d.f; S.tab = "customers"; render(); return; }
@@ -434,7 +457,7 @@
     else if (a === "support") support();
     else if (a === "addhome") { if (!tg("web_app_add_to_home_screen")) toast("از داخل تلگرام روی گوشی باز کن"); }
   });
-  document.addEventListener("input", (e) => { if (e.target.id === "cq") { S.cq = e.target.value; const p = e.target.selectionStart; render(); const x = $("cq"); x.focus(); x.setSelectionRange(p, p); return; } if (e.target.id === "q") { S.q = e.target.value; const p = e.target.selectionStart; render(); const x = $("q"); x.focus(); x.setSelectionRange(p, p); } });
+  document.addEventListener("input", (e) => { if (e.target.id === "hq") { S.hq = e.target.value; const p = e.target.selectionStart; render(); const x = $("hq"); x.focus(); x.setSelectionRange(p, p); return; } if (e.target.id === "cq") { S.cq = e.target.value; const p = e.target.selectionStart; render(); const x = $("cq"); x.focus(); x.setSelectionRange(p, p); return; } if (e.target.id === "q") { S.q = e.target.value; const p = e.target.selectionStart; render(); const x = $("q"); x.focus(); x.setSelectionRange(p, p); } });
   document.addEventListener("change", (e) => { if (e.target.id === "rcpt" && e.target.files[0]) { const l = $("rname"); if (l) l.textContent = "✓ " + e.target.files[0].name; } });
   $("scrim").onclick = closeSheet;
 
