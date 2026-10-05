@@ -23,7 +23,7 @@
     if (tp.bg_color) {
       const n = parseInt(tp.bg_color.slice(1), 16);
       const l = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
-      document.documentElement.dataset.theme = l < 128 ? "dark" : "light";
+      document.documentElement.dataset.theme = "dark";
     }
   } catch (e) {}
   // رویدادهایی که تلگرام به صفحه می‌فرسته (همان قرارداد telegram-web-app.js)
@@ -77,6 +77,7 @@
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>',
     layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
     dotc: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>',
+    apple: '<path fill="currentColor" stroke="none" d="M16.37 12.8c-.02-2.1 1.72-3.12 1.8-3.17-.98-1.43-2.5-1.63-3.04-1.65-1.29-.13-2.52.76-3.18.76-.66 0-1.67-.74-2.75-.72-1.41.02-2.72.82-3.45 2.09-1.47 2.55-.38 6.33 1.06 8.4.7 1.01 1.53 2.15 2.62 2.11 1.05-.04 1.45-.68 2.72-.68 1.27 0 1.62.68 2.73.66 1.13-.02 1.85-1.03 2.54-2.05.8-1.17 1.13-2.31 1.15-2.37-.03-.01-2.2-.85-2.22-3.36zM14.3 6.62c.58-.7.97-1.68.86-2.65-.83.03-1.84.55-2.44 1.25-.53.62-1 1.62-.88 2.57.93.07 1.88-.47 2.46-1.17z"/>',
     crown: '<path d="M3 8l4 4 5-7 5 7 4-4-2 11H5L3 8Z"/>',
     link: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>'
   };
@@ -84,14 +85,15 @@
   const n = (v) => Number(v).toLocaleString("en-US");
   const num = (v) => `<span class="num">${v}</span>`;
   const toman = (v) => `${num(n(v))} تومان`;
-  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const latn = (s) => String(s).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+  const esc = (s) => latn(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const GB = 1073741824;
-  // مبلغ کوتاه برای کاشی‌های کوچک (۱۲۵۰۰۰۰ ← 1.3 میلیون) تا عدد از کادر بیرون نزند
+  // مبلغ کوتاه برای کاشی‌های کوچک (1250000 ← 1.3 میلیون) تا عدد از کادر بیرون نزند
   const shortToman = (v) => v >= 1e6 ? `<span class="num">${+(v / 1e6).toFixed(1)}</span><i>میلیون تومان</i>`
     : v >= 1e4 ? `<span class="num">${Math.round(v / 1e3)}</span><i>هزار تومان</i>` : `<span class="num">${n(v)}</span>`;
   const gb = (b) => (b / GB).toFixed(b >= 10 * GB ? 0 : 1);
   const $ = (id) => document.getElementById(id);
-  function toast(t) { const e = $("toast"); e.textContent = t; e.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove("show"), 1800); }
+  function toast(t) { const e = $("toast"); e.textContent = latn(t); e.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove("show"), 1800); }
   async function copy(text) { try { await navigator.clipboard.writeText(text); toast("کپی شد"); } catch (e) { toast("نگه دار و کپی کن"); } }
 
   async function api(path, opts) {
@@ -135,7 +137,7 @@
       ${list.map((c) => `<div class="glass cust cust2${c.on ? "" : " off"}"><div style="min-width:0"><button type="button" class="nm nmbtn" data-card="${c.id}">${esc(c.username)} ›</button>
         <div class="mt"><span class="dot ${c.on ? c.state : "bad"}"></span><span>${c.on ? custLine(c) : '<span class="offtag">غیرفعال</span>'}</span></div></div>
         <button class="sw" type="button" role="switch" aria-checked="${c.on}" aria-label="روشن یا خاموش" data-sw="${c.id}"></button>
-        <div class="cacts"><button class="pill" type="button" data-conn="${c.id}">📲 نصب</button><button class="pill ghost" type="button" data-send="${c.id}">ارسال</button><button class="pill dark" type="button" data-renew="${c.id}">تمدید</button></div></div>`).join("") || '<div class="empty">مشتری‌ای پیدا نشد.</div>'}`;
+        <div class="cacts"><button class="pill" type="button" data-conn="${c.id}">${ic("apple")} نصب</button><button class="pill ghost" type="button" data-send="${c.id}">ارسال</button><button class="pill dark" type="button" data-renew="${c.id}">تمدید</button></div></div>`).join("") || '<div class="empty">مشتری‌ای پیدا نشد.</div>'}`;
     },
     buy: () => {
       if (!S.shop.length) return '<div class="empty">فعلاً پلنی برای فروش نیست.</div>';
@@ -182,12 +184,12 @@
         ${withGuide.slice(0, 6).map((x) => `<div class="lrow"><span class="u">${esc(x.username)}</span><span class="cacts"><button class="pill" type="button" data-guide="${x.id}">باز کردن</button><button class="pill ghost" type="button" data-send="${x.id}">ارسال</button></span></div>`).join("") || '<div class="empty">کاربری با راهنمای IKEv2/L2TP پیدا نشد.</div>'}
       </div>
       <div class="glass sec" style="display:grid;gap:8px"><b>📱 کدوم نوع اتصال؟</b>
-        <div class="lrow"><span class="d">اندروید ۱۱ به بالا و آیفون</span><span class="v">IKEv2</span></div>
+        <div class="lrow"><span class="d">اندروید 11 به بالا و آیفون</span><span class="v">IKEv2</span></div>
         <div class="lrow"><span class="d">آیفون و اندرویدهای قدیمی‌تر</span><span class="v">L2TP</span></div>
         <div class="lrow"><span class="d">کامپیوتر، یا شبکه‌ای که IKEv2 رو می‌بنده</span><span class="v">V2Ray</span></div>
       </div>
       <div class="glass sec" style="display:grid;gap:8px"><b>🛠 وصل نشد؟ اینا رو چک کن</b>
-        <div class="lrow"><span class="d">یوزرنیم و رمز دقیقاً مثل کارت باشه (رمز ۶ رقمه)</span></div>
+        <div class="lrow"><span class="d">یوزرنیم و رمز دقیقاً مثل کارت باشه (رمز 6 رقمه)</span></div>
         <div class="lrow"><span class="d">«شناسه IPSec» توی L2TP خالی بمونه</span></div>
         <div class="lrow"><span class="d">برنامه‌های VPN دیگه و Always-on خاموش باشن، فقط یه پروفایل</span></div>
         <div class="lrow"><span class="d">بعضی اپراتورها و شهرها IKEv2 رو می‌بندن؛ با یه شبکه‌ی دیگه یا V2Ray امتحان کن</span></div>
@@ -212,7 +214,7 @@
           <div class="c"><div>${c.limit ? `<b class="num">${gb(Math.max(0, c.limit - c.used))} GB</b><br><small>مونده از ${num(gb(c.limit))} گیگ</small>` : `<b>∞</b><br><small>نامحدود</small>`}</div></div></div>
         <div><h3 style="direction:ltr;text-align:right">${esc(c.username)}</h3><div class="pl">${esc(c.service_name)}</div><div class="chips">${c.service === "xray" ? '<span class="chip">VLESS</span>' : '<span class="chip">IKEv2</span><span class="chip">L2TP</span>'}</div></div></div>
         <div class="days"><span>${c.days_left === null ? "بدون انقضا" : `${num(c.days_left)} روز مانده`}</span></div><div class="dbar"><i style="width:${c.days_left === null ? 100 : Math.min(100, (c.days_left / 30) * 100)}%"></i></div>
-        <button class="cta" type="button" data-conn="${c.id}">📲 نصب پروفایل و اطلاعات اتصال</button>
+        <button class="cta" type="button" data-conn="${c.id}">${ic("apple")} نصب پروفایل و اطلاعات اتصال</button>
         <div class="sacts"><button class="pill" type="button" data-renew="${c.id}">تمدید</button><button class="pill ghost" type="button" data-send="${c.id}">${ic("link")} ارسال</button><button class="pill ghost" type="button" data-guide="${c.id}">${ic("help")} راهنما</button></div></div>
       <div class="glass sec info">
         <div class="lrow"><span class="d">${ic("user")} نام کاربری</span><span class="v">${esc(c.username)}</span></div>
@@ -239,8 +241,8 @@
         <div class="glass tile">${ic("clock")}<b class="num">${a.pending.length}</b><small>رسید در انتظار</small></div>
       </div>
       <div class="glass sec">
-        <div class="lrow"><span class="d">فروش ۷ روز</span><span class="v">${toman(a.span.week.revenue)} · ${num(a.span.week.new_orders)} سفارش</span></div>
-        <div class="lrow"><span class="d">فروش ۳۰ روز</span><span class="v">${toman(a.span.month.revenue)} · ${num(a.span.month.new_orders)} سفارش</span></div>
+        <div class="lrow"><span class="d">فروش 7 روز</span><span class="v">${toman(a.span.week.revenue)} · ${num(a.span.week.new_orders)} سفارش</span></div>
+        <div class="lrow"><span class="d">فروش 30 روز</span><span class="v">${toman(a.span.month.revenue)} · ${num(a.span.month.new_orders)} سفارش</span></div>
         <div class="lrow"><span class="d">سرویس فعال / کاربر</span><span class="v"><span class="num">${a.totals.active}</span> / <span class="num">${a.totals.users}</span></span></div>
         <div class="lrow"><span class="d">تیکت باز</span><span class="v num">${a.totals.tickets_open}</span></div>
       </div>
@@ -370,7 +372,7 @@
       const v = faDigits(raw);
       if (!/^\d+$/.test(v)) { toast("فقط عدد بنویس"); return; }
       const x = +v;
-      if (mode === "discount" ? x > 100 : x <= 0) { toast(mode === "discount" ? "از ۰ تا ۱۰۰" : "عدد بزرگ‌تر از صفر"); return; }
+      if (mode === "discount" ? x > 100 : x <= 0) { toast(mode === "discount" ? "از 0 تا 100" : "عدد بزرگ‌تر از صفر"); return; }
       if (mode === "debit" && x > S.auser.balance) { toast("موجودی کاربر کمتر از این مبلغه"); return; }
       S.aact = { action: mode, value: x };
     }
@@ -597,7 +599,7 @@
     S.padd = S.padd || {};
     const v = (k) => esc(S.padd[k] || "");
     $("sheet").innerHTML = `<h3 id="sheetTitle">➕ اتصال پنل جدید</h3>
-      <label class="field">نام (مثلاً سرور آلمان ۱)<input id="pa_name" dir="auto" style="direction:rtl" value="${v("name")}"></label>
+      <label class="field">نام (مثلاً سرور آلمان 1)<input id="pa_name" dir="auto" style="direction:rtl" value="${v("name")}"></label>
       <label class="field">آدرس پنل<input id="pa_url" placeholder="https://panel.example.com" value="${v("url")}"></label>
       <label class="field">یوزرنیم ادمین پنل<input id="pa_username" autocomplete="off" value="${v("username")}"></label>
       <label class="field">پسورد یا کلید API (tifusi_…)<input id="pa_password" type="password" autocomplete="off" value="${v("password")}"></label>
@@ -711,11 +713,11 @@
     const svcs = S.aplanServices || [];
     $("sheet").innerHTML = `<h3 id="sheetTitle">➕ پلن جدید</h3>
       <label class="field">سرویس<select id="na_service" style="font:inherit;padding:12px;border-radius:14px;border:1px solid var(--edge);background:var(--glass);color:var(--fg)">${svcs.map((s) => `<option value="${s.key}">${esc(s.name)}</option>`).join("")}</select></label>
-      <label class="field">عنوان (مثلاً ۳۰ گیگ یک ماهه)<input id="na_title" dir="auto" style="direction:rtl" maxlength="80"></label>
-      <label class="field">حجم به گیگ (۰ = نامحدود)<input id="na_gb" inputmode="numeric"></label>
+      <label class="field">عنوان (مثلاً 30 گیگ یک ماهه)<input id="na_title" dir="auto" style="direction:rtl" maxlength="80"></label>
+      <label class="field">حجم به گیگ (0 = نامحدود)<input id="na_gb" inputmode="numeric"></label>
       <label class="field">مدت (روز)<input id="na_days" inputmode="numeric" value="30"></label>
       <label class="field">قیمت (تومان)<input id="na_price" inputmode="numeric"></label>
-      <label class="field">تعداد کاربر همزمان (۰ = بدون محدودیت، حداکثر ۵)<input id="na_users" inputmode="numeric" value="1"></label>
+      <label class="field">تعداد کاربر همزمان (0 = بدون محدودیت، حداکثر 5)<input id="na_users" inputmode="numeric" value="1"></label>
       <button class="cta" type="button" id="nachk">بررسی</button>
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
@@ -797,12 +799,12 @@
     if (x.l2tp && x.l2tp.secret) lines.push(`🗝 کلید L2TP (Secret): ${x.l2tp.secret}`);
     if (!x.ikev2 && !x.l2tp && x.sub) lines.push(`🔗 لینک اشتراک: ${x.sub}`);
     const link = x.guide || "";
-    if (link) lines.push("", `📲 نصب و راهنما: ${link}`);
+    if (link) lines.push("", `🔗 نصب و راهنما: ${link}`);
     return lines.join("\n");
   }
   const crow = (label, v) => `<div class="lrow"><span class="d">${label}</span><span class="cacts"><span class="num" style="font-weight:700;direction:ltr">${esc(v)}</span><button class="pill ghost" type="button" data-copy="${esc(v)}">کپی</button></span></div>`;
   async function openConnect(id) {
-    $("sheet").innerHTML = '<h3 id="sheetTitle">📲 نصب و اطلاعات اتصال</h3>' + LOADING;
+    $("sheet").innerHTML = '<h3 id="sheetTitle">نصب و اطلاعات اتصال</h3>' + LOADING;
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
     let x;
     try { x = await getConn(id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
@@ -810,12 +812,12 @@
         <b>${title}</b>
         <img data-qr="${k}" data-qid="${x.id}" alt="QR نصب ${title}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
         <small style="color:var(--muted);line-height:1.8">آیفون مشتری: دوربین رو باز کنه و این QR رو اسکن کنه، پروفایل روی گوشی خودش نصب می‌شه.</small>
-        <button class="pill" type="button" data-install="${esc(x[k].install)}" style="justify-content:center;width:100%">📲 نصب روی همین گوشی</button></div>` : "";
+        <button class="pill" type="button" data-install="${esc(x[k].install)}" style="justify-content:center;width:100%">${ic("apple")} نصب روی همین گوشی</button></div>` : "";
     const andr = (k) => x[k] ? `<div class="glass sec" style="padding:8px 14px"><b style="font-size:.88rem">${k === "ikev2" ? "IKEv2 (پیشنهادی)" : "L2TP (گوشی‌های قدیمی‌تر)"}</b>
         ${crow("نوع", TYPE[k])}${crow("سرور", x[k].server)}${crow("نام کاربری", x.username)}${x.password ? crow("رمز", x.password) : ""}
         ${k === "l2tp" && x.l2tp.secret ? crow("کلید IPSec (Secret)", x.l2tp.secret) + '<small style="color:var(--muted)">«شناسه IPSec» خالی بمونه.</small>' : ""}</div>` : "";
     const ipsec = x.ikev2 || x.l2tp;
-    $("sheet").innerHTML = `<h3 id="sheetTitle">📲 ${esc(x.username)}</h3>
+    $("sheet").innerHTML = `<h3 id="sheetTitle" style="display:flex;gap:8px;align-items:center">${ic("apple")} ${esc(x.username)}</h3>
       ${ipsec ? `<div class="filters"><button type="button" aria-pressed="${S.cos !== "android"}" data-cos="ios">🍎 آیفون</button><button type="button" aria-pressed="${S.cos === "android"}" data-cos="android">🤖 اندروید</button></div>
         <div data-cpane="ios"${S.cos === "android" ? " hidden" : ""} style="display:grid;gap:10px">${ios("ikev2", "IKEv2 (پیشنهادی)")}${ios("l2tp", "L2TP")}</div>
         <div data-cpane="android"${S.cos === "android" ? "" : " hidden"} style="display:grid;gap:10px">${andr("ikev2")}${andr("l2tp")}<small style="color:var(--muted);line-height:1.8">تنظیمات گوشی ← اتصال‌ها ← VPN ← افزودن، و همین‌ها رو وارد کن.</small></div>`
@@ -881,7 +883,7 @@
       setTimeout(() => tg("web_app_close"), 700);
     } catch (e) { toast("الان نشد؛ دوباره امتحان کن"); }
   }
-  // اسم تصادفی از قبل توی کادر: قبل از پرداخت دیده می‌شه (پیشنهاد Claude-۱)
+  // اسم تصادفی از قبل توی کادر: قبل از پرداخت دیده می‌شه (پیشنهاد Claude-1)
   const randName = () => "u" + Array.from({ length: 6 }, () => "abcdefghjkmnpqrstuvwxyz23456789"[Math.floor(Math.random() * 31)]).join("");
   function openBuy(svc, p) {
     const ipsec = svc.service !== "xray";
@@ -890,7 +892,7 @@
     $("sheet").innerHTML = `<h3 id="sheetTitle">خرید ${esc(svc.label)}</h3>
       <div class="sum"><div><span>پلن</span><span>${name} · ${num(p.days)} روزه</span></div><div><span>قیمت هر اکانت</span><span>${toman(p.price)}</span></div><div><span>موجودی</span><span>${toman(S.me.balance)}</span></div></div>
       <label class="field" for="bu">یوزرنیم (یه اسم تصادفی گذاشتیم؛ اگه خواستی عوضش کن)<input id="bu" autocomplete="off" placeholder="ali12" maxlength="20" value="${randName()}"></label>
-      ${ipsec ? '<label class="field" for="bp">رمز ۶ رقمی (خالی بذاری خودش می‌سازه)<input id="bp" inputmode="numeric" maxlength="6" placeholder="123456"></label>' : ""}
+      ${ipsec ? '<label class="field" for="bp">رمز 6 رقمی (خالی بذاری خودش می‌سازه)<input id="bp" inputmode="numeric" maxlength="6" placeholder="123456"></label>' : ""}
       <div class="stepper"><button class="pill ghost" type="button" data-q="-1" aria-label="کمتر">−</button><output id="bq"></output><button class="pill ghost" type="button" data-q="1" aria-label="بیشتر">+</button></div>
       <p class="soon" id="bnote" style="margin:0"></p>
       <button class="cta" type="button" id="bpay">پرداخت از کیف پول</button>
@@ -910,8 +912,8 @@
     const b = S.buy, btn = $("bpay");
     if (btn.dataset.short) { closeSheet(); S.tab = "wallet"; render(); return; }
     const username = ($("bu").value || "").trim(), password = $("bp") ? ($("bp").value || "").trim() : "";
-    if (username && !/^[A-Za-z][A-Za-z0-9_]{2,19}$/.test(username)) { toast("یوزرنیم: با حرف انگلیسی شروع بشه، ۳ تا ۲۰ کاراکتر، فقط حرف و عدد و _"); return; }
-    if (password && !/^[0-9۰-۹]{6}$/.test(password)) { toast("رمز باید دقیقاً ۶ رقم باشه"); return; }
+    if (username && !/^[A-Za-z][A-Za-z0-9_]{2,19}$/.test(username)) { toast("یوزرنیم: با حرف انگلیسی شروع بشه، 3 تا 20 کاراکتر، فقط حرف و عدد و _"); return; }
+    if (password && !/^[0-9۰-۹]{6}$/.test(password)) { toast("رمز باید دقیقاً 6 رقم باشه"); return; }
     btn.disabled = true; btn.textContent = "در حال ساخت…";
     try {
       const r = await fetch("api/buy", { method: "POST", headers: { "X-Init-Data": INIT, "Content-Type": "application/json" },
@@ -923,7 +925,7 @@
       reload();
     } catch (e) {
       btn.disabled = false; updBuy();
-      const m = { balance: "موجودی کافی نیست", capacity: "این سرویس الان ظرفیت نداره", username: "یوزرنیم درست نیست", password: "رمز باید ۶ رقم باشه", busy: "یه خرید دیگه در جریانه", plan: "این پلن دیگه فروخته نمی‌شه" }[e.message];
+      const m = { balance: "موجودی کافی نیست", capacity: "این سرویس الان ظرفیت نداره", username: "یوزرنیم درست نیست", password: "رمز باید 6 رقم باشه", busy: "یه خرید دیگه در جریانه", plan: "این پلن دیگه فروخته نمی‌شه" }[e.message];
       toast(m || "ساخت نشد؛ پولت برگشت به کیف پول");
     }
   }
@@ -933,7 +935,7 @@
       ${made.map((m, i) => `<div class="glass sec" style="display:grid;gap:8px;padding:12px 14px">
         <div class="lrow"><span class="d">${ic("user")} یوزرنیم</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.username)}</span><button class="pill ghost" type="button" data-copy="${esc(m.username)}" aria-label="کپی یوزرنیم">کپی</button></span></div>
         ${m.password ? `<div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.password)}</span><button class="pill ghost" type="button" data-copy="${esc(m.password)}" aria-label="کپی رمز">کپی</button></span></div>` : ""}
-        <button class="cta" type="button" data-conn="${m.id}" style="padding:13px">📲 نصب پروفایل و اطلاعات اتصال</button>
+        <button class="cta" type="button" data-conn="${m.id}" style="padding:13px">${ic("apple")} نصب پروفایل و اطلاعات اتصال</button>
         <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill ghost" type="button" data-send="${m.id}" style="justify-content:center">${ic("link")} ارسال برای مشتری</button>${m.guide ? `<button class="pill ghost" type="button" data-mguide="${i}" style="justify-content:center">${ic("help")} راهنما</button>` : ""}</div>
       </div>`).join("")}
       ${failed ? `<p class="soon" style="color:#ff9a9a">بقیه ساخته نشد (${esc(failed)})؛ پولش به کیف پول برگشت.</p>` : ""}
@@ -991,7 +993,7 @@
       toast("✅ رسید فرستاده شد؛ بعد از تأیید شارژ می‌شه"); S.amt = null; S.wallet = null; render();
     } catch (e) {
       btn.disabled = false; btn.textContent = "ارسال رسید برای تأیید";
-      toast({ amount: "مبلغ درست نیست", photo: "عکس رسید رو انتخاب کن", photo_size: "عکس خیلی بزرگه (حداکثر ۸ مگ)" }[e.message] || "ارسال نشد؛ دوباره امتحان کن");
+      toast({ amount: "مبلغ درست نیست", photo: "عکس رسید رو انتخاب کن", photo_size: "عکس خیلی بزرگه (حداکثر 8 مگ)" }[e.message] || "ارسال نشد؛ دوباره امتحان کن");
     }
   }
   async function loadAdmin() {

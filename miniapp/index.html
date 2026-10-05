@@ -255,6 +255,45 @@ body{background:
 .cust2 .cacts{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr)}
 .cust2 .cacts .pill{justify-content:center}
 .amenu .tile small{line-height:1.6}
+
+/* ---- «نقره و یخ» (انتخاب جواد، ۵ اکتبر): نقره‌ای نشان اسب‌ها برای دکمه‌ی اصلی، فیروزه‌ای یخی کم‌رنگ فقط برای
+   حالت فعال و نوارها، شیشه‌ی مات و درخشش کم؛ عکس زمینه دست نخورده و نشانش دیده می‌شود. ---- */
+:root,:root[data-theme="dark"],:root[data-theme="light"]{
+  --bg:#050b1f; --bg2:#0b1d4a; --fg:#eef2fc; --muted:#9aa8c9; --soft:#6c7a9c;
+  --ice:#8fd6ff; --iceSoft:rgba(143,214,255,.13); --silver1:#f2f5fb; --silver2:#b8c4da; --silverInk:#0b1a44;
+  --cyan:var(--ice); --cyan2:var(--ice); --glow:rgba(143,214,255,.14);
+  --card:rgba(10,22,60,.56); --line:rgba(190,205,245,.14);
+  --ok:#5fd39a; --warn:#f0c062; --bad:#8d98b2; --track:rgba(255,255,255,.10); color-scheme:dark}
+.glass{background:var(--card);border:1px solid var(--line);box-shadow:0 10px 24px rgba(0,0,0,.32);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+.glass::before{opacity:.25}
+.pill{background:linear-gradient(180deg,var(--silver1),var(--silver2));color:var(--silverInk);box-shadow:inset 0 1px 0 rgba(255,255,255,.7),0 4px 12px rgba(0,0,0,.28);border:0}
+.pill::after{opacity:.35}
+.pill.dark{background:var(--iceSoft);color:var(--ice);border:1px solid rgba(143,214,255,.22);box-shadow:none}
+.pill.dark::after,.pill.ghost::after{display:none}
+.pill.ghost{background:transparent;color:var(--fg);border:1px solid var(--line);box-shadow:none}
+.cta{background:linear-gradient(180deg,var(--silver1),var(--silver2));color:var(--silverInk);box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 8px 20px rgba(0,0,0,.32);border-radius:18px}
+.cta::after{opacity:.3}
+.tabs{background:var(--card);border:1px solid var(--line);box-shadow:0 10px 24px rgba(0,0,0,.35)}
+.tabs button[aria-selected="true"]{background:var(--iceSoft);color:var(--ice);border:1px solid transparent;box-shadow:none}
+.filters button{background:transparent;border:1px solid var(--line);color:var(--fg)}
+.filters button[aria-pressed="true"]{background:var(--iceSoft);color:var(--ice);border-color:transparent;box-shadow:none}
+.kind[aria-pressed="true"],.plan[aria-pressed="true"]{background:var(--iceSoft);border-color:rgba(143,214,255,.45);box-shadow:none}
+.kind[aria-pressed="true"] b,.plan[aria-pressed="true"] .gb{color:var(--ice)}
+.amts button{background:transparent;border-color:var(--line)}
+.amts button[aria-pressed="true"]{border-color:var(--ice);color:var(--ice);background:var(--iceSoft)}
+.tile .ic{color:var(--ice);filter:none}
+.tile b,.wallet .v,.bigw .v,.hero .en{text-shadow:none}
+.iconbtn{background:var(--card);border:1px solid var(--line);box-shadow:none}
+.iconbtn .badge{background:var(--ice);box-shadow:0 0 0 2px var(--bg)}
+.dbar i{background:var(--ice);box-shadow:none}
+.sw[aria-checked="true"]{background:#3fbf83;box-shadow:none;border-color:transparent}
+.sw{background:#5b6680;box-shadow:none;border-color:transparent}
+.dot.ok{box-shadow:none}.dot.warn{box-shadow:none}
+.sech button{color:var(--ice)}
+.bgart.dim{opacity:.55}
+.toast{background:var(--silver1);color:var(--silverInk)}
+.sheet{background:#081333;border-color:var(--line)}
+.ic[viewBox] path[fill="currentColor"]{stroke:none}
 </style>
 </head>
 <body>
