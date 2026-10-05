@@ -108,7 +108,7 @@ def _customer(order, pu):
         state = "warn"
     else:
         state = "ok"
-    sub = (order["sub_url"] or "").rstrip("/")
+    sub = ns["public_sub_url"](order["sub_url"] or "").rstrip("/")
     return {
         "id": order["id"], "username": order["username"], "service": order["protocol"],
         "service_name": SHOP_SERVICES.get(order["protocol"]) or ns["service_name"](order["protocol"]),
@@ -308,7 +308,7 @@ async def api_buy(request):
                 break
             taken.add(name)
             made.append({"id": order["id"], "username": order["username"], "password": order["password"],
-                         "guide": (order["sub_url"] or "").rstrip("/") + "/guide" if order["sub_url"] else None})
+                         "guide": ns["public_sub_url"](order["sub_url"]).rstrip("/") + "/guide" if order["sub_url"] else None})
             try:
                 await ns["deliver_service"](ctx, uid, order, opanel, quiet=True)
             except Exception as e:
@@ -384,8 +384,8 @@ def _own_order(db, uid, order_id):
 async def _order_connect(order):
     """اطلاعات اتصال همان‌طور که پنل الان می‌دهد (رمز از پنل، نه از سفارش، تا همانی باشد که نود چک می‌کند)."""
     info = {"id": order["id"], "username": order["username"], "service": order["protocol"],
-            "password": order["password"] or "", "sub": order["sub_url"] or "",
-            "guide": (order["sub_url"] or "").rstrip("/") + "/guide" if (order["sub_url"] or "").startswith("https://") else None,
+            "password": order["password"] or "", "sub": ns["public_sub_url"](order["sub_url"] or ""),
+            "guide": ns["public_sub_url"](order["sub_url"]).rstrip("/") + "/guide" if (order["sub_url"] or "").startswith("https://") else None,
             "ikev2": None, "l2tp": None}
     if order["protocol"] not in ns["IPSEC_SERVICES"]:
         return info
@@ -403,7 +403,7 @@ async def _order_connect(order):
             info["password"] = c.get("password") or info["password"]
             info[kind] = {"server": c.get("server") or "", "remote_id": c.get("remote_id") or "",
                           "secret": c.get("psk") or "" if kind == "l2tp" else "",
-                          "install": c.get("install_url") or c.get("mobileconfig_url") or ""}
+                          "install": ns["public_sub_url"](c.get("install_url") or c.get("mobileconfig_url") or "")}
     return info
 
 
@@ -1051,6 +1051,13 @@ async def api_admin_plan_delete(request):
 # تنظیماتی که از مینی‌اپ عوض می‌شوند؛ همان SETTING_KEYS ربات به‌علاوه‌ی چند کلید روشن/خاموش
 SETTING_TOGGLES = [("test_enabled", "🎁 اکانت تست"), ("backup_auto", "💾 بکاپ خودکار روزانه")]
 SETTING_EXTRA = [("support_username", "💬 یوزرنیم پشتیبانی (دایرکت)")]
+# دامنه‌ی زاپاس لینک‌های اشتراک (public_sub_url در bot.py)؛ فقط همین گزینه‌ها، چون پنل باید آن‌ها را سرو کند
+SUB_DOMAIN_KEY = "sub_domain_override"
+
+
+def _sub_domain_choices():
+    raw = ns["db"].setting("sub_backup_domains", "my.bomalo.ir") or ""
+    return [d.strip().lower() for d in raw.split(",") if re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", d.strip().lower())]
 
 
 async def api_admin_settings(request):
@@ -1060,11 +1067,20 @@ async def api_admin_settings(request):
     keys = ns["SETTING_KEYS"] + SETTING_EXTRA
     if request.method == "GET":
         return web.json_response({
+            "subdomain": {"value": db.setting(SUB_DOMAIN_KEY, ""), "choices": _sub_domain_choices()},
             "items": [{"key": k, "label": l, "value": db.setting(k, "")} for k, l in keys],
             "toggles": [{"key": k, "label": l, "on": db.setting(k, "1" if k == "backup_auto" else "0") == "1"}
                         for k, l in SETTING_TOGGLES]})
     b = await _body(request)
     key, value = b.get("key"), str(b.get("value") if b.get("value") is not None else "").strip()
+    if key == SUB_DOMAIN_KEY:
+        value = value.lower()
+        if value and value not in _sub_domain_choices():
+            return _err("domain")
+        db.set_setting(SUB_DOMAIN_KEY, value)
+        _panel_cache.clear()
+        _admin_log(request, f"🌐 دامنه‌ی لینک‌های اشتراک شد: {value or 'دامنه‌ی اصلی'}")
+        return web.json_response({"ok": True, "value": value})
     labels = dict(keys + SETTING_TOGGLES)
     if key not in labels:
         return _err("key")

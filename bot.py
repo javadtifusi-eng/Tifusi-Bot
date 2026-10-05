@@ -27,6 +27,7 @@ from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler,
 import sqlite3
 import threading
 import requests
+import urllib.parse
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -2171,7 +2172,7 @@ def delivery_card_png(order):
             return buf
 
         import qrcode
-        qr = qrcode.make(order["sub_url"], box_size=10, border=1).convert("RGB").resize((500, 500), Image.NEAREST)
+        qr = qrcode.make(public_sub_url(order["sub_url"]), box_size=10, border=1).convert("RGB").resize((500, 500), Image.NEAREST)
         box = 540
         qx = (CARD_W - box) // 2
         d.rounded_rectangle([qx, y, qx + box, y + box], radius=26, fill="#ffffff")
@@ -2210,15 +2211,28 @@ def qr_png(data):
 
 async def send_order_qr(context, chat_id, order):
     """بارکد لینک اشتراک با خود لینک زیر آن؛ اگر بارکد ساخته یا فرستاده نشد False."""
-    png = qr_png(order["sub_url"])
+    png = qr_png(public_sub_url(order["sub_url"]))
     if not png:
         return False
     try:
-        await context.bot.send_photo(chat_id, png, caption=order["sub_url"])
+        await context.bot.send_photo(chat_id, png, caption=public_sub_url(order["sub_url"]))
         return True
     except Exception as e:
         log.warning("send QR failed for %s: %s", chat_id, e)
         return False
+
+
+def public_sub_url(url):
+    """لینک https اشتراک/راهنما/نصب همان‌طور که به کاربر نشان داده می‌شود: اگر تنظیم sub_domain_override
+    (دامنه‌ی زاپاس اشتراک، برای روز فیلتر شدن دامنه‌ی اصلی) ست باشد، فقط host ِ لینک‌های /sub/ عوض می‌شود.
+    orders.sub_url در دیتابیس دست نمی‌خورد و آدرس سرور IKEv2/L2TP هم هرگز از این‌جا رد نمی‌شود."""
+    host = (db.setting("sub_domain_override", "") or "").strip().lower()
+    if not host or not url:
+        return url
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.path.startswith("/sub/"):
+        return url
+    return urllib.parse.urlunsplit(("https", host, parts.path, parts.query, parts.fragment))
 
 
 def apple_profile_url(order, links):
@@ -2228,7 +2242,7 @@ def apple_profile_url(order, links):
     if order["protocol"] not in IPSEC_SERVICES:
         return None
     cfgs = (links or {}).get(f"{order['protocol']}_configs") or []
-    return (cfgs[0].get("install_url") or cfgs[0].get("mobileconfig_url")) if cfgs else None
+    return public_sub_url(cfgs[0].get("install_url") or cfgs[0].get("mobileconfig_url")) if cfgs else None
 
 
 # نوع اتصال همان‌طور که در منوی VPN خود گوشی نوشته شده، تا مشتری همان را انتخاب کند
@@ -2356,7 +2370,7 @@ GUIDE_BTN = "📖 راهنمای اتصال"
 def guide_button(order):
     """راهنمای قدم‌به‌قدم پنل (/sub/<secret>/guide) به‌صورت مینی‌اپ تلگرام، برای IKEv2 و L2TP.
     مینی‌اپ فقط آدرس https قبول می‌کند؛ بدون لینک اشتراک دکمه‌ای نمی‌سازیم."""
-    url = (order["sub_url"] or "").rstrip("/")
+    url = public_sub_url(order["sub_url"] or "").rstrip("/")
     if order["protocol"] not in ("ikev2", "l2tp") or not url.startswith("https://"):
         return None
     return InlineKeyboardButton(GUIDE_BTN, web_app=WebAppInfo(url=url + "/guide"))
@@ -2772,7 +2786,7 @@ def delivery_details_html(order, panel, links):
     if apple_url:
         parts.append(f"🍎 نصب پروفایل آیفون:\n{esc(apple_url)}")
     if order["protocol"] not in IPSEC_SERVICES and order["sub_url"]:
-        parts.append(f"🔗 لینک اشتراک:\n<code>{esc(order['sub_url'])}</code>")
+        parts.append(f"🔗 لینک اشتراک:\n<code>{esc(public_sub_url(order['sub_url']))}</code>")
     return "\n\n".join(parts)
 
 
@@ -2817,7 +2831,7 @@ async def deliver_service(context, chat_id, order, panel, quiet=False):
             # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
             rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
         # لینک اشتراک فعلاً فقط برای Xray (سرویس‌های گوشی با تنظیمات خود گوشی وصل می‌شوند)
-        copy_btn = copy_text_button("🔗 کپی لینک اشتراک", order["sub_url"]) if order["sub_url"] and not guide else None
+        copy_btn = copy_text_button("🔗 کپی لینک اشتراک", public_sub_url(order["sub_url"])) if order["sub_url"] and not guide else None
         if copy_btn:
             rows.append([copy_btn])
         try:
@@ -2833,7 +2847,7 @@ async def deliver_service(context, chat_id, order, panel, quiet=False):
 
     await context.bot.send_message(chat_id, summary)
     if order["sub_url"] and not await send_order_qr(context, chat_id, order):
-        await context.bot.send_message(chat_id, order["sub_url"])
+        await context.bot.send_message(chat_id, public_sub_url(order["sub_url"]))
     if details:
         await context.bot.send_message(chat_id, details, parse_mode="HTML", disable_web_page_preview=True)
 
@@ -2954,7 +2968,7 @@ async def show_service_detail(query, uid, oid):
 
     creds = f"👤 یوزرنیم: `{o['username']}`"
     if not phone:
-        creds += f"\n🔗 لینک اشتراک: `{o['sub_url'] or '-'}`"
+        creds += f"\n🔗 لینک اشتراک: `{public_sub_url(o['sub_url']) or '-'}`"
     # رمز و سکرت از خود پنل، تا همیشه همانی باشد که نود واقعاً چک می‌کند
     guide = o["protocol"] in ("ikev2", "l2tp", "pptp")
     manual = [] if guide else ipsec_manual_lines(fresh, o, code=lambda v: f"`{v}`", text=md)
@@ -3289,7 +3303,7 @@ async def do_renew_and_deliver(query, context, uid, oid, plan_id=None, quiet=Fal
             f"✅ سرویس `{new_o['username']}` تمدید شد!\n\n"
             f"📦 پلن جدید: {vol_text(new_o['volume_gb'])} — {new_o['days']} روز\n"
             f"👤 یوزرنیم: `{new_o['username']}`\n"
-            f"🔗 لینک اشتراک: `{new_o['sub_url'] or '-'}`\n"
+            f"🔗 لینک اشتراک: `{public_sub_url(new_o['sub_url']) or '-'}`\n"
             f"⏳ اعتبار جدید: تا {dt}",
             parse_mode="Markdown")
     except Exception as e:

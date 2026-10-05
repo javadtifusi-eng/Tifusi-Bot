@@ -642,10 +642,32 @@
   // تنظیمات
   AV.settings = () => {
     if (!S.aset) { loadSettings(); return LOADING; }
-    return `<div class="glass sec">${S.aset.toggles.map((t) => `<div class="lrow"><span class="d" style="color:var(--fg)">${esc(t.label)}</span><button class="sw" type="button" role="switch" aria-checked="${t.on}" data-stog="${t.key}" aria-label="${esc(t.label)}"></button></div>`).join("")}</div>
+    const sd = S.aset.subdomain || { value: "", choices: [] };
+    const dom = `<div class="glass sec" style="display:grid;gap:10px"><b>🌐 دامنه‌ی لینک‌های اشتراک</b>
+      <small style="color:var(--muted);line-height:1.8">اگه دامنه‌ی اصلی فیلتر شد، با یه لمس همه‌ی لینک‌های اشتراک، راهنما و نصب پروفایل می‌رن روی دامنه‌ی زاپاس. آدرس سرور IKEv2 و L2TP عوض نمی‌شه.</small>
+      <div class="filters">${[""].concat(sd.choices).map((d) => `<button type="button" aria-pressed="${sd.value === d}" data-subdom="${esc(d)}">${d ? esc(d) : "دامنه‌ی اصلی"}</button>`).join("")}</div></div>`;
+    return dom + `<div class="glass sec">${S.aset.toggles.map((t) => `<div class="lrow"><span class="d" style="color:var(--fg)">${esc(t.label)}</span><button class="sw" type="button" role="switch" aria-checked="${t.on}" data-stog="${t.key}" aria-label="${esc(t.label)}"></button></div>`).join("")}</div>
     <div class="glass sec">${S.aset.items.map((x) => `<button class="lrow arow" type="button" data-sedit="${x.key}"><span class="d" style="color:var(--fg)">${esc(x.label)}</span><span class="v" dir="auto" style="max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${esc(x.value) || "—"}</span></button>`).join("")}</div>
     <button class="cta" type="button" id="bkp">💾 بکاپ همین الان</button>`;
   };
+  function confirmSubDomain(d) {
+    if ((S.aset.subdomain || {}).value === d) return;
+    $("sheet").innerHTML = `<h3 id="sheetTitle">🌐 ${d ? "رفتن روی " + esc(d) : "برگشت به دامنه‌ی اصلی"}؟</h3>
+      <p style="margin:0;line-height:1.9">از همین الان همه‌ی لینک‌های اشتراک، صفحه‌ی راهنما، نصب پروفایل آیفون و QR که توی مینی‌اپ و ربات نشون داده یا ارسال می‌شن، با <b class="num">${d ? esc(d) : "دامنه‌ی اصلی"}</b> ساخته می‌شن.</p>
+      <p class="soon" style="text-align:right;margin:0">آدرس سرور IKEv2/L2TP همون می‌مونه. لینک‌هایی که قبلاً برای مشتری فرستادی خودشون عوض نمی‌شن؛ اگه لازم بود دوباره بفرست.</p>
+      <button class="cta" type="button" data-subdomok="${esc(d)}">✅ بله، عوض کن</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+  }
+  async function saveSubDomain(d, btn) {
+    btn.disabled = true;
+    try {
+      const j = await api("admin/settings", { method: "POST", body: JSON.stringify({ key: "sub_domain_override", value: d }) });
+      S.aset.subdomain.value = j.value;
+      Object.keys(connCache).forEach((k) => delete connCache[k]); Object.keys(qrCache).forEach((k) => delete qrCache[k]);
+      closeSheet(); render(); toast("✅ لینک‌ها حالا با " + (j.value || "دامنه‌ی اصلی") + " ساخته می‌شن"); reload();
+    } catch (e) { btn.disabled = false; toast("عوض نشد"); }
+  }
   async function loadSettings() {
     try { S.aset = await api("admin/settings"); if (S.tab === "admin" && S.asec === "settings") render(); } catch (e) { toast("الان نشد تنظیمات رو بگیرم"); }
   }
@@ -1066,6 +1088,8 @@
     if (d.pdel) { confirmPanelDelete(d.pdel); return; }
     if (d.pdelyes) { panelAct(d.pdelyes, { action: "delete" }, b, "🗑 پنل حذف شد").then((j) => { if (j) closeSheet(); }); return; }
     if (d.pmap) { openPanelMap(d.pmap, b); return; }
+    if (d.subdom !== undefined) { confirmSubDomain(d.subdom); return; }
+    if (d.subdomok !== undefined) { saveSubDomain(d.subdomok, b); return; }
     if (d.stog) { const t = S.aset.toggles.find((x) => x.key === d.stog); saveSetting(d.stog, t.on ? "0" : "1", b); return; }
     if (d.sedit) { openSetting(d.sedit); return; }
     if (d.ssave) { saveSetting(d.ssave, $("sv").value, b); return; }
