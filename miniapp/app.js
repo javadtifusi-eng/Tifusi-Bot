@@ -86,6 +86,9 @@
   const toman = (v) => `${num(n(v))} تومان`;
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const GB = 1073741824;
+  // مبلغ کوتاه برای کاشی‌های کوچک (۱۲۵۰۰۰۰ ← 1.3 میلیون) تا عدد از کادر بیرون نزند
+  const shortToman = (v) => v >= 1e6 ? `<span class="num">${+(v / 1e6).toFixed(1)}</span><i>میلیون تومان</i>`
+    : v >= 1e4 ? `<span class="num">${Math.round(v / 1e3)}</span><i>هزار تومان</i>` : `<span class="num">${n(v)}</span>`;
   const gb = (b) => (b / GB).toFixed(b >= 10 * GB ? 0 : 1);
   const $ = (id) => document.getElementById(id);
   function toast(t) { const e = $("toast"); e.textContent = t; e.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove("show"), 1800); }
@@ -230,7 +233,7 @@
       if (!a) { loadAdmin(); return LOADING; }
       const tl = { wallet_charge: "شارژ کیف پول", purchase: "خرید سرویس", renew: "تمدید" };
       return `<div class="stats">
-        <div class="glass tile">${ic("wallet")}<b class="num">${n(a.span.day.revenue)}</b><small>فروش امروز</small></div>
+        <div class="glass tile">${ic("wallet")}<b>${shortToman(a.span.day.revenue)}</b><small>فروش امروز</small></div>
         <div class="glass tile">${ic("uplus")}<b class="num">${a.span.day.new_users}</b><small>کاربر جدید امروز</small></div>
         <div class="glass tile">${ic("clock")}<b class="num">${a.pending.length}</b><small>رسید در انتظار</small></div>
       </div>
