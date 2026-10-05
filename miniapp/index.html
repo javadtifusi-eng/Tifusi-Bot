@@ -240,6 +240,12 @@ body{background:
 .nmbtn:focus-visible{outline:2px solid var(--cyan)}
 .nmrow{appearance:none;font:inherit;color:var(--fg);width:100%;cursor:pointer;grid-template-columns:minmax(0,1fr) auto}
 .nmrow:focus-visible{outline:2px solid var(--cyan)}
+.arow{appearance:none;background:none;border:0;border-bottom:1px solid var(--edge2);width:100%;font:inherit;color:var(--fg);cursor:pointer;text-align:right;gap:10px}
+.arow:last-child{border-bottom:0}
+.arow:focus-visible{outline:2px solid var(--cyan)}
+.arow .d{gap:8px}
+.field textarea{font:inherit;padding:12px;border-radius:14px;border:1px solid var(--edge);background:var(--glass);color:var(--fg);resize:vertical;line-height:1.8}
+.sheet{max-height:88vh;overflow-y:auto}
 </style>
 </head>
 <body>

@@ -513,6 +513,279 @@ async def api_admin_receipt(request):
     return web.json_response({"ok": True, "status": r["status"] if r else None, "notes": q.notes})
 
 
+# ---------- تب مدیریت: کاربرها، تعرفه‌ها، تیکت‌ها، پیام همگانی ----------
+# همان قانون‌های پنل مدیریت ربات (au_amount، au_disc، ticket_reply، plan_edit_value، run_broadcast)؛
+# هر کار ادمین در تاپیک «📊 گزارش» گروه ثبت می‌شود.
+def _admin_log(request, text):
+    ns["notify_group"](request.app["tg_app"].bot, f"👑 مینی‌اپ — {text}\nادمین: {ns['who'](request['uid'])}", topic="report")
+
+
+async def _body(request):
+    try:
+        b = await request.json()
+        return b if isinstance(b, dict) else {}
+    except Exception:
+        return {}
+
+
+def _int(v, default=0):
+    try:
+        return int(str(v).strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")).replace(",", ""))
+    except (TypeError, ValueError):
+        return default
+
+
+def _user_row(u, svc=0):
+    return {"id": u["id"], "name": (u["full_name"] or "").strip(), "uname": u["username"] or "",
+            "balance": int(u["balance"] or 0), "blocked": bool(u["is_blocked"]),
+            "discount": int(u["discount_pct"] or 0), "services": svc,
+            "joined": u["created_at"] or None, "seen": u["last_seen"] or None}
+
+
+ADMIN_USER_FILTERS = {"all": "", "balance": " AND u.balance > 0", "neg": " AND u.balance < 0",
+                      "blocked": " AND COALESCE(u.is_blocked,0)=1"}
+
+
+async def api_admin_users(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db = ns["db"]
+    q = (request.query.get("q") or "").strip().lstrip("@")
+    filt = ADMIN_USER_FILTERS.get(request.query.get("f") or "all", "")
+    offset = max(0, _int(request.query.get("offset")))
+    where, args = "1=1" + filt, []
+    if q:
+        where += " AND (CAST(u.id AS TEXT) LIKE ? OR u.username LIKE ? OR u.full_name LIKE ?)"
+        args += [f"{q}%", f"%{q}%", f"%{q}%"]
+    total = db.one(f"SELECT COUNT(*) c FROM users u WHERE {where}", tuple(args))["c"]
+    rows = db.q(f"""SELECT u.*, (SELECT COUNT(*) FROM orders o WHERE o.user_id=u.id AND o.status IN ('active','delreq_pending')) svc
+                    FROM users u WHERE {where} ORDER BY COALESCE(NULLIF(u.last_seen,0), u.created_at) DESC LIMIT 25 OFFSET ?""",
+                tuple(args) + (offset,))
+    return web.json_response({"total": total, "offset": offset, "users": [_user_row(r, r["svc"]) for r in rows]})
+
+
+async def api_admin_user(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db = ns["db"]
+    u = db.get_user(_int(request.query.get("id")))
+    if not u:
+        return _err("not_found", 404)
+    orders = db.get_user_orders(u["id"])
+    paid = db.one("SELECT COALESCE(SUM(amount),0) s FROM receipts WHERE user_id=? AND status='approved'", (u["id"],))["s"]
+    bought = db.one("SELECT COUNT(*) c, COALESCE(SUM(price),0) s FROM orders WHERE user_id=?", (u["id"],))
+    row = _user_row(u, len(orders))
+    row.update({"paid": paid, "orders_count": bought["c"], "orders_sum": bought["s"],
+                "is_admin": bool(ns["is_admin"](u["id"])),
+                "orders": [{"id": o["id"], "username": o["username"], "service": ns["service_name"](o["protocol"]),
+                            "expire": o["expire_at"] or None, "gb": o["volume_gb"], "status": o["status"]} for o in orders]})
+    return web.json_response(row)
+
+
+async def api_admin_user_action(request):
+    """{id, action: credit|debit|block|unblock|discount|message, amount?, pct?, text?}"""
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db, fmt = ns["db"], ns["fmt"]
+    bot = request.app["tg_app"].bot
+    b = await _body(request)
+    action = b.get("action")
+    u = db.get_user(_int(b.get("id")))
+    if not u:
+        return _err("not_found", 404)
+    target = u["id"]
+    label = ns["who"](target)
+    if action in ("credit", "debit"):
+        amount = _int(b.get("amount"))
+        if not 0 < amount <= 50_000_000:
+            return _err("amount")
+        if action == "debit":
+            if not db.try_spend(target, amount):
+                return _err("low_balance", balance=db.get_balance(target))
+            _admin_log(request, f"➖ {fmt(amount)} تومان از کیف پول {label} کم شد")
+        else:
+            db.add_balance(target, amount)
+            _admin_log(request, f"➕ {fmt(amount)} تومان به کیف پول {label} اضافه شد")
+            try:
+                await bot.send_message(target, f"💰 کیف پول شما {fmt(amount)} تومان شارژ شد (شارژ دستی).")
+            except Exception:
+                pass
+            try:
+                await ns["offer_pending_buy"](bot, target)
+            except Exception as e:
+                log.info("offer_pending_buy %s: %s", target, e)
+    elif action in ("block", "unblock"):
+        if action == "block" and ns["is_admin"](target):
+            return _err("admin")
+        db.x("UPDATE users SET is_blocked=? WHERE id=?", (1 if action == "block" else 0, target))
+        _admin_log(request, f"{'⛔ مسدود شد' if action == 'block' else '✅ رفع مسدودی'}: {label}")
+    elif action == "discount":
+        pct = _int(b.get("pct"), -1)
+        if not 0 <= pct <= 100:
+            return _err("pct")
+        db.x("UPDATE users SET discount_pct=? WHERE id=?", (pct, target))
+        _admin_log(request, f"🏷 تخفیف {label} شد {pct}٪")
+    elif action == "message":
+        text = (b.get("text") or "").strip()
+        if not text or len(text) > 3500:
+            return _err("text")
+        try:
+            await bot.send_message(target, f"📩 پیام از پشتیبانی:\n\n{text}")
+        except Exception as e:
+            return _err("send", 502, detail=str(e)[:200])
+        _admin_log(request, f"📩 پیام به {label}")
+    else:
+        return _err("action")
+    return web.json_response({"ok": True, "user": _user_row(db.get_user(target), len(db.get_user_orders(target)))})
+
+
+def _plan_json(p):
+    return {"id": p["id"], "service": p["service"] or "", "service_name": ns["SERVICES"].get(p["service"] or "", "بدون سرویس"),
+            "title": p["title"] or "", "gb": p["volume_gb"], "days": p["days"], "price": p["price"],
+            "users": p["user_limit"] or 0, "active": bool(p["active"])}
+
+
+async def api_admin_plans(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    plans = sorted(ns["db"].get_plans(), key=lambda p: (p["service"] or "", p["volume_gb"] == 0, p["volume_gb"], p["user_limit"] or 0, p["price"]))
+    return web.json_response({"plans": [_plan_json(p) for p in plans]})
+
+
+async def api_admin_plan(request):
+    """{id, price?, days?, title?, active?} — مرحله‌ی تأیید (قبل/بعد) در خود مینی‌اپ است."""
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db, fmt = ns["db"], ns["fmt"]
+    b = await _body(request)
+    p = db.get_plan(_int(b.get("id")))
+    if not p:
+        return _err("not_found", 404)
+    fields = {}
+    if "price" in b:
+        v = _int(b["price"], -1)
+        if not 0 < v <= 100_000_000:
+            return _err("price")
+        fields["price"] = v
+    if "days" in b:
+        v = _int(b["days"], -1)
+        if not 0 < v <= 3650:
+            return _err("days")
+        fields["days"] = v
+    if "title" in b:
+        v = (b.get("title") or "").strip()
+        if not v or len(v) > 80:
+            return _err("title")
+        fields["title"] = v
+    if "active" in b:
+        fields["active"] = 1 if b["active"] else 0
+    fields = {k: v for k, v in fields.items() if p[k] != v}
+    if not fields:
+        return web.json_response({"ok": True, "plan": _plan_json(p)})
+    db.update_plan(p["id"], **fields)
+    names = {"price": "قیمت", "days": "مدت", "title": "عنوان", "active": "وضعیت"}
+
+    def show(k, v):
+        return fmt(v) if k == "price" else ("فعال" if v else "خاموش") if k == "active" else v
+    change = "، ".join(f"{names[k]}: {show(k, p[k])} ← {show(k, v)}" for k, v in fields.items())
+    _admin_log(request, f"🏷 تعرفه #{p['id']} ({p['title'] or ''}) عوض شد — {change}")
+    return web.json_response({"ok": True, "plan": _plan_json(db.get_plan(p["id"]))})
+
+
+async def api_admin_tickets(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db = ns["db"]
+    status = "closed" if request.query.get("s") == "closed" else "open"
+    rows = db.q("SELECT * FROM tickets WHERE status=? ORDER BY id DESC LIMIT 30", (status,))
+    out = []
+    for t in rows:
+        u = db.get_user(t["user_id"])
+        out.append({"id": t["id"], "user_id": t["user_id"], "user": (u["full_name"] or "") if u else "",
+                    "uname": (u["username"] or "") if u else "", "text": t["message"] or "", "photo": bool(t["photo_id"]),
+                    "reply": t["reply"] or "", "at": t["created_at"]})
+    return web.json_response({"tickets": out})
+
+
+async def api_admin_ticket_photo(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    t = ns["db"].get_ticket(_int(request.query.get("id")))
+    if not t or not t["photo_id"]:
+        return _err("not_found", 404)
+    try:
+        f = await request.app["tg_app"].bot.get_file(t["photo_id"])
+        data = bytes(await f.download_as_bytearray())
+    except Exception as e:
+        log.warning("miniapp ticket photo %s failed: %s", t["id"], e)
+        return _err("telegram", 502)
+    return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
+async def api_admin_ticket(request):
+    """{id, action: reply|close, text?} — مثل ticket_reply ربات: پاسخ به کاربر می‌رود و تیکت بسته می‌شود."""
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db = ns["db"]
+    b = await _body(request)
+    t = db.get_ticket(_int(b.get("id")))
+    if not t:
+        return _err("not_found", 404)
+    if t["status"] != "open":
+        return _err("closed", 409)
+    if b.get("action") == "reply":
+        text = (b.get("text") or "").strip()
+        if not text or len(text) > 3500:
+            return _err("text")
+        db.set_ticket(t["id"], "closed", reply=text)
+        sent = True
+        try:
+            await request.app["tg_app"].bot.send_message(t["user_id"], f"☎️ پاسخ پشتیبانی به تیکت #{t['id']}:\n\n{text}")
+        except Exception:
+            sent = False
+        _admin_log(request, f"🎫 تیکت #{t['id']} پاسخ داده و بسته شد ({ns['who'](t['user_id'])})")
+        return web.json_response({"ok": True, "sent": sent})
+    if b.get("action") == "close":
+        db.set_ticket(t["id"], "closed")
+        _admin_log(request, f"🔒 تیکت #{t['id']} بدون پاسخ بسته شد")
+        return web.json_response({"ok": True})
+    return _err("action")
+
+
+_broadcast_running = set()
+
+
+async def api_admin_broadcast(request):
+    """GET: تعداد گیرنده‌ها. POST {text, count}: count باید همان عددی باشد که ادمین در مرحله‌ی تأیید دید."""
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    count = len(ns["db"].all_user_ids())
+    if request.method == "GET":
+        return web.json_response({"count": count, "running": bool(_broadcast_running)})
+    b = await _body(request)
+    text = (b.get("text") or "").strip()
+    if not text or len(text) > 3500:
+        return _err("text")
+    if _int(b.get("count"), -1) != count:
+        return _err("count_changed", 409, count=count)
+    if _broadcast_running:
+        return _err("running", 409)
+    uid = request["uid"]
+    bot = request.app["tg_app"].bot
+    _broadcast_running.add(uid)
+
+    async def run():
+        try:
+            await ns["run_broadcast"](bot, uid, {"text": text})
+        except Exception as e:
+            log.warning("miniapp broadcast failed: %s", e)
+        finally:
+            _broadcast_running.discard(uid)
+    asyncio.create_task(run())
+    _admin_log(request, f"📣 پیام همگانی برای {count} کاربر شروع شد:\n\n{text[:300]}")
+    return web.json_response({"ok": True, "count": count})
+
+
 # ---------- اکانت تست داخل مینی‌اپ ----------
 async def api_test(request):
     """همان قانون send_test_account ربات (روشن بودن، سهمیه‌ی هر کاربر، اولین سرویس در دسترس)،
@@ -635,6 +908,16 @@ async def start(application, bot_globals):
     app.router.add_get("/api/admin/summary", api_admin_summary)
     app.router.add_get("/api/admin/receipt_photo", api_admin_receipt_photo)
     app.router.add_post("/api/admin/receipt", api_admin_receipt)
+    app.router.add_get("/api/admin/users", api_admin_users)
+    app.router.add_get("/api/admin/user", api_admin_user)
+    app.router.add_post("/api/admin/user", api_admin_user_action)
+    app.router.add_get("/api/admin/plans", api_admin_plans)
+    app.router.add_post("/api/admin/plan", api_admin_plan)
+    app.router.add_get("/api/admin/tickets", api_admin_tickets)
+    app.router.add_get("/api/admin/ticket_photo", api_admin_ticket_photo)
+    app.router.add_post("/api/admin/ticket", api_admin_ticket)
+    app.router.add_get("/api/admin/broadcast", api_admin_broadcast)
+    app.router.add_post("/api/admin/broadcast", api_admin_broadcast)
     app["tg_app"] = application
     if (STATIC_DIR / "assets").is_dir():
         app.router.add_static("/assets/", STATIC_DIR / "assets", append_version=False)

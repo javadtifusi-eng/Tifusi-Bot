@@ -164,29 +164,11 @@
       ${w.receipts.length ? `<div class="glass sec"><div class="sech"><b>رسیدهای اخیر</b></div>${w.receipts.map((r) => `<div class="tx"><span class="ti">${ic("wallet")}</span><div><b>${r.type === "wallet_charge" ? "شارژ کیف پول" : r.type === "purchase" ? "خرید سرویس" : "تمدید"}</b><small class="num">#${r.id}</small></div><span class="am ${(st[r.status] || ["", ""])[1] === "ok" ? "plus" : "minus"}"><span class="num">${n(r.amount)}</span><br><small>${(st[r.status] || [r.status])[0]}</small></span></div>`).join("")}</div>` : ""}`;
     },
     admin: () => {
-      const a = S.admin;
-      if (!a) { loadAdmin(); return '<div class="loading">در حال بارگذاری…</div>'; }
-      const tl = { wallet_charge: "شارژ کیف پول", purchase: "خرید سرویس", renew: "تمدید" };
-      return `<div class="ptitle"><b>مدیریت</b><small>فروش و رسیدها</small></div>
-      <div class="stats">
-        <div class="glass tile">${ic("wallet")}<b class="num">${n(a.span.day.revenue)}</b><small>فروش امروز</small></div>
-        <div class="glass tile">${ic("uplus")}<b class="num">${a.span.day.new_users}</b><small>کاربر جدید امروز</small></div>
-        <div class="glass tile">${ic("clock")}<b class="num">${a.pending.length}</b><small>رسید در انتظار</small></div>
-      </div>
-      <div class="glass sec">
-        <div class="lrow"><span class="d">فروش ۷ روز</span><span class="v">${toman(a.span.week.revenue)} · ${num(a.span.week.new_orders)} سفارش</span></div>
-        <div class="lrow"><span class="d">فروش ۳۰ روز</span><span class="v">${toman(a.span.month.revenue)} · ${num(a.span.month.new_orders)} سفارش</span></div>
-        <div class="lrow"><span class="d">سرویس فعال / کاربر</span><span class="v"><span class="num">${a.totals.active}</span> / <span class="num">${a.totals.users}</span></span></div>
-        <div class="lrow"><span class="d">تیکت باز</span><span class="v num">${a.totals.tickets_open}</span></div>
-      </div>
-      <div class="h2"><b>رسیدهای در انتظار</b></div>
-      ${a.pending.map((r) => `<div class="glass sec" style="display:grid;gap:10px">
-        <div class="sech"><b>${tl[r.type] || r.type} · ${toman(r.amount)}</b><small class="num" style="color:var(--muted)">#${r.id}</small></div>
-        <div style="color:var(--muted);font-size:.8rem">${esc(r.user || "")} ${r.uname ? "@" + esc(r.uname) : ""} · <span class="num">${r.user_id}</span>${r.username ? ` · سرویس <span class="num">${esc(r.username)}</span>` : ""}</div>
-        <img data-rimg="${r.id}" alt="رسید #${r.id}" style="width:100%;border-radius:14px;background:var(--glass);min-height:120px;object-fit:contain">
-        <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill" type="button" data-rok="${r.id}" style="justify-content:center;background:linear-gradient(180deg,#6ff0a8,#1fae64)">تأیید</button><button class="pill" type="button" data-rno="${r.id}" style="justify-content:center;background:linear-gradient(180deg,#ff7b7b,#d63a3a);color:#fff">رد</button></div>
-      </div>`).join("") || '<div class="empty">رسید در انتظاری نیست ✓</div>'}
-      <p class="soon">بقیه‌ی بخش‌های مدیریت فعلاً با دستور /admin توی چت ربات.</p>`;
+      const sec = S.asec || "rc", a = S.admin;
+      const tk = a && a.totals.tickets_open, rc = a && a.pending.length;
+      return `<div class="ptitle"><b>مدیریت</b><small>${{ rc: "فروش و رسیدها", users: "کاربرهای ربات", plans: "قیمت و مدت پلن‌ها", tk: "پیام‌های مشتری‌ها", bc: "پیام به همه‌ی کاربرها" }[sec]}</small></div>
+      <div class="filters" role="tablist">${ASEC.map(([k, l]) => `<button type="button" role="tab" aria-pressed="${k === sec}" data-asec="${k}">${l}${k === "rc" && rc ? ` <span class="num">(${rc})</span>` : k === "tk" && tk ? ` <span class="num">(${tk})</span>` : ""}</button>`).join("")}</div>
+      ${AV[sec]()}`;
     },
     help: () => {
       const q = (S.hq || "").toLowerCase();
@@ -236,6 +218,275 @@
       </div>`;
     }
   };
+
+  // ---------- تب مدیریت: زیربخش‌ها ----------
+  const ASEC = [["rc", "رسیدها"], ["users", "کاربران"], ["plans", "تعرفه‌ها"], ["tk", "تیکت‌ها"], ["bc", "پیام همگانی"]];
+  const LOADING = '<div class="loading">در حال بارگذاری…</div>';
+  const fdate = (ts) => ts ? new Date(ts * 1000).toLocaleDateString("fa-IR-u-nu-latn", { timeZone: "Asia/Tehran" }) : "—";
+  const uname = (u) => esc(u.name || (u.uname ? "@" + u.uname : u.id));
+  const AV = {
+    rc: () => {
+      const a = S.admin;
+      if (!a) { loadAdmin(); return LOADING; }
+      const tl = { wallet_charge: "شارژ کیف پول", purchase: "خرید سرویس", renew: "تمدید" };
+      return `<div class="stats">
+        <div class="glass tile">${ic("wallet")}<b class="num">${n(a.span.day.revenue)}</b><small>فروش امروز</small></div>
+        <div class="glass tile">${ic("uplus")}<b class="num">${a.span.day.new_users}</b><small>کاربر جدید امروز</small></div>
+        <div class="glass tile">${ic("clock")}<b class="num">${a.pending.length}</b><small>رسید در انتظار</small></div>
+      </div>
+      <div class="glass sec">
+        <div class="lrow"><span class="d">فروش ۷ روز</span><span class="v">${toman(a.span.week.revenue)} · ${num(a.span.week.new_orders)} سفارش</span></div>
+        <div class="lrow"><span class="d">فروش ۳۰ روز</span><span class="v">${toman(a.span.month.revenue)} · ${num(a.span.month.new_orders)} سفارش</span></div>
+        <div class="lrow"><span class="d">سرویس فعال / کاربر</span><span class="v"><span class="num">${a.totals.active}</span> / <span class="num">${a.totals.users}</span></span></div>
+        <div class="lrow"><span class="d">تیکت باز</span><span class="v num">${a.totals.tickets_open}</span></div>
+      </div>
+      <div class="h2"><b>رسیدهای در انتظار</b></div>
+      ${a.pending.map((r) => `<div class="glass sec" style="display:grid;gap:10px">
+        <div class="sech"><b>${tl[r.type] || r.type} · ${toman(r.amount)}</b><small class="num" style="color:var(--muted)">#${r.id}</small></div>
+        <div style="color:var(--muted);font-size:.8rem">${esc(r.user || "")} ${r.uname ? "@" + esc(r.uname) : ""} · <span class="num">${r.user_id}</span>${r.username ? ` · سرویس <span class="num">${esc(r.username)}</span>` : ""}</div>
+        <img data-rimg="${r.id}" alt="رسید #${r.id}" style="width:100%;border-radius:14px;background:var(--glass);min-height:120px;object-fit:contain">
+        <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill" type="button" data-rok="${r.id}" style="justify-content:center;background:linear-gradient(180deg,#6ff0a8,#1fae64)">تأیید</button><button class="pill" type="button" data-rno="${r.id}" style="justify-content:center;background:linear-gradient(180deg,#ff7b7b,#d63a3a);color:#fff">رد</button></div>
+      </div>`).join("") || '<div class="empty">رسید در انتظاری نیست ✓</div>'}`;
+    },
+    users: () => {
+      if (!S.au) loadUsers();
+      return `<label class="glass search">${ic("search")}<input id="aq" type="search" placeholder="آیدی، یوزرنیم یا اسم…" value="${esc(S.aq || "")}" aria-label="جستجوی کاربر"></label>
+      <div class="filters">${[["all", "همه"], ["balance", "موجودی‌دار"], ["neg", "موجودی منفی"], ["blocked", "مسدود"]].map(([k, l]) => `<button type="button" aria-pressed="${(S.af || "all") === k}" data-af="${k}">${l}</button>`).join("")}</div>
+      <div id="aul" style="display:grid;gap:10px">${usersList()}</div>`;
+    },
+    plans: () => {
+      if (!S.aplans) { loadPlans(); return LOADING; }
+      const groups = {};
+      S.aplans.forEach((p) => { (groups[p.service_name] = groups[p.service_name] || []).push(p); });
+      return Object.entries(groups).map(([g, ps]) => `<div class="glass sec"><div class="sech"><b>${esc(g)}</b></div>
+        ${ps.map((p) => `<button class="lrow arow" type="button" data-ap="${p.id}"><span class="d" style="color:var(--fg)"><span class="dot ${p.active ? "ok" : "bad"}"></span>${esc(planName(p))}</span><span class="v">${toman(p.price)} · <span class="num">${p.days}</span> روز</span></button>`).join("")}</div>`).join("") || '<div class="empty">پلنی تعریف نشده.</div>';
+    },
+    tk: () => {
+      if (!S.atk) { loadTickets(); return LOADING; }
+      const closed = S.tks === "closed";
+      return `<div class="filters"><button type="button" aria-pressed="${!closed}" data-tks="open">باز</button><button type="button" aria-pressed="${closed}" data-tks="closed">بسته‌شده</button></div>
+      ${S.atk.map((t) => `<div class="glass sec" style="display:grid;gap:10px">
+        <div class="sech"><b dir="auto">${esc(t.user || (t.uname ? "@" + t.uname : t.user_id))}</b><small style="color:var(--muted)"><span class="num">#${t.id}</span> · ${fdate(t.at)}</small></div>
+        <div style="color:var(--muted);font-size:.78rem">${t.uname ? "@" + esc(t.uname) + " · " : ""}<span class="num">${t.user_id}</span></div>
+        ${t.text ? `<div dir="auto" style="white-space:pre-wrap;line-height:1.8">${esc(t.text)}</div>` : ""}
+        ${t.photo ? `<img data-timg="${t.id}" alt="عکس تیکت #${t.id}" style="width:100%;border-radius:14px;background:var(--glass);min-height:120px;object-fit:contain">` : ""}
+        ${closed ? (t.reply ? `<div style="border-inline-start:3px solid var(--cyan);padding-inline-start:10px;white-space:pre-wrap;color:var(--muted)" dir="auto">${esc(t.reply)}</div>` : '<small style="color:var(--muted)">بدون پاسخ بسته شد</small>')
+          : `<label class="field">پاسخ (برای کاربر فرستاده می‌شه و تیکت بسته می‌شه)<textarea data-tkt="${t.id}" rows="3" dir="auto">${esc((S.tkr || {})[t.id] || "")}</textarea></label>
+        <div class="sacts" style="grid-template-columns:1.4fr 1fr"><button class="pill" type="button" data-tkr="${t.id}" style="justify-content:center">ارسال پاسخ</button><button class="pill ghost" type="button" data-tkc="${t.id}" style="justify-content:center">بستن بدون پاسخ</button></div>`}
+      </div>`).join("") || `<div class="empty">${closed ? "تیکت بسته‌ای نیست." : "تیکت بازی نیست ✓"}</div>`}`;
+    },
+    bc: () => `<div class="glass sec" style="display:grid;gap:10px"><b>📣 پیام همگانی</b>
+      <p class="soon" style="text-align:right;margin:0">برای همه‌ی کاربرهای ربات (به‌جز مسدودها) فرستاده می‌شه. فقط متن؛ برای پیام با عکس از /admin توی چت ربات.</p>
+      <label class="field">متن پیام<textarea id="bct" rows="7" dir="auto" maxlength="3500">${esc(S.bct || "")}</textarea></label>
+      <button class="cta" type="button" id="bcgo">پیش‌نمایش و ارسال</button></div>`
+  };
+  const planName = (p) => p.title || (p.gb ? `${p.gb} گیگ` : "نامحدود");
+
+  function usersList() {
+    const a = S.au;
+    if (!a) return LOADING;
+    return (a.users.map((u) => `<button class="glass cust nmrow" type="button" data-au="${u.id}"><div style="min-width:0;text-align:right"><div class="nm" dir="auto" style="direction:rtl">${uname(u)}</div>
+      <div class="mt">${u.blocked ? '<span class="offtag">مسدود</span> · ' : ""}<span class="num">${u.id}</span>${u.uname ? ` · <span class="num">@${esc(u.uname)}</span>` : ""}</div>
+      <div class="mt">${toman(u.balance)} · ${num(u.services)} سرویس${u.discount ? ` · ${num(u.discount)}٪ تخفیف` : ""}</div></div><span style="color:var(--muted)">‹</span></button>`).join("") || '<div class="empty">کاربری پیدا نشد.</div>')
+      + (a.users.length < a.total ? `<button class="pill ghost" type="button" data-aumore="1" style="justify-content:center">بیشتر (${num(a.total - a.users.length)} نفر دیگه)</button>` : "");
+  }
+  async function loadUsers(more) {
+    const off = more && S.au ? S.au.users.length : 0;
+    const seq = (loadUsers.seq = (loadUsers.seq || 0) + 1);
+    try {
+      const j = await api(`admin/users?q=${encodeURIComponent(S.aq || "")}&f=${S.af || "all"}&offset=${off}`);
+      if (seq !== loadUsers.seq) return;
+      if (more && S.au) j.users = S.au.users.concat(j.users);
+      S.au = j;
+      const box = $("aul"); if (box) box.innerHTML = usersList();
+    } catch (e) { toast("الان نشد لیست کاربرها رو بگیرم"); }
+  }
+  async function openAU(id) {
+    try { S.auser = await api("admin/user?id=" + id); auSheet("main"); $("sheet").classList.add("open"); $("scrim").classList.add("open"); }
+    catch (e) { toast("اطلاعات کاربر نیومد"); }
+  }
+  const AUA = {
+    credit: ["➕ افزایش موجودی", (v) => `${toman(v)} به کیف پولش اضافه بشه؟ به خودش هم پیام «شارژ دستی» می‌ره.`],
+    debit: ["➖ کسر موجودی", (v) => `${toman(v)} از کیف پولش کم بشه؟ (موجودی الان: ${toman(S.auser.balance)})`],
+    discount: ["🏷 درصد تخفیف", (v) => `تخفیفش از ${num(S.auser.discount)}٪ بشه ${num(v)}٪؟ روی خرید و تمدیدهای بعدیش اعمال می‌شه.`],
+    message: ["📩 پیام به کاربر", (v) => `این پیام از طرف «پشتیبانی» براش فرستاده بشه؟<div dir="auto" style="white-space:pre-wrap;margin-top:8px;padding:10px;border-radius:12px;background:var(--glass)">${esc(v)}</div>`],
+    block: ["⛔ مسدود کردن", () => "مسدود بشه؟ دیگه نمی‌تونه از ربات و مینی‌اپ استفاده کنه. سرویس‌هاش روی پنل دست نمی‌خورن و وصل می‌مونن."],
+    unblock: ["✅ رفع مسدودی", () => "مسدودیش برداشته بشه؟"]
+  };
+  function auSheet(mode) {
+    const u = S.auser;
+    let h = `<h3 id="sheetTitle" dir="auto">${uname(u)}</h3>`;
+    if (mode === "main") {
+      h += `<div class="sum">
+        <div><span>آیدی</span><span class="num">${u.id}</span></div>
+        ${u.uname ? `<div><span>یوزرنیم</span><span class="num">@${esc(u.uname)}</span></div>` : ""}
+        <div><span>وضعیت</span><span style="color:${u.blocked ? "#ff7b7b" : "var(--ok)"}">${u.blocked ? "⛔ مسدود" : "✅ فعال"}${u.is_admin ? " · 👑 ادمین" : ""}</span></div>
+        <div><span>موجودی</span><span>${toman(u.balance)}</span></div>
+        <div><span>تخفیف</span><span>${num(u.discount)}٪</span></div>
+        <div><span>خریدها</span><span>${num(u.orders_count)} · ${toman(u.orders_sum)}</span></div>
+        <div><span>پرداختی تأییدشده</span><span>${toman(u.paid)}</span></div>
+        <div><span>عضویت / آخرین استفاده</span><span class="num">${fdate(u.joined)} / ${fdate(u.seen)}</span></div>
+      </div>
+      ${u.orders.length ? `<div class="glass sec" style="padding:8px 12px">${u.orders.slice(0, 8).map((o) => `<div class="lrow"><span class="u">${esc(o.username)}</span><span class="d">${o.expire ? fdate(o.expire) : "بدون انقضا"}${o.status !== "active" ? " · درخواست حذف" : ""}</span></div>`).join("")}${u.orders.length > 8 ? `<small style="color:var(--muted)">و ${num(u.orders.length - 8)} سرویس دیگه</small>` : ""}</div>` : '<small style="color:var(--muted)">سرویس فعالی نداره.</small>'}
+      <div class="sacts" style="grid-template-columns:1fr 1fr">
+        <button class="pill" type="button" data-aum="credit" style="justify-content:center">➕ افزایش موجودی</button>
+        <button class="pill ghost" type="button" data-aum="debit" style="justify-content:center">➖ کسر موجودی</button>
+        <button class="pill ghost" type="button" data-aum="discount" style="justify-content:center">🏷 تخفیف</button>
+        <button class="pill ghost" type="button" data-aum="message" style="justify-content:center">📩 پیام</button>
+        ${u.blocked ? '<button class="pill ghost" type="button" data-aum="unblock" style="justify-content:center">✅ رفع مسدودی</button>'
+          : u.is_admin ? "" : '<button class="pill ghost" type="button" data-aum="block" style="justify-content:center;color:#ff7b7b">⛔ مسدود کردن</button>'}
+      </div>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
+    } else if (mode === "confirm") {
+      const x = S.aact;
+      h += `<p style="margin:0;line-height:1.9">${AUA[x.action][1](x.value)}</p>
+      <button class="cta" type="button" id="audo">✅ بله، انجام بده</button>
+      <button class="pill ghost" type="button" data-aum="${x.action === "block" || x.action === "unblock" ? "main" : x.action}" style="justify-content:center">برگشت</button>`;
+    } else {
+      const input = mode === "message" ? `<textarea id="auv" rows="5" dir="auto" maxlength="3500">${esc(S.aact && S.aact.action === mode ? S.aact.value : "")}</textarea>`
+        : `<input id="auv" inputmode="numeric" autocomplete="off" placeholder="${mode === "discount" ? "0 تا 100" : "مثلاً 50000"}" value="${mode === "discount" ? u.discount : S.aact && S.aact.action === mode ? S.aact.value : ""}">`;
+      h += `<label class="field" for="auv">${AUA[mode][0]}${mode === "discount" ? " (درصد)" : mode === "message" ? "" : " (تومان)"}${input}</label>
+      ${mode === "credit" || mode === "debit" ? `<div class="amts">${[50000, 100000, 200000, 500000].map((v) => `<button type="button" data-auamt="${v}">${n(v / 1000)}k</button>`).join("")}</div>` : ""}
+      <button class="cta" type="button" data-aunext="${mode}">ادامه</button>
+      <button class="pill ghost" type="button" data-aum="main" style="justify-content:center">برگشت</button>`;
+    }
+    $("sheet").innerHTML = h;
+    $("sheet").scrollTop = 0;
+  }
+  const faDigits = (s) => String(s).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[,،\s]/g, "");
+  function auNext(mode) {
+    const raw = ($("auv") || {}).value || "";
+    if (mode === "message") {
+      if (!raw.trim()) { toast("متن پیام خالیه"); return; }
+      S.aact = { action: mode, value: raw.trim() };
+    } else {
+      const v = faDigits(raw);
+      if (!/^\d+$/.test(v)) { toast("فقط عدد بنویس"); return; }
+      const x = +v;
+      if (mode === "discount" ? x > 100 : x <= 0) { toast(mode === "discount" ? "از ۰ تا ۱۰۰" : "عدد بزرگ‌تر از صفر"); return; }
+      if (mode === "debit" && x > S.auser.balance) { toast("موجودی کاربر کمتر از این مبلغه"); return; }
+      S.aact = { action: mode, value: x };
+    }
+    auSheet("confirm");
+  }
+  async function auDo(btn) {
+    const x = S.aact, body = { id: S.auser.id, action: x.action };
+    if (x.action === "credit" || x.action === "debit") body.amount = x.value;
+    if (x.action === "discount") body.pct = x.value;
+    if (x.action === "message") body.text = x.value;
+    btn.disabled = true; btn.textContent = "در حال انجام…";
+    try {
+      const j = await api("admin/user", { method: "POST", body: JSON.stringify(body) });
+      Object.assign(S.auser, j.user); S.aact = null; S.au = null;
+      toast("✅ انجام شد"); auSheet("main");
+      if (S.tab === "admin" && S.asec === "users") loadUsers();
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "✅ بله، انجام بده";
+      toast({ low_balance: "موجودی کاربر کمتر از این مبلغه", send: "ارسال نشد (احتمالاً ربات رو بلاک کرده)", admin: "ادمین رو نمی‌شه مسدود کرد", amount: "مبلغ درست نیست" }[e.message] || "انجام نشد؛ دوباره امتحان کن");
+    }
+  }
+
+  async function loadPlans() {
+    try { S.aplans = (await api("admin/plans")).plans; if (S.tab === "admin" && S.asec === "plans") render(); } catch (e) { toast("الان نشد تعرفه‌ها رو بگیرم"); }
+  }
+  function openPlan(id) {
+    const p = S.aplans.find((x) => x.id === +id); if (!p) return;
+    S.pedit = { id: p.id, title: p.title, price: p.price, days: p.days, active: p.active };
+    planSheet("edit");
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+  }
+  function planDiff() {
+    const p = S.aplans.find((x) => x.id === S.pedit.id), e = S.pedit, out = [];
+    if (e.title !== p.title) out.push(["عنوان", esc(p.title || "—"), esc(e.title)]);
+    if (e.price !== p.price) out.push(["قیمت", toman(p.price), toman(e.price)]);
+    if (e.days !== p.days) out.push(["مدت", `${num(p.days)} روز`, `${num(e.days)} روز`]);
+    if (e.active !== p.active) out.push(["وضعیت", p.active ? "فعال" : "خاموش", e.active ? "فعال" : "خاموش"]);
+    return out;
+  }
+  function planSheet(mode) {
+    const p = S.aplans.find((x) => x.id === S.pedit.id), e = S.pedit;
+    let h = `<h3 id="sheetTitle">تعرفه‌ی ${esc(planName(p))}</h3><small style="color:var(--muted)">${esc(p.service_name)} · ${p.gb ? `${num(p.gb)} گیگ` : "نامحدود"}${p.users ? ` · ${num(p.users)} کاربره` : ""}</small>`;
+    if (mode === "edit") {
+      h += `<label class="field" for="pt">عنوان<input id="pt" dir="auto" style="direction:rtl" maxlength="80" value="${esc(e.title)}"></label>
+      <label class="field" for="pp">قیمت (تومان)<input id="pp" inputmode="numeric" value="${e.price}"></label>
+      <label class="field" for="pd">مدت (روز)<input id="pd" inputmode="numeric" value="${e.days}"></label>
+      <div class="lrow" style="border:0"><span class="d" style="color:var(--fg)">در فروش باشه</span><button class="sw" type="button" role="switch" aria-checked="${e.active}" data-pact="1" aria-label="فعال بودن پلن"></button></div>
+      <button class="cta" type="button" id="pchk">بررسی تغییرات</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+    } else {
+      const d = planDiff();
+      h += `<div class="glass sec">${d.map(([k, a, b]) => `<div class="lrow"><span class="d">${k}</span><span class="v">${a} ← <b>${b}</b></span></div>`).join("")}</div>
+      <p class="soon" style="text-align:right;margin:0">فقط روی خرید و تمدیدهای بعدی اثر داره؛ سرویس‌های فعلی دست نمی‌خورن. تخفیف شخصی کاربرها روی قیمت جدید حساب می‌شه.</p>
+      <button class="cta" type="button" id="pdo">✅ ثبت تعرفه</button>
+      <button class="pill ghost" type="button" data-pback="1" style="justify-content:center">برگشت</button>`;
+    }
+    $("sheet").innerHTML = h;
+  }
+  function planCheck() {
+    const e = S.pedit, price = faDigits($("pp").value), days = faDigits($("pd").value), title = $("pt").value.trim();
+    if (!/^\d+$/.test(price) || +price <= 0) { toast("قیمت درست نیست"); return; }
+    if (!/^\d+$/.test(days) || +days <= 0 || +days > 3650) { toast("مدت درست نیست"); return; }
+    if (!title) { toast("عنوان خالیه"); return; }
+    Object.assign(e, { price: +price, days: +days, title });
+    if (!planDiff().length) { toast("تغییری ندادی"); return; }
+    planSheet("confirm");
+  }
+  async function planDo(btn) {
+    const e = S.pedit, p = S.aplans.find((x) => x.id === e.id), body = { id: e.id };
+    if (e.title !== p.title) body.title = e.title;
+    if (e.price !== p.price) body.price = e.price;
+    if (e.days !== p.days) body.days = e.days;
+    if (e.active !== p.active) body.active = e.active;
+    btn.disabled = true;
+    try {
+      const j = await api("admin/plan", { method: "POST", body: JSON.stringify(body) });
+      Object.assign(p, j.plan); closeSheet(); render(); toast("✅ تعرفه ثبت شد");
+      S.shop = (await api("plans")).services;
+    } catch (err) { btn.disabled = false; toast("ثبت نشد؛ دوباره امتحان کن"); }
+  }
+
+  async function loadTickets() {
+    try { S.atk = (await api("admin/tickets?s=" + (S.tks || "open"))).tickets; if (S.tab === "admin" && S.asec === "tk") render(); } catch (e) { toast("الان نشد تیکت‌ها رو بگیرم"); }
+  }
+  async function ticketAct(id, action, btn) {
+    const text = ((S.tkr || {})[id] || "").trim();
+    if (action === "reply" && !text) { toast("اول پاسخ رو بنویس"); return; }
+    btn.disabled = true;
+    try {
+      const j = await api("admin/ticket", { method: "POST", body: JSON.stringify({ id: +id, action, text }) });
+      toast(action === "close" ? "🔒 بسته شد" : j.sent ? "✅ پاسخ رفت و تیکت بسته شد" : "تیکت بسته شد ولی پیام به کاربر نرسید (ربات رو بلاک کرده؟)");
+      delete (S.tkr || {})[id]; S.atk = null; S.admin = null; render();
+    } catch (e) { btn.disabled = false; toast(e.message === "closed" ? "این تیکت قبلاً بسته شده" : "انجام نشد؛ دوباره امتحان کن"); S.atk = null; render(); }
+  }
+
+  async function bcPreview(btn) {
+    S.bct = ($("bct").value || "").trim();
+    if (!S.bct) { toast("متن پیام خالیه"); return; }
+    btn.disabled = true;
+    try {
+      const j = await api("admin/broadcast");
+      btn.disabled = false;
+      if (j.running) { toast("یه پیام همگانی هنوز در حال ارساله"); return; }
+      S.bcn = j.count;
+      $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال پیام همگانی</h3>
+        <div class="glass sec" dir="auto" style="white-space:pre-wrap;line-height:1.9">${esc(S.bct)}</div>
+        <p style="margin:0">این پیام برای <b class="num">${n(j.count)}</b> کاربر فرستاده می‌شه و برگشت نداره. گزارش پایانش توی چت ربات میاد.</p>
+        <button class="cta" type="button" id="bcsend">📣 ارسال به ${num(n(j.count))} کاربر</button>
+        <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+      $("sheet").classList.add("open"); $("scrim").classList.add("open");
+    } catch (e) { btn.disabled = false; toast("الان نشد؛ دوباره امتحان کن"); }
+  }
+  async function bcSend(btn) {
+    btn.disabled = true; btn.textContent = "در حال شروع…";
+    try {
+      await api("admin/broadcast", { method: "POST", body: JSON.stringify({ text: S.bct, count: S.bcn }) });
+      S.bct = ""; closeSheet(); render(); toast("📣 ارسال شروع شد");
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "📣 ارسال";
+      toast({ count_changed: "تعداد کاربرها عوض شد؛ دوباره پیش‌نمایش بگیر", running: "یه پیام همگانی هنوز در حال ارساله" }[e.message] || "ارسال نشد؛ دوباره امتحان کن");
+      if (e.message === "count_changed") closeSheet();
+    }
+  }
 
   function render() {
     $("app").innerHTML = V[S.tab]();
@@ -386,11 +637,11 @@
   }
   const imgCache = {};
   async function loadReceiptImages() {
-    document.querySelectorAll("[data-rimg]").forEach(async (img) => {
-      const id = img.dataset.rimg;
+    document.querySelectorAll("[data-rimg],[data-timg]").forEach(async (img) => {
+      const tk = img.dataset.timg, id = tk ? "t" + tk : img.dataset.rimg;
       if (!imgCache[id]) {
         try {
-          const r = await fetch("api/admin/receipt_photo?id=" + id, { headers: { "X-Init-Data": INIT } });
+          const r = await fetch(tk ? "api/admin/ticket_photo?id=" + tk : "api/admin/receipt_photo?id=" + id, { headers: { "X-Init-Data": INIT } });
           if (!r.ok) return;
           imgCache[id] = URL.createObjectURL(await r.blob());
         } catch (e) { return; }
@@ -451,11 +702,35 @@
     }
     if (d.plan) { const svc = S.shop.find((x) => x.service === S.kind); const p = svc && svc.plans.find((x) => x.id === +d.plan); if (p) openBuy(svc, p); return; }
     if (d.q) { S.buy.qty = Math.max(1, Math.min(20, S.buy.qty + +d.q)); updBuy(); return; }
+    if (d.asec) { S.asec = d.asec; if (d.asec === "rc") S.admin = null; if (d.asec === "tk") S.atk = null; if (d.asec === "plans") S.aplans = null; render(); return; }
+    if (d.af) { S.af = d.af; S.au = null; render(); return; }
+    if (d.aumore) { b.disabled = true; loadUsers(true); return; }
+    if (d.au) { openAU(+d.au); return; }
+    if (d.aum) { if (d.aum === "block" || d.aum === "unblock") { S.aact = { action: d.aum }; auSheet("confirm"); } else auSheet(d.aum); return; }
+    if (d.auamt) { const x = $("auv"); if (x) x.value = d.auamt; return; }
+    if (d.aunext) { auNext(d.aunext); return; }
+    if (b.id === "audo") { auDo(b); return; }
+    if (d.ap) { openPlan(d.ap); return; }
+    if (d.pact) { S.pedit.active = !S.pedit.active; b.setAttribute("aria-checked", S.pedit.active); return; }
+    if (b.id === "pchk") { planCheck(); return; }
+    if (d.pback) { planSheet("edit"); return; }
+    if (b.id === "pdo") { planDo(b); return; }
+    if (d.tks) { S.tks = d.tks; S.atk = null; render(); return; }
+    if (d.tkr) { ticketAct(d.tkr, "reply", b); return; }
+    if (d.tkc) { ticketAct(d.tkc, "close", b); return; }
+    if (b.id === "bcgo") { bcPreview(b); return; }
+    if (b.id === "bcsend") { bcSend(b); return; }
     const a = d.act;
     if (a === "close") closeSheet();
     else if (a === "charge") { S.tab = "wallet"; render(); }
     else if (a === "support") support();
     else if (a === "addhome") { if (!tg("web_app_add_to_home_screen")) toast("از داخل تلگرام روی گوشی باز کن"); }
+  });
+  document.addEventListener("input", (e) => {
+    const t = e.target;
+    if (t.id === "aq") { S.aq = t.value; clearTimeout(loadUsers.t); loadUsers.t = setTimeout(() => loadUsers(), 300); return; }
+    if (t.id === "bct") { S.bct = t.value; return; }
+    if (t.dataset && t.dataset.tkt) { (S.tkr = S.tkr || {})[t.dataset.tkt] = t.value; return; }
   });
   document.addEventListener("input", (e) => { if (e.target.id === "hq") { S.hq = e.target.value; const p = e.target.selectionStart; render(); const x = $("hq"); x.focus(); x.setSelectionRange(p, p); return; } if (e.target.id === "cq") { S.cq = e.target.value; const p = e.target.selectionStart; render(); const x = $("cq"); x.focus(); x.setSelectionRange(p, p); return; } if (e.target.id === "q") { S.q = e.target.value; const p = e.target.selectionStart; render(); const x = $("q"); x.focus(); x.setSelectionRange(p, p); } });
   document.addEventListener("change", (e) => { if (e.target.id === "rcpt" && e.target.files[0]) { const l = $("rname"); if (l) l.textContent = "✓ " + e.target.files[0].name; } });
