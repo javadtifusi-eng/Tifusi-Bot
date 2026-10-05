@@ -5671,10 +5671,18 @@ async def start_miniapp(application):
         log.warning("miniapp not started: %s", e)
 
 
+async def stop_miniapp(application):
+    try:
+        import miniapp
+        await miniapp.stop(application)
+    except Exception as e:
+        log.warning("miniapp stop failed: %s", e)
+
+
 def main():
     if not BOT_TOKEN or not ADMIN_ID:
         raise SystemExit("❌ ابتدا BOT_TOKEN و ADMIN_ID را در بالای همین فایل (bot.py) پر کنید.")
-    app = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).post_init(start_miniapp).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).post_init(start_miniapp).post_shutdown(stop_miniapp).build()
     app.add_handler(CommandHandler("start", per_user(start)))
     app.add_handler(CommandHandler("admin", per_user(admin_menu_cmd)))
     app.add_handler(CallbackQueryHandler(per_user(on_callback_admin), pattern=r"^(pb|pbe|pbm|apm|pl|ple):"))
