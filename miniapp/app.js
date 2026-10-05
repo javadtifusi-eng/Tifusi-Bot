@@ -167,11 +167,10 @@
       ${w.receipts.length ? `<div class="glass sec"><div class="sech"><b>رسیدهای اخیر</b></div>${w.receipts.map((r) => `<div class="tx"><span class="ti">${ic("wallet")}</span><div><b>${r.type === "wallet_charge" ? "شارژ کیف پول" : r.type === "purchase" ? "خرید سرویس" : "تمدید"}</b><small class="num">#${r.id}</small></div><span class="am ${(st[r.status] || ["", ""])[1] === "ok" ? "plus" : "minus"}"><span class="num">${n(r.amount)}</span><br><small>${(st[r.status] || [r.status])[0]}</small></span></div>`).join("")}</div>` : ""}`;
     },
     admin: () => {
-      const sec = S.asec || "rc", a = S.admin;
-      const tk = a && a.totals.tickets_open, rc = a && a.pending.length;
-      return `<div class="ptitle"><b>مدیریت</b><small>${{ rc: "فروش و رسیدها", users: "کاربرهای ربات", plans: "قیمت و مدت پلن‌ها", tk: "پیام‌های مشتری‌ها", bc: "پیام به همه‌ی کاربرها" }[sec]}</small></div>
-      <div class="filters" role="tablist">${ASEC.map(([k, l]) => `<button type="button" role="tab" aria-pressed="${k === sec}" data-asec="${k}">${l}${k === "rc" && rc ? ` <span class="num">(${rc})</span>` : k === "tk" && tk ? ` <span class="num">(${tk})</span>` : ""}</button>`).join("")}</div>
-      ${AV[sec]()}`;
+      const sec = S.asec || "rc";
+      if (sec === "rc") return `<div class="ptitle"><b>مدیریت</b><small>فروش و رسیدها</small></div>
+        <button class="cta" type="button" data-asec="menu">⚙️ همه‌ی بخش‌های مدیریت</button>${AV.rc()}`;
+      return `<div class="ptitle"><b>${ATITLE[sec] || "مدیریت"}</b><small>مدیریت</small><button class="iconbtn back" type="button" data-asec="${sec === "menu" ? "rc" : "menu"}" aria-label="برگشت">${ic("back")}</button></div>${AV[sec]()}`;
     },
     help: () => {
       const q = (S.hq || "").toLowerCase();
@@ -254,14 +253,14 @@
     users: () => {
       if (!S.au) loadUsers();
       return `<label class="glass search">${ic("search")}<input id="aq" type="search" placeholder="آیدی، یوزرنیم یا اسم…" value="${esc(S.aq || "")}" aria-label="جستجوی کاربر"></label>
-      <div class="filters">${[["all", "همه"], ["balance", "موجودی‌دار"], ["neg", "موجودی منفی"], ["blocked", "مسدود"]].map(([k, l]) => `<button type="button" aria-pressed="${(S.af || "all") === k}" data-af="${k}">${l}</button>`).join("")}</div>
+      <div class="filters">${[["all", "همه"], ["balance", "موجودی‌دار"], ["ref", "زیرمجموعه‌دار"], ["neg", "موجودی منفی"], ["blocked", "مسدود"]].map(([k, l]) => `<button type="button" aria-pressed="${(S.af || "all") === k}" data-af="${k}">${l}</button>`).join("")}</div>
       <div id="aul" style="display:grid;gap:10px">${usersList()}</div>`;
     },
     plans: () => {
       if (!S.aplans) { loadPlans(); return LOADING; }
       const groups = {};
       S.aplans.forEach((p) => { (groups[p.service_name] = groups[p.service_name] || []).push(p); });
-      return Object.entries(groups).map(([g, ps]) => `<div class="glass sec"><div class="sech"><b>${esc(g)}</b></div>
+      return '<button class="cta" type="button" id="naopen">➕ پلن جدید</button>' + Object.entries(groups).map(([g, ps]) => `<div class="glass sec"><div class="sech"><b>${esc(g)}</b></div>
         ${ps.map((p) => `<button class="lrow arow" type="button" data-ap="${p.id}"><span class="d" style="color:var(--fg)"><span class="dot ${p.active ? "ok" : "bad"}"></span>${esc(planName(p))}</span><span class="v">${toman(p.price)} · <span class="num">${p.days}</span> روز</span></button>`).join("")}</div>`).join("") || '<div class="empty">پلنی تعریف نشده.</div>';
     },
     tk: () => {
@@ -290,7 +289,7 @@
     if (!a) return LOADING;
     return (a.users.map((u) => `<button class="glass cust nmrow" type="button" data-au="${u.id}"><div style="min-width:0;text-align:right"><div class="nm" dir="auto" style="direction:rtl">${uname(u)}</div>
       <div class="mt">${u.blocked ? '<span class="offtag">مسدود</span> · ' : ""}<span class="num">${u.id}</span>${u.uname ? ` · <span class="num">@${esc(u.uname)}</span>` : ""}</div>
-      <div class="mt">${toman(u.balance)} · ${num(u.services)} سرویس${u.discount ? ` · ${num(u.discount)}٪ تخفیف` : ""}</div></div><span style="color:var(--muted)">‹</span></button>`).join("") || '<div class="empty">کاربری پیدا نشد.</div>')
+      <div class="mt">${toman(u.balance)} · ${num(u.services)} سرویس${u.discount ? ` · ${num(u.discount)}٪ تخفیف` : ""}${u.refs ? ` · ${num(u.refs)} زیرمجموعه` : ""}</div></div><span style="color:var(--muted)">‹</span></button>`).join("") || '<div class="empty">کاربری پیدا نشد.</div>')
       + (a.users.length < a.total ? `<button class="pill ghost" type="button" data-aumore="1" style="justify-content:center">بیشتر (${num(a.total - a.users.length)} نفر دیگه)</button>` : "");
   }
   async function loadUsers(more) {
@@ -328,8 +327,11 @@
         <div><span>تخفیف</span><span>${num(u.discount)}٪</span></div>
         <div><span>خریدها</span><span>${num(u.orders_count)} · ${toman(u.orders_sum)}</span></div>
         <div><span>پرداختی تأییدشده</span><span>${toman(u.paid)}</span></div>
+        <div><span>معرف</span><span dir="auto">${u.referrer ? esc(u.referrer) : "—"}</span></div>
+        <div><span>زیرمجموعه‌ها</span><span>${num(u.refs)} نفر</span></div>
         <div><span>عضویت / آخرین استفاده</span><span class="num">${fdate(u.joined)} / ${fdate(u.seen)}</span></div>
       </div>
+      ${u.ref_users.length ? `<div class="glass sec" style="padding:8px 12px"><b style="font-size:.85rem">🤝 زیرمجموعه‌ها</b>${u.ref_users.map((r) => `<button class="lrow arow" type="button" data-au="${r.id}"><span class="d" dir="auto">${esc(r.name || (r.uname ? "@" + r.uname : r.id))}</span><span class="num" style="color:var(--muted)">${r.id}</span></button>`).join("")}</div>` : ""}
       ${u.orders.length ? `<div class="glass sec" style="padding:8px 12px">${u.orders.slice(0, 8).map((o) => `<div class="lrow"><span class="u">${esc(o.username)}</span><span class="d">${o.expire ? fdate(o.expire) : "بدون انقضا"}${o.status !== "active" ? " · درخواست حذف" : ""}</span></div>`).join("")}${u.orders.length > 8 ? `<small style="color:var(--muted)">و ${num(u.orders.length - 8)} سرویس دیگه</small>` : ""}</div>` : '<small style="color:var(--muted)">سرویس فعالی نداره.</small>'}
       <div class="sacts" style="grid-template-columns:1fr 1fr">
         <button class="pill" type="button" data-aum="credit" style="justify-content:center">➕ افزایش موجودی</button>
@@ -390,7 +392,7 @@
   }
 
   async function loadPlans() {
-    try { S.aplans = (await api("admin/plans")).plans; if (S.tab === "admin" && S.asec === "plans") render(); } catch (e) { toast("الان نشد تعرفه‌ها رو بگیرم"); }
+    try { const j = await api("admin/plans"); S.aplans = j.plans; S.aplanServices = j.services; if (S.tab === "admin" && S.asec === "plans") render(); } catch (e) { toast("الان نشد تعرفه‌ها رو بگیرم"); }
   }
   function openPlan(id) {
     const p = S.aplans.find((x) => x.id === +id); if (!p) return;
@@ -415,6 +417,7 @@
       <label class="field" for="pd">مدت (روز)<input id="pd" inputmode="numeric" value="${e.days}"></label>
       <div class="lrow" style="border:0"><span class="d" style="color:var(--fg)">در فروش باشه</span><button class="sw" type="button" role="switch" aria-checked="${e.active}" data-pact="1" aria-label="فعال بودن پلن"></button></div>
       <button class="cta" type="button" id="pchk">بررسی تغییرات</button>
+      <button class="pill ghost" type="button" id="pdelete" style="justify-content:center;color:#ff7b7b">🗑 حذف این پلن</button>
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
     } else {
       const d = planDiff();
@@ -491,6 +494,239 @@
     }
   }
 
+  // ---------- «⚙️ همه‌ی بخش‌ها» ----------
+  const AMENU = [
+    ["users", "users", "کاربران", "جستجو، موجودی، مسدود، تخفیف"],
+    ["refs", "uplus", "زیرمجموعه‌ها", "کاربرهایی که زیرمجموعه دارن"],
+    ["plans", "layers", "تعرفه‌ها", "افزودن، ویرایش و حذف پلن"],
+    ["panels", "shield", "پنل‌ها", "اتصال پنل، ظرفیت، گروه سرویس‌ها"],
+    ["tk", "chat", "تیکت‌ها", "پیام‌های مشتری‌ها"],
+    ["bc", "bell", "پیام همگانی", "پیام به همه"],
+    ["settings", "card", "تنظیمات", "پشتیبانی، ساعت‌ها، تست، بکاپ"],
+    ["admins", "crown", "ادمین‌ها", "کی به مدیریت دسترسی داره"]
+  ];
+  const ATITLE = { rc: "فروش و رسیدها", menu: "همه‌ی بخش‌ها", users: "کاربران", plans: "تعرفه‌ها", panels: "پنل‌ها", tk: "تیکت‌ها", bc: "پیام همگانی", settings: "تنظیمات", admins: "ادمین‌ها" };
+  AV.menu = () => `<div class="amenu">${AMENU.map(([k, i, l, d]) => `<button class="glass tile" type="button" data-asec="${k}">${ic(i)}<b style="font-size:.95rem">${l}</b><small>${d}</small></button>`).join("")}</div>`;
+
+  // پنل‌ها
+  AV.panels = () => {
+    if (!S.apanels) { loadPanels(); return LOADING; }
+    const st = { active: ["ok", "فعال"], inactive: ["bad", "خارج از فروش"], offline: ["warn", "آفلاین"] };
+    return `<button class="cta" type="button" id="padd">➕ اتصال پنل جدید</button>
+    ${S.apanels.map((p) => { const s = st[p.status] || ["bad", p.status]; const pct = p.max_users ? Math.min(100, p.count / p.max_users * 100) : 0;
+      return `<div class="glass sec" style="display:grid;gap:10px">
+        <div class="sech"><b dir="auto"><span class="dot ${s[0]}"></span> ${esc(p.name)}</b><small style="color:var(--muted)">${s[1]}${p.location ? " · " + esc(p.location) : ""}</small></div>
+        <div class="days"><span>کاربر فعال</span><span class="num">${p.count} / ${p.max_users}</span></div><div class="dbar"><i style="width:${pct}%"></i></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${p.services.filter((x) => x.state !== "none").map((x) => `<span class="chip" style="direction:rtl">${x.state === "off" ? "🚫" : "✅"} ${esc(x.name)}${x.state !== "off" ? ` ← ${esc(x.state)}` : ""}</span>`).join("") || '<small style="color:var(--muted)">هیچ سرویسی روی این پنل هاست نداره</small>'}</div>
+        <small style="color:var(--muted)" class="num">${esc(p.url)}${p.checked_at ? " · بررسی " + fdate(p.checked_at) : ""}</small>
+        <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill" type="button" data-ptest="${p.id}" style="justify-content:center">🔄 بررسی اتصال</button><button class="pill ghost" type="button" data-pmap="${p.id}" style="justify-content:center">🧩 گروه سرویس‌ها</button>
+        <button class="pill ghost" type="button" data-pedit="${p.id}" style="justify-content:center">✏️ ویرایش</button><button class="pill ghost" type="button" data-ptog="${p.id}" style="justify-content:center">${p.status === "inactive" ? "▶️ فعال کن" : "⏸ خارج از فروش"}</button></div>
+      </div>`; }).join("") || '<div class="empty">هنوز پنلی وصل نشده.</div>'}`;
+  };
+  async function loadPanels() {
+    try { S.apanels = (await api("admin/panels")).panels; if (S.tab === "admin" && S.asec === "panels") render(); } catch (e) { toast("الان نشد پنل‌ها رو بگیرم"); }
+  }
+  const panelById = (id) => (S.apanels || []).find((p) => p.id === +id);
+  async function panelAct(id, body, btn, okMsg) {
+    if (btn) btn.disabled = true;
+    try {
+      const j = await api("admin/panel", { method: "POST", body: JSON.stringify(Object.assign({ id: +id }, body)) });
+      if (j.deleted) S.apanels = S.apanels.filter((p) => p.id !== +id);
+      else if (j.panel) S.apanels = S.apanels.map((p) => p.id === +id ? j.panel : p);
+      if (body.action === "test") toast(j.ok ? `✅ آنلاین (${j.ms}ms)${j.diff ? " · " + j.diff : ""}` : "❌ آفلاین: " + (j.error || ""));
+      else if (okMsg) toast(okMsg);
+      render(); return j;
+    } catch (e) { if (btn) btn.disabled = false; toast(e.message === "panel" ? "❌ پنل جواب نداد" : "انجام نشد"); return null; }
+  }
+  function openPanelEdit(id) {
+    const p = panelById(id); if (!p) return;
+    $("sheet").innerHTML = `<h3 id="sheetTitle">✏️ ویرایش ${esc(p.name)}</h3>
+      <label class="field">نام<input id="pe_name" dir="auto" style="direction:rtl" value="${esc(p.name)}"></label>
+      <label class="field">آدرس<input id="pe_url" value="${esc(p.url)}"></label>
+      <label class="field">یوزرنیم<input id="pe_username" value="${esc(p.username)}"></label>
+      <label class="field">پسورد یا کلید API (خالی = بدون تغییر)<input id="pe_password" type="password" autocomplete="off"></label>
+      <label class="field">موقعیت<input id="pe_location" dir="auto" style="direction:rtl" value="${esc(p.location)}"></label>
+      <label class="field">سقف کاربر<input id="pe_max_users" inputmode="numeric" value="${p.max_users}"></label>
+      <button class="cta" type="button" data-pesave="${p.id}">ذخیره</button>
+      <button class="pill ghost" type="button" data-pdel="${p.id}" style="justify-content:center;color:#ff7b7b">🗑 حذف پنل</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+  }
+  async function savePanelEdit(id, btn) {
+    const body = { action: "edit" };
+    ["name", "url", "username", "password", "location", "max_users"].forEach((k) => { const v = ($("pe_" + k).value || "").trim(); if (v) body[k] = k === "max_users" ? faDigits(v) : v; });
+    const j = await panelAct(id, body, btn, "✅ ذخیره شد");
+    if (j) closeSheet();
+  }
+  function confirmPanelDelete(id) {
+    const p = panelById(id);
+    $("sheet").innerHTML = `<h3 id="sheetTitle">🗑 حذف پنل ${esc(p.name)}؟</h3>
+      <p style="margin:0;line-height:1.9">سرویس‌های قبلی مشتری‌ها روی سرور دست نمی‌خورن و وصل می‌مونن، ولی دیگه از ربات و مینی‌اپ مدیریت نمی‌شن (تمدید، مصرف، روشن و خاموش).</p>
+      <button class="cta" type="button" data-pdelyes="${id}" style="background:linear-gradient(180deg,#ff7b7b,#d63a3a);color:#fff">بله، حذف کن</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+  }
+  // انتخاب گروه سرویس‌ها: هم برای پنل موجود و هم برای پنل جدید
+  function mapSheet(title, services, groups, current, saveId) {
+    S.pmap = { services, groups, map: Object.assign({}, current || {}), saveId };
+    $("sheet").innerHTML = `<h3 id="sheetTitle">🧩 ${esc(title)}</h3>
+      <p class="soon" style="text-align:right;margin:0">هر سرویس روی کدوم گروه پنل فروخته بشه؟ سروری که توی هیچ گروهی نیست برای همه‌ست.</p>
+      ${services.map((s) => `<label class="field">${esc(s.name)}<select data-pmsel="${s.key}" style="font:inherit;padding:12px;border-radius:14px;border:1px solid var(--edge);background:var(--glass);color:var(--fg)">
+        ${groups.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join("")}<option value="x">🚫 روی این پنل فروخته نشه</option></select></label>`).join("") || '<div class="empty">روی این پنل هنوز هاستی تعریف نشده.</div>'}
+      <button class="cta" type="button" id="pmsave">${saveId === "new" ? "ادامه" : "ذخیره"}</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+    services.forEach((s) => { const el = document.querySelector(`[data-pmsel="${s.key}"]`); const cur = S.pmap.map[s.key]; el.value = cur === null ? "x" : cur ? String(cur.id) : String((groups[0] || {}).id); });
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+  }
+  function readMap() {
+    const m = {};
+    S.pmap.services.forEach((s) => { const v = document.querySelector(`[data-pmsel="${s.key}"]`).value; const g = S.pmap.groups.find((x) => String(x.id) === v); m[s.key] = v === "x" || !g ? null : { id: g.id, name: g.name }; });
+    return m;
+  }
+  async function openPanelMap(id, btn) {
+    const p = panelById(id); btn.disabled = true;
+    try {
+      const j = await api("admin/panel", { method: "POST", body: JSON.stringify({ id: +id, action: "groups" }) });
+      btn.disabled = false;
+      const cur = {}; j.panel.services.forEach((s) => { if (s.state === "off") cur[s.key] = null; else if (s.state !== "none") { const g = j.groups.find((x) => x.name === s.state); if (g) cur[s.key] = g; } });
+      mapSheet("گروه سرویس‌های " + p.name, j.services, j.groups, cur, id);
+    } catch (e) { btn.disabled = false; toast("❌ پنل جواب نداد"); }
+  }
+  function openPanelAdd() {
+    S.padd = S.padd || {};
+    const v = (k) => esc(S.padd[k] || "");
+    $("sheet").innerHTML = `<h3 id="sheetTitle">➕ اتصال پنل جدید</h3>
+      <label class="field">نام (مثلاً سرور آلمان ۱)<input id="pa_name" dir="auto" style="direction:rtl" value="${v("name")}"></label>
+      <label class="field">آدرس پنل<input id="pa_url" placeholder="https://panel.example.com" value="${v("url")}"></label>
+      <label class="field">یوزرنیم ادمین پنل<input id="pa_username" autocomplete="off" value="${v("username")}"></label>
+      <label class="field">پسورد یا کلید API (tifusi_…)<input id="pa_password" type="password" autocomplete="off" value="${v("password")}"></label>
+      <label class="field">موقعیت (مثلاً 🇩🇪 آلمان)<input id="pa_location" dir="auto" style="direction:rtl" value="${v("location")}"></label>
+      <label class="field">سقف کاربر (خالی = پیش‌فرض)<input id="pa_max_users" inputmode="numeric" value="${v("max_users")}"></label>
+      <button class="cta" type="button" id="patest">🔄 تست اتصال</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+  }
+  async function panelAddTest(btn) {
+    ["name", "url", "username", "password", "location", "max_users"].forEach((k) => { S.padd[k] = ($("pa_" + k).value || "").trim(); });
+    if (!S.padd.name || !/^https?:\/\//.test(S.padd.url) || !S.padd.username || !S.padd.password) { toast("نام، آدرس (با https://)، یوزرنیم و پسورد لازمه"); return; }
+    btn.disabled = true; btn.textContent = "در حال تست…";
+    try {
+      const j = await api("admin/panel_add", { method: "POST", body: JSON.stringify(S.padd) });
+      toast("✅ اتصال موفق" + (j.insecure ? " (گواهی SSL معتبر نیست)" : ""));
+      mapSheet("گروه سرویس‌های " + S.padd.name, j.services, j.groups, {}, "new");
+    } catch (e) { btn.disabled = false; btn.textContent = "🔄 تست اتصال"; toast(e.message === "panel" ? "❌ اتصال نشد؛ آدرس یا یوزر و پسورد رو چک کن" : "اطلاعات ناقصه"); }
+  }
+  async function mapSave(btn) {
+    const map = readMap();
+    if (S.pmap.saveId === "new") {
+      $("sheet").innerHTML = `<h3 id="sheetTitle">ثبت پنل ${esc(S.padd.name)}؟</h3>
+        <div class="sum"><div><span>آدرس</span><span class="num">${esc(S.padd.url)}</span></div><div><span>سقف کاربر</span><span class="num">${esc(S.padd.max_users || "پیش‌فرض")}</span></div></div>
+        ${S.pmap.services.map((s) => `<div class="lrow"><span class="d">${esc(s.name)}</span><span class="v">${map[s.key] ? esc(map[s.key].name) : "🚫 فروخته نمی‌شه"}</span></div>`).join("")}
+        <p class="soon" style="text-align:right;margin:0">از این به بعد خریدهای جدید خودکار روی خلوت‌ترین پنل ساخته می‌شن.</p>
+        <button class="cta" type="button" id="paddsave">✅ ثبت پنل</button>
+        <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+      S.pmap.final = map; return;
+    }
+    const j = await panelAct(S.pmap.saveId, { action: "map", map }, btn, "✅ گروه سرویس‌ها ذخیره شد");
+    if (j) closeSheet();
+  }
+  async function panelAddSave(btn) {
+    btn.disabled = true;
+    try {
+      const j = await api("admin/panel_add", { method: "POST", body: JSON.stringify(Object.assign({ step: "save", map: S.pmap.final }, S.padd)) });
+      S.apanels = (S.apanels || []).concat([j.panel]); S.padd = null; closeSheet(); render(); toast("✅ پنل وصل شد");
+    } catch (e) { btn.disabled = false; toast("ثبت نشد؛ دوباره امتحان کن"); }
+  }
+
+  // تنظیمات
+  AV.settings = () => {
+    if (!S.aset) { loadSettings(); return LOADING; }
+    return `<div class="glass sec">${S.aset.toggles.map((t) => `<div class="lrow"><span class="d" style="color:var(--fg)">${esc(t.label)}</span><button class="sw" type="button" role="switch" aria-checked="${t.on}" data-stog="${t.key}" aria-label="${esc(t.label)}"></button></div>`).join("")}</div>
+    <div class="glass sec">${S.aset.items.map((x) => `<button class="lrow arow" type="button" data-sedit="${x.key}"><span class="d" style="color:var(--fg)">${esc(x.label)}</span><span class="v" dir="auto" style="max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${esc(x.value) || "—"}</span></button>`).join("")}</div>
+    <button class="cta" type="button" id="bkp">💾 بکاپ همین الان</button>`;
+  };
+  async function loadSettings() {
+    try { S.aset = await api("admin/settings"); if (S.tab === "admin" && S.asec === "settings") render(); } catch (e) { toast("الان نشد تنظیمات رو بگیرم"); }
+  }
+  async function saveSetting(key, value, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      const j = await api("admin/settings", { method: "POST", body: JSON.stringify({ key, value }) });
+      const it = S.aset.items.find((x) => x.key === key); if (it) it.value = j.value;
+      const tg2 = S.aset.toggles.find((x) => x.key === key); if (tg2) tg2.on = j.value === "1";
+      closeSheet(); render(); toast("✅ ذخیره شد");
+    } catch (e) { if (btn) btn.disabled = false; toast({ time: "ساعت رو مثل 06:30 بنویس", number: "یه عدد بزرگ‌تر از صفر" }[e.message] || "ذخیره نشد"); }
+  }
+  function openSetting(key) {
+    const x = S.aset.items.find((i) => i.key === key); if (!x) return;
+    const long = key === "faq_text";
+    $("sheet").innerHTML = `<h3 id="sheetTitle">${esc(x.label)}</h3>
+      <label class="field">مقدار جدید${long ? `<textarea id="sv" rows="7" dir="auto">${esc(x.value)}</textarea>` : `<input id="sv" dir="auto" value="${esc(x.value)}">`}</label>
+      <button class="cta" type="button" data-ssave="${key}">ذخیره</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+  }
+
+  // ادمین‌ها
+  AV.admins = () => {
+    if (!S.aadm) { loadAdmins(); return LOADING; }
+    const a = S.aadm, row = (x, main) => `<div class="lrow"><span class="d" style="color:var(--fg)">${main ? "👑" : "👤"} <span dir="auto">${esc(x.name || (x.uname ? "@" + x.uname : ""))}</span> <span class="num">${x.id}</span></span>${!main && a.can_edit ? `<button class="pill ghost" type="button" data-admdel="${x.id}">حذف</button>` : ""}</div>`;
+    return `<div class="glass sec">${row(a.main, true)}${a.admins.map((x) => row(x, false)).join("")}</div>
+    ${a.can_edit ? `<div class="glass sec" style="display:grid;gap:10px"><label class="field">آیدی عددی ادمین جدید<input id="admid" inputmode="numeric"></label><button class="pill" type="button" id="admadd" style="justify-content:center">➕ افزودن ادمین</button></div>`
+      : '<p class="soon">افزودن و حذف ادمین فقط با ادمین اصلی (👑) است، مثل ربات.</p>'}`;
+  };
+  async function loadAdmins() {
+    try { S.aadm = await api("admin/admins"); if (S.tab === "admin" && S.asec === "admins") render(); } catch (e) { toast("الان نشد لیست ادمین‌ها رو بگیرم"); }
+  }
+  async function adminsAct(action, id) {
+    try { S.aadm = await api("admin/admins", { method: "POST", body: JSON.stringify({ action, id: +id }) }); render(); toast("✅ انجام شد"); }
+    catch (e) { toast(e.message === "blocked" ? "فقط ادمین اصلی" : "انجام نشد"); }
+  }
+
+  // افزودن و حذف پلن
+  function openPlanAdd() {
+    const svcs = S.aplanServices || [];
+    $("sheet").innerHTML = `<h3 id="sheetTitle">➕ پلن جدید</h3>
+      <label class="field">سرویس<select id="na_service" style="font:inherit;padding:12px;border-radius:14px;border:1px solid var(--edge);background:var(--glass);color:var(--fg)">${svcs.map((s) => `<option value="${s.key}">${esc(s.name)}</option>`).join("")}</select></label>
+      <label class="field">عنوان (مثلاً ۳۰ گیگ یک ماهه)<input id="na_title" dir="auto" style="direction:rtl" maxlength="80"></label>
+      <label class="field">حجم به گیگ (۰ = نامحدود)<input id="na_gb" inputmode="numeric"></label>
+      <label class="field">مدت (روز)<input id="na_days" inputmode="numeric" value="30"></label>
+      <label class="field">قیمت (تومان)<input id="na_price" inputmode="numeric"></label>
+      <label class="field">تعداد کاربر همزمان (۰ = بدون محدودیت، حداکثر ۵)<input id="na_users" inputmode="numeric" value="1"></label>
+      <button class="cta" type="button" id="nachk">بررسی</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+    $("sheet").classList.add("open"); $("scrim").classList.add("open");
+  }
+  function planAddCheck() {
+    const g = (k) => faDigits($("na_" + k).value || ""), d = { service: $("na_service").value, title: $("na_title").value.trim(), gb: g("gb"), days: g("days"), price: g("price"), users: g("users") || "0" };
+    if (!d.title || !/^\d+$/.test(d.gb) || !/^\d+$/.test(d.days) || +d.days <= 0 || !/^\d+$/.test(d.price) || +d.price <= 0 || !/^\d+$/.test(d.users) || +d.users > 5) { toast("همه‌ی خونه‌ها رو درست پر کن"); return; }
+    S.newPlan = d;
+    const sname = (S.aplanServices.find((s) => s.key === d.service) || {}).name;
+    $("sheet").innerHTML = `<h3 id="sheetTitle">ثبت این پلن؟</h3>
+      <div class="sum"><div><span>سرویس</span><span>${esc(sname)}</span></div><div><span>عنوان</span><span>${esc(d.title)}</span></div>
+      <div><span>حجم</span><span>${+d.gb ? num(d.gb) + " گیگ" : "نامحدود"}</span></div><div><span>مدت</span><span>${num(d.days)} روز</span></div>
+      <div><span>قیمت</span><span>${toman(+d.price)}</span></div><div><span>کاربر همزمان</span><span>${+d.users ? num(d.users) : "بدون محدودیت"}</span></div></div>
+      <p class="soon" style="text-align:right;margin:0">بعد از ثبت، همین الان توی خرید مشتری‌ها دیده می‌شه.</p>
+      <button class="cta" type="button" id="nado">✅ ثبت پلن</button>
+      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+  }
+  async function planAddDo(btn) {
+    btn.disabled = true;
+    try { const j = await api("admin/plan_add", { method: "POST", body: JSON.stringify(S.newPlan) }); S.aplans = null; closeSheet(); render(); toast("✅ پلن " + j.plan.title + " اضافه شد"); S.shop = (await api("plans")).services; }
+    catch (e) { btn.disabled = false; toast("ثبت نشد"); }
+  }
+  async function planDelete(btn) {
+    if (!btn.dataset.sure) { btn.dataset.sure = "1"; btn.textContent = "مطمئنی؟ دوباره بزن تا حذف بشه"; return; }
+    btn.disabled = true;
+    try { await api("admin/plan_delete", { method: "POST", body: JSON.stringify({ id: S.pedit.id }) }); S.aplans = null; closeSheet(); render(); toast("🗑 پلن حذف شد"); S.shop = (await api("plans")).services; }
+    catch (e) { btn.disabled = false; toast("حذف نشد"); }
+  }
+  async function backupNow(btn) {
+    btn.disabled = true; btn.textContent = "در حال بکاپ…";
+    try { await api("admin/backup", { method: "POST", body: "{}" }); toast("✅ بکاپ رفت توی گروه (تاپیک بکاپ)"); }
+    catch (e) { toast(e.message === "no_target" ? "کانال بکاپ تنظیم نشده" : "بکاپ نشد"); }
+    btn.disabled = false; btn.textContent = "💾 بکاپ همین الان";
+  }
+
   // ---------- 🔔 اعلان‌ها ----------
   const NK = { wallet: "💰", reject: "❌", refund: "↩️", expiry: "⏳", support: "📩", broadcast: "📣", admin_receipt: "🧾", admin: "👑", info: "🔔" };
   async function openNotifs() {
@@ -556,13 +792,15 @@
       setTimeout(() => tg("web_app_close"), 700);
     } catch (e) { toast("الان نشد؛ دوباره امتحان کن"); }
   }
+  // اسم تصادفی از قبل توی کادر: قبل از پرداخت دیده می‌شه (پیشنهاد Claude-۱)
+  const randName = () => "u" + Array.from({ length: 6 }, () => "abcdefghjkmnpqrstuvwxyz23456789"[Math.floor(Math.random() * 31)]).join("");
   function openBuy(svc, p) {
     const ipsec = svc.service !== "xray";
     S.buy = { svc, p, qty: 1 };
     const name = p.gb ? `${num(p.gb)} گیگ` : `نامحدود${p.users ? ` ${num(p.users)} کاربره` : ""}`;
     $("sheet").innerHTML = `<h3 id="sheetTitle">خرید ${esc(svc.label)}</h3>
       <div class="sum"><div><span>پلن</span><span>${name} · ${num(p.days)} روزه</span></div><div><span>قیمت هر اکانت</span><span>${toman(p.price)}</span></div><div><span>موجودی</span><span>${toman(S.me.balance)}</span></div></div>
-      <label class="field" for="bu">یوزرنیم (خالی بذاری خودش می‌سازه)<input id="bu" autocomplete="off" placeholder="ali12" maxlength="20"></label>
+      <label class="field" for="bu">یوزرنیم (یه اسم تصادفی گذاشتیم؛ اگه خواستی عوضش کن)<input id="bu" autocomplete="off" placeholder="ali12" maxlength="20" value="${randName()}"></label>
       ${ipsec ? '<label class="field" for="bp">رمز ۶ رقمی (خالی بذاری خودش می‌سازه)<input id="bp" inputmode="numeric" maxlength="6" placeholder="123456"></label>' : ""}
       <div class="stepper"><button class="pill ghost" type="button" data-q="-1" aria-label="کمتر">−</button><output id="bq"></output><button class="pill ghost" type="button" data-q="1" aria-label="بیشتر">+</button></div>
       <p class="soon" id="bnote" style="margin:0"></p>
@@ -739,7 +977,34 @@
     }
     if (d.plan) { const svc = S.shop.find((x) => x.service === S.kind); const p = svc && svc.plans.find((x) => x.id === +d.plan); if (p) openBuy(svc, p); return; }
     if (d.q) { S.buy.qty = Math.max(1, Math.min(20, S.buy.qty + +d.q)); updBuy(); return; }
-    if (d.asec) { S.asec = d.asec; if (d.asec === "rc") S.admin = null; if (d.asec === "tk") S.atk = null; if (d.asec === "plans") S.aplans = null; render(); return; }
+    if (d.asec) {
+      let k = d.asec;
+      if (k === "refs") { k = "users"; S.af = "ref"; S.au = null; } else if (k === "users") { S.af = "all"; S.au = null; }
+      S.asec = k; if (k === "rc") S.admin = null; if (k === "tk") S.atk = null; if (k === "plans") S.aplans = null;
+      if (k === "panels") S.apanels = null; if (k === "settings") S.aset = null; if (k === "admins") S.aadm = null;
+      render(); scrollTo(0, 0); return;
+    }
+    if (b.id === "padd") { openPanelAdd(); return; }
+    if (b.id === "patest") { panelAddTest(b); return; }
+    if (b.id === "pmsave") { mapSave(b); return; }
+    if (b.id === "paddsave") { panelAddSave(b); return; }
+    if (d.ptest) { b.textContent = "در حال بررسی…"; panelAct(d.ptest, { action: "test" }, b); return; }
+    if (d.ptog) { panelAct(d.ptog, { action: "toggle" }, b, "✅ انجام شد"); return; }
+    if (d.pedit) { openPanelEdit(d.pedit); return; }
+    if (d.pesave) { savePanelEdit(d.pesave, b); return; }
+    if (d.pdel) { confirmPanelDelete(d.pdel); return; }
+    if (d.pdelyes) { panelAct(d.pdelyes, { action: "delete" }, b, "🗑 پنل حذف شد").then((j) => { if (j) closeSheet(); }); return; }
+    if (d.pmap) { openPanelMap(d.pmap, b); return; }
+    if (d.stog) { const t = S.aset.toggles.find((x) => x.key === d.stog); saveSetting(d.stog, t.on ? "0" : "1", b); return; }
+    if (d.sedit) { openSetting(d.sedit); return; }
+    if (d.ssave) { saveSetting(d.ssave, $("sv").value, b); return; }
+    if (b.id === "bkp") { backupNow(b); return; }
+    if (b.id === "admadd") { const v = faDigits($("admid").value || ""); if (/^\d+$/.test(v)) adminsAct("add", v); else toast("آیدی عددی بنویس"); return; }
+    if (d.admdel) { adminsAct("del", d.admdel); return; }
+    if (b.id === "naopen") { openPlanAdd(); return; }
+    if (b.id === "nachk") { planAddCheck(); return; }
+    if (b.id === "nado") { planAddDo(b); return; }
+    if (b.id === "pdelete") { planDelete(b); return; }
     if (d.af) { S.af = d.af; S.au = null; render(); return; }
     if (d.aumore) { b.disabled = true; loadUsers(true); return; }
     if (d.au) { openAU(+d.au); return; }

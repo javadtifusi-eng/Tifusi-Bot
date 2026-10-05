@@ -556,11 +556,13 @@ def _user_row(u, svc=0):
     return {"id": u["id"], "name": (u["full_name"] or "").strip(), "uname": u["username"] or "",
             "balance": int(u["balance"] or 0), "blocked": bool(u["is_blocked"]),
             "discount": int(u["discount_pct"] or 0), "services": svc,
-            "joined": u["created_at"] or None, "seen": u["last_seen"] or None}
+            "joined": u["created_at"] or None, "seen": u["last_seen"] or None,
+            "refs": ns["db"].referral_count(u["id"])}
 
 
 ADMIN_USER_FILTERS = {"all": "", "balance": " AND u.balance > 0", "neg": " AND u.balance < 0",
-                      "blocked": " AND COALESCE(u.is_blocked,0)=1"}
+                      "blocked": " AND COALESCE(u.is_blocked,0)=1",
+                      "ref": " AND u.id IN (SELECT referred_by FROM users WHERE referred_by IS NOT NULL)"}
 
 
 async def api_admin_users(request):
@@ -594,6 +596,9 @@ async def api_admin_user(request):
     row = _user_row(u, len(orders))
     row.update({"paid": paid, "orders_count": bought["c"], "orders_sum": bought["s"],
                 "is_admin": bool(ns["is_admin"](u["id"])),
+                "referrer": ns["who"](u["referred_by"]) if u["referred_by"] else None,
+                "ref_users": [{"id": r["id"], "name": (r["full_name"] or "").strip(), "uname": r["username"] or ""}
+                              for r in db.q("SELECT * FROM users WHERE referred_by=? ORDER BY id DESC LIMIT 30", (u["id"],))],
                 "orders": [{"id": o["id"], "username": o["username"], "service": ns["service_name"](o["protocol"]),
                             "expire": o["expire_at"] or None, "gb": o["volume_gb"], "status": o["status"]} for o in orders]})
     return web.json_response(row)
@@ -666,7 +671,8 @@ async def api_admin_plans(request):
     if not _admin_only(request):
         return _err("forbidden", 403)
     plans = sorted(ns["db"].get_plans(), key=lambda p: (p["service"] or "", p["volume_gb"] == 0, p["volume_gb"], p["user_limit"] or 0, p["price"]))
-    return web.json_response({"plans": [_plan_json(p) for p in plans]})
+    return web.json_response({"plans": [_plan_json(p) for p in plans],
+                              "services": [{"key": k, "name": v} for k, v in ns["SERVICES"].items()]})
 
 
 async def api_admin_plan(request):
@@ -803,6 +809,268 @@ async def api_admin_broadcast(request):
     return web.json_response({"ok": True, "count": count})
 
 
+# ---------- «⚙️ همه‌ی بخش‌ها»: پنل‌ها، افزودن/حذف پلن، تنظیمات، ادمین‌ها، بکاپ ----------
+# همان قانون‌های منوی /admin ربات (admin_panels، refresh_panel، ap_*، pbm/apm، set_value، adm، send_backup).
+def _panel_json(p):
+    svc_rows = ns["db"].get_service_rows(p["id"])
+    services = []
+    for key, name in ns["SERVICES"].items():
+        on_panel = ns["service_protocols_on"](p, key)
+        r = svc_rows.get(key)
+        if not on_panel:
+            st = "none"
+        elif r and r["enabled"]:
+            st = r["remark"] or "-"
+        elif r:
+            st = "off"
+        else:
+            st = "سرورهای عمومی"
+        services.append({"key": key, "name": name, "state": st})
+    return {"id": p["id"], "name": p["name"], "url": p["url"], "username": p["username"], "location": p["location"] or "",
+            "status": p["status"], "max_users": p["max_users"], "count": ns["db"].count_panel_active_orders(p["id"]),
+            "protocols": ns["panel_protocols"](p), "services": services, "checked_at": p["checked_at"] or None,
+            "tls_insecure": bool(p["tls_insecure"])}
+
+
+async def api_admin_panels(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    return web.json_response({"panels": [_panel_json(p) for p in ns["db"].get_panels()]})
+
+
+PANEL_FIELDS = ("name", "url", "username", "password", "location", "max_users")
+
+
+async def api_admin_panel(request):
+    """{id, action: test|toggle|edit|delete|groups|map, ...}"""
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db = ns["db"]
+    b = await _body(request)
+    p = db.get_panel(_int(b.get("id")))
+    if not p:
+        return _err("not_found", 404)
+    action = b.get("action")
+    if action == "test":
+        t0 = time.time()
+        try:
+            before, after = await asyncio.to_thread(ns["refresh_panel"], p)
+        except Exception as e:
+            if p["status"] == "active":
+                db.update_panel(p["id"], status="offline")
+            return web.json_response({"ok": False, "error": str(e)[:300], "panel": _panel_json(db.get_panel(p["id"]))})
+        if p["status"] == "offline":
+            db.update_panel(p["id"], status="active")
+        return web.json_response({"ok": True, "ms": int((time.time() - t0) * 1000),
+                                  "diff": ns["protocols_diff_text"](before, after), "panel": _panel_json(db.get_panel(p["id"]))})
+    if action == "toggle":
+        new = "inactive" if p["status"] == "active" else "active"
+        db.update_panel(p["id"], status=new)
+        _admin_log(request, f"🖥 پنل «{p['name']}» {'از فروش خارج شد' if new == 'inactive' else 'دوباره فعال شد'}")
+    elif action == "edit":
+        fields = {}
+        for k in PANEL_FIELDS:
+            if k not in b or b[k] in (None, ""):
+                continue
+            v = str(b[k]).strip()
+            if k == "max_users":
+                v = _int(v, 0)
+                if v <= 0:
+                    return _err("max_users")
+            elif k == "url":
+                if not v.startswith("http"):
+                    return _err("url")
+                v = v.rstrip("/")
+            fields[k] = v
+        if fields:
+            db.update_panel(p["id"], **fields)
+            _admin_log(request, f"🖥 پنل «{p['name']}» ویرایش شد: {'، '.join(k for k in fields if k != 'password') or 'پسورد'}"
+                                + ("، پسورد" if "password" in fields and len(fields) > 1 else ""))
+    elif action == "delete":
+        db.delete_panel(p["id"])
+        _admin_log(request, f"🗑 پنل «{p['name']}» حذف شد")
+        return web.json_response({"ok": True, "deleted": True})
+    elif action == "groups":
+        # برای انتخاب دوباره‌ی گروه سرویس‌ها: پروتکل‌ها و گروه‌ها تازه از خود پنل
+        try:
+            await asyncio.to_thread(ns["refresh_panel"], p)
+            groups = await asyncio.to_thread(ns["panel_client"](p).list_groups)
+        except Exception as e:
+            return _err("panel", 502, detail=str(e)[:300])
+        p = db.get_panel(p["id"])
+        return web.json_response({"ok": True, "groups": groups,
+                                  "services": [{"key": k, "name": ns["SERVICES"][k]} for k in ns["mappable_services"](ns["panel_protocols"](p))],
+                                  "panel": _panel_json(p)})
+    elif action == "map":
+        mapping = _clean_map(b.get("map"))
+        if mapping is None:
+            return _err("map")
+        db.set_service_map(p["id"], mapping)
+        _admin_log(request, f"🧩 گروه سرویس‌های پنل «{p['name']}» عوض شد")
+    else:
+        return _err("action")
+    return web.json_response({"ok": True, "panel": _panel_json(db.get_panel(p["id"]))})
+
+
+def _clean_map(raw):
+    """{سرویس: {"id", "name"} یا null} از مینی‌اپ ← همان شکل set_service_map؛ None اگر خراب بود."""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for k, g in raw.items():
+        if k not in ns["SERVICES"]:
+            return None
+        if g is None:
+            out[k] = None
+        elif isinstance(g, dict) and "id" in g:
+            out[k] = {"id": _int(g.get("id")), "name": str(g.get("name") or "")[:80]}
+        else:
+            return None
+    return out
+
+
+async def api_admin_panel_add(request):
+    """دو مرحله مثل جادوی ap_* ربات. step=test: اتصال و خواندن پروتکل‌ها و گروه‌ها.
+    step=save: ثبت پنل با گروه سرویس‌ها، موقعیت و سقف کاربر."""
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    b = await _body(request)
+    d = {k: str(b.get(k) or "").strip() for k in ("name", "url", "username", "password", "location")}
+    if not d["name"] or not d["url"].startswith("http") or not d["username"] or not d["password"]:
+        return _err("fields")
+    d["url"] = d["url"].rstrip("/")
+    try:
+        client = ns["TifusiPanelAPI"](d["url"], d["username"], d["password"])
+        await asyncio.to_thread(client.login)
+        protocols = await asyncio.to_thread(client.list_protocols)
+        groups = await asyncio.to_thread(client.list_groups)
+    except Exception as e:
+        return _err("panel", 502, detail=str(e)[:300])
+    if b.get("step") != "save":
+        return web.json_response({"ok": True, "protocols": protocols, "groups": groups, "insecure": bool(client.insecure),
+                                  "services": [{"key": k, "name": ns["SERVICES"][k]} for k in ns["mappable_services"](protocols)]})
+    mapping = _clean_map(b.get("map") or {})
+    if mapping is None:
+        return _err("map")
+    max_users = _int(b.get("max_users"), 0) or ns["DEFAULT_PANEL_MAX_USERS"]
+    draft = dict(d, max_users=max_users, status="active", protocols=protocols, tls_insecure=client.insecure)
+    pid = ns["db"].add_panel(draft)
+    ns["db"].set_service_map(pid, mapping)
+    _admin_log(request, f"➕ پنل جدید «{d['name']}» اضافه شد ({d['location'] or '—'}، سقف {max_users})")
+    return web.json_response({"ok": True, "panel": _panel_json(ns["db"].get_panel(pid))})
+
+
+async def api_admin_plan_add(request):
+    """{service, title, gb, days, price, users} — مثل plan_add_* ربات."""
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    b = await _body(request)
+    service = b.get("service") or ""
+    if service not in ns["SERVICES"]:
+        return _err("service")
+    title = (b.get("title") or "").strip()
+    gb, days, price, users = _int(b.get("gb"), -1), _int(b.get("days"), -1), _int(b.get("price"), -1), _int(b.get("users"), 0)
+    if not title or len(title) > 80 or gb < 0 or not 0 < days <= 3650 or not 0 < price <= 100_000_000 or not 0 <= users <= 5:
+        return _err("fields")
+    pid = ns["db"].add_plan(gb, days, price, title, users, service)
+    _admin_log(request, f"➕ پلن جدید #{pid}: {ns['SERVICES'][service]} — {title} — {ns['fmt'](price)} تومان — {days} روز")
+    return web.json_response({"ok": True, "plan": _plan_json(ns["db"].get_plan(pid))})
+
+
+async def api_admin_plan_delete(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    b = await _body(request)
+    p = ns["db"].get_plan(_int(b.get("id")))
+    if not p:
+        return _err("not_found", 404)
+    ns["db"].delete_plan(p["id"])
+    _admin_log(request, f"🗑 پلن #{p['id']} ({p['title'] or ''}) حذف شد")
+    return web.json_response({"ok": True})
+
+
+# تنظیماتی که از مینی‌اپ عوض می‌شوند؛ همان SETTING_KEYS ربات به‌علاوه‌ی چند کلید روشن/خاموش
+SETTING_TOGGLES = [("test_enabled", "🎁 اکانت تست"), ("backup_auto", "💾 بکاپ خودکار روزانه")]
+SETTING_EXTRA = [("support_username", "💬 یوزرنیم پشتیبانی (دایرکت)")]
+
+
+async def api_admin_settings(request):
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db = ns["db"]
+    keys = ns["SETTING_KEYS"] + SETTING_EXTRA
+    if request.method == "GET":
+        return web.json_response({
+            "items": [{"key": k, "label": l, "value": db.setting(k, "")} for k, l in keys],
+            "toggles": [{"key": k, "label": l, "on": db.setting(k, "1" if k == "backup_auto" else "0") == "1"}
+                        for k, l in SETTING_TOGGLES]})
+    b = await _body(request)
+    key, value = b.get("key"), str(b.get("value") if b.get("value") is not None else "").strip()
+    labels = dict(keys + SETTING_TOGGLES)
+    if key not in labels:
+        return _err("key")
+    if key in dict(SETTING_TOGGLES):
+        value = "1" if value in ("1", "true", "True") else "0"
+    elif key in ("test_volume_gb", "test_days"):
+        if _int(value, 0) <= 0:
+            return _err("number")
+        value = str(_int(value))
+    elif key in ns["DAILY_TIMES"]:
+        value = ns["parse_hhmm"](value)
+        if not value:
+            return _err("time")
+    db.set_setting(key, value)
+    if key in ns["DAILY_TIMES"]:
+        ns["schedule_daily_jobs"](request.app["tg_app"].job_queue)
+    shown = "روشن" if value == "1" and key in dict(SETTING_TOGGLES) else "خاموش" if key in dict(SETTING_TOGGLES) else value[:80]
+    _admin_log(request, f"⚙️ تنظیم «{labels[key]}» شد: {shown}")
+    return web.json_response({"ok": True, "value": value})
+
+
+async def api_admin_admins(request):
+    """GET: لیست. POST {action: add|del, id}: فقط ادمین اصلی (ADMIN_ID)، مثل دکمه‌های adm ربات."""
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db = ns["db"]
+    main = ns["ADMIN_ID"]
+    if request.method == "POST":
+        if request["uid"] != main:
+            return _err("main_only", 403)
+        b = await _body(request)
+        aid = _int(b.get("id"))
+        ads = ns["get_admins"]()
+        if b.get("action") == "add" and aid > 0 and aid != main and aid not in ads:
+            ads.append(aid)
+        elif b.get("action") == "del" and aid in ads:
+            ads.remove(aid)
+        else:
+            return _err("action")
+        db.set_setting("admins", json.dumps(ads))
+        _admin_log(request, f"👑 ادمین {'اضافه' if b.get('action') == 'add' else 'حذف'} شد: {ns['who'](aid)}")
+
+    def row(a):
+        u = db.get_user(a)
+        return {"id": a, "name": (u["full_name"] or "") if u else "", "uname": (u["username"] or "") if u else ""}
+    return web.json_response({"main": row(main), "admins": [row(a) for a in ns["get_admins"]()],
+                              "can_edit": request["uid"] == main})
+
+
+async def api_admin_backup(request):
+    """بکاپ همین الان، به همان جای بکاپ روزانه (کانال/گروه بکاپ، تاپیک بکاپ)."""
+    if not _admin_only(request):
+        return _err("forbidden", 403)
+    db, bot = ns["db"], request.app["tg_app"].bot
+    target = ns["_chat_target"](db.setting("backup_chat_id"))
+    if target is None:
+        return _err("no_target")
+    try:
+        ok = await ns["send_backup"](bot, target, "💾 بکاپ دستی از مینی‌اپ", thread_id=ns["group_thread"]("backup"))
+    except Exception as e:
+        return _err("send", 502, detail=str(e)[:200])
+    _admin_log(request, "💾 بکاپ دستی گرفته شد")
+    return web.json_response({"ok": bool(ok)})
+
+
 # ---------- اکانت تست داخل مینی‌اپ ----------
 async def api_test(request):
     """همان قانون send_test_account ربات (روشن بودن، سهمیه‌ی هر کاربر، اولین سرویس در دسترس)،
@@ -937,6 +1205,16 @@ async def start(application, bot_globals):
     app.router.add_post("/api/admin/ticket", api_admin_ticket)
     app.router.add_get("/api/admin/broadcast", api_admin_broadcast)
     app.router.add_post("/api/admin/broadcast", api_admin_broadcast)
+    app.router.add_get("/api/admin/panels", api_admin_panels)
+    app.router.add_post("/api/admin/panel", api_admin_panel)
+    app.router.add_post("/api/admin/panel_add", api_admin_panel_add)
+    app.router.add_post("/api/admin/plan_add", api_admin_plan_add)
+    app.router.add_post("/api/admin/plan_delete", api_admin_plan_delete)
+    app.router.add_get("/api/admin/settings", api_admin_settings)
+    app.router.add_post("/api/admin/settings", api_admin_settings)
+    app.router.add_get("/api/admin/admins", api_admin_admins)
+    app.router.add_post("/api/admin/admins", api_admin_admins)
+    app.router.add_post("/api/admin/backup", api_admin_backup)
     app["tg_app"] = application
     if (STATIC_DIR / "assets").is_dir():
         app.router.add_static("/assets/", STATIC_DIR / "assets", append_version=False)
