@@ -143,8 +143,7 @@
       <div class="h2"><b>پلن‌های ${esc(svc.label)}</b></div>
       <div class="plans">${svc.plans.map((p) => `<button class="glass plan" type="button" data-plan="${p.id}">${ic(p.gb ? "bolt" : "inf")}
         <span class="gb">${p.gb ? `${num(p.gb)} <small>گیگ</small>` : "نامحدود"}</span>${p.gb ? "" : `<span class="dy">${p.users ? `${num(p.users)} کاربره` : "بدون محدودیت"}</span>`}
-        <span class="pr">${toman(p.price)}</span><span class="dy">${num(p.days)} روزه</span></button>`).join("")}</div>
-      ${S.me.test_enabled ? '<button class="pill ghost" type="button" data-goto="test" style="justify-content:center">🔑 اکانت تست رایگان</button>' : ""}`;
+        <span class="pr">${toman(p.price)}</span><span class="dy">${num(p.days)} روزه</span></button>`).join("")}</div>`;
     },
     wallet: () => {
       const w = S.wallet;
