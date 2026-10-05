@@ -189,10 +189,18 @@
       <p class="soon">بقیه‌ی بخش‌های مدیریت فعلاً با دستور /admin توی چت ربات.</p>`;
     },
     card: () => {
-      const c = S.customers.find((x) => x.id === S.card) || S.customers[0];
-      if (!c) return '<div class="empty">هنوز سرویسی نداری. از تب «خرید» شروع کن.</div>';
+      if (!S.customers.length) return '<div class="empty">هنوز سرویسی نداری. از تب «خرید» شروع کن.</div>';
+      const c = S.customers.find((x) => x.id === S.card);
+      if (!c) {
+        const q = (S.cq || "").toLowerCase();
+        const list = S.customers.filter((x) => x.username.toLowerCase().includes(q));
+        return `<div class="ptitle"><b>کارت سرویس</b><small>یه سرویس انتخاب کن</small></div>
+        <label class="glass search">${ic("search")}<input id="cq" type="search" placeholder="جستجوی یوزرنیم…" value="${esc(S.cq || "")}" aria-label="جستجو"></label>
+        ${list.map((x) => `<button class="glass cust nmrow" type="button" data-card="${x.id}"><div style="min-width:0;text-align:right"><div class="nm">${esc(x.username)}</div>
+          <div class="mt"><span class="dot ${x.on ? x.state : "bad"}"></span><span>${x.on ? custLine(x) : '<span class="offtag">غیرفعال</span>'}</span></div></div><span style="color:var(--muted)">‹</span></button>`).join("") || '<div class="empty">سرویسی پیدا نشد.</div>'}`;
+      }
       const C = 2 * Math.PI * 50, frac = c.limit ? Math.min(c.used / c.limit, 1) : 1;
-      return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small></div>
+      return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small><button class="iconbtn back" type="button" data-cardlist="1" aria-label="همه‌ی سرویس‌ها">${ic("back")}</button></div>
       <div class="glass svc"><div class="svctop">
         <div class="ring"><svg viewBox="0 0 118 118"><circle cx="59" cy="59" r="50" fill="none" stroke="var(--track)" stroke-width="9"/><circle cx="59" cy="59" r="50" fill="none" stroke="${frac > 0.85 && c.limit ? "#f0a43a" : "var(--cyan)"}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C * frac} ${C}"/></svg>
           <div class="c"><div>${c.limit ? `<b class="num">${gb(Math.max(0, c.limit - c.used))} GB</b><br><small>مونده از ${num(gb(c.limit))} گیگ</small>` : `<b>∞</b><br><small>نامحدود</small>`}</div></div></div>
@@ -387,7 +395,8 @@
 
   document.addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
-    if (d.tab) { S.tab = d.tab; render(); scrollTo(0, 0); return; }
+    if (d.tab) { S.tab = d.tab; if (d.tab === "card") S.card = null; render(); scrollTo(0, 0); return; }
+    if (d.cardlist) { S.card = null; render(); scrollTo(0, 0); return; }
     if (d.go) { S.tab = d.go; render(); scrollTo(0, 0); return; }
     if (d.f) { S.filt = d.f; S.tab = "customers"; render(); return; }
     if (d.kind) { S.kind = d.kind; render(); return; }
@@ -425,7 +434,7 @@
     else if (a === "support") support();
     else if (a === "addhome") { if (!tg("web_app_add_to_home_screen")) toast("از داخل تلگرام روی گوشی باز کن"); }
   });
-  document.addEventListener("input", (e) => { if (e.target.id === "q") { S.q = e.target.value; const p = e.target.selectionStart; render(); const x = $("q"); x.focus(); x.setSelectionRange(p, p); } });
+  document.addEventListener("input", (e) => { if (e.target.id === "cq") { S.cq = e.target.value; const p = e.target.selectionStart; render(); const x = $("cq"); x.focus(); x.setSelectionRange(p, p); return; } if (e.target.id === "q") { S.q = e.target.value; const p = e.target.selectionStart; render(); const x = $("q"); x.focus(); x.setSelectionRange(p, p); } });
   document.addEventListener("change", (e) => { if (e.target.id === "rcpt" && e.target.files[0]) { const l = $("rname"); if (l) l.textContent = "✓ " + e.target.files[0].name; } });
   $("scrim").onclick = closeSheet;
 
