@@ -144,7 +144,7 @@
       <div class="plans">${svc.plans.map((p) => `<button class="glass plan" type="button" data-plan="${p.id}">${ic(p.gb ? "bolt" : "inf")}
         <span class="gb">${p.gb ? `${num(p.gb)} <small>گیگ</small>` : "نامحدود"}</span>${p.gb ? "" : `<span class="dy">${p.users ? `${num(p.users)} کاربره` : "بدون محدودیت"}</span>`}
         <span class="pr">${toman(p.price)}</span><span class="dy">${num(p.days)} روزه</span></button>`).join("")}</div>
-      <button class="pill ghost" type="button" data-goto="test" style="justify-content:center">🔑 اکانت تست رایگان</button>`;
+      ${S.me.test_enabled ? '<button class="pill ghost" type="button" data-goto="test" style="justify-content:center">🔑 اکانت تست رایگان</button>' : ""}`;
     },
     wallet: () => {
       const w = S.wallet;
@@ -226,6 +226,22 @@
       <p class="soon">اطلاعات اتصال رو فقط توی تلگرام یا واتساپ بفرست؛ پیام‌رسان‌های داخلی پیام‌ها رو می‌خونن.</p>
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
+  }
+  function support() {
+    const u = S.me && S.me.support;
+    if (!u) { toast("پشتیبانی هنوز تنظیم نشده"); return; }
+    if (!tg("web_app_open_tg_link", { path_full: "/" + u })) openLink("https://t.me/" + u);
+  }
+  async function testAccount(btn) {
+    btn.disabled = true; btn.textContent = "در حال ساخت…";
+    try {
+      const j = await api("test", { method: "POST", body: "{}" });
+      toast("✅ اکانت تست ساخته شد؛ کارتش توی چت ربات هم اومد"); reload();
+      btn.textContent = "✅ " + j.username;
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "🔑 اکانت تست رایگان";
+      toast({ disabled: "اکانت تست فعلاً فعال نیست", quota: "سهمیه‌ی اکانت تستت تموم شده", capacity: "الان ظرفیت نداریم", busy: "یه درخواست دیگه در جریانه" }[e.message] || "ساخت نشد؛ دوباره امتحان کن");
+    }
   }
   async function goto(action, extra) {
     try {
@@ -384,6 +400,8 @@
     if (d.shareWa) { const c = byId(d.shareWa); openLink(`https://wa.me/?text=${encodeURIComponent("اطلاعات اتصال و راهنمای سرویس " + c.username + ":\n" + c.guide)}`); return; }
     if (b.id === "bpay") { payBuy(); return; }
     if (d.goto === "buy") { S.tab = "buy"; render(); scrollTo(0, 0); return; }
+    if (d.goto === "support") { support(); return; }
+    if (d.goto === "test") { testAccount(b); return; }
     if (d.goto) { goto(d.goto); return; }
     if (d.renew) { openRenew(+d.renew); return; }
     if (d.rp) { pickRenew(d.rp); return; }
@@ -405,7 +423,7 @@
     const a = d.act;
     if (a === "close") closeSheet();
     else if (a === "charge") { S.tab = "wallet"; render(); }
-    else if (a === "support") goto("support");
+    else if (a === "support") support();
     else if (a === "addhome") { if (!tg("web_app_add_to_home_screen")) toast("از داخل تلگرام روی گوشی باز کن"); }
   });
   document.addEventListener("input", (e) => { if (e.target.id === "q") { S.q = e.target.value; const p = e.target.selectionStart; render(); const x = $("q"); x.focus(); x.setSelectionRange(p, p); } });

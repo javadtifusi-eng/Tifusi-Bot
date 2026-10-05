@@ -125,6 +125,9 @@ async def api_me(request):
     return web.json_response({
         "id": uid, "balance": db.get_balance(uid), "orders": len(orders),
         "is_admin": bool(ns["is_admin"](uid)),
+        # پشتیبانی و گرفتن شماره کارت: چت مستقیم تلگرام با همین یوزرنیم (تنظیم support_username)
+        "support": (db.setting("support_username", "") or "").lstrip("@"),
+        "test_enabled": db.setting("test_enabled", "0") == "1",
     })
 
 
@@ -510,6 +513,43 @@ async def api_admin_receipt(request):
     return web.json_response({"ok": True, "status": r["status"] if r else None, "notes": q.notes})
 
 
+# ---------- اکانت تست داخل مینی‌اپ ----------
+async def api_test(request):
+    """همان قانون send_test_account ربات (روشن بودن، سهمیه‌ی هر کاربر، اولین سرویس در دسترس)،
+    با جواب JSON؛ کارت تحویل مثل خرید در چت فرستاده می‌شود."""
+    uid = request["uid"]
+    db = ns["db"]
+    if db.setting("test_enabled", "0") != "1":
+        return _err("disabled", 403)
+    u = db.get_user(uid)
+    limit = int((u["test_limit"] if u and u["test_limit"] is not None else 1))
+    if db.one("SELECT COUNT(*) c FROM orders WHERE user_id=? AND price=0", (uid,))["c"] >= limit:
+        return _err("quota", 409)
+    service = next((x for x in ns["TEST_SERVICE_ORDER"] if ns["pick_panel"](x)), None)
+    if not service:
+        return _err("capacity", 503)
+    lock = _buy_locks.setdefault(uid, asyncio.Lock())
+    if lock.locked():
+        return _err("busy", 429)
+    async with lock:
+        plan = {"id": 0, "volume_gb": int(db.setting("test_volume_gb", "1") or 1),
+                "days": int(db.setting("test_days", "1") or 1), "price": 0}
+        try:
+            order, panel = await asyncio.to_thread(ns["create_service_on_panel"], uid, plan, service, f"t{uid}")
+        except Exception as e:
+            log.warning("miniapp test account %s failed: %s", uid, e)
+            return _err("failed", 502)
+        app = request.app["tg_app"]
+        ctx = SimpleNamespace(bot=app.bot, application=app, job_queue=app.job_queue, args=[])
+        try:
+            await ns["deliver_service"](ctx, uid, order, panel)
+        except Exception as e:
+            log.warning("miniapp test deliver failed: %s", e)
+        await ns["notify_admin"](app.bot, f"🔑 اکانت تست از مینی‌اپ\n👤 کاربر: {uid}\n🧩 سرویس: {ns['SERVICES'][service]}")
+        _panel_cache.pop(panel["id"], None)
+    return web.json_response({"ok": True, "username": order["username"], "password": order["password"]})
+
+
 # ---------- پل موقت: دکمه‌های مینی‌اپ همان مسیرهای امتحان‌پس‌داده‌ی ربات را در چت باز می‌کنند ----------
 class ChatMessage:
     """جای update.message برای توابع منوی ربات: هر جوابی مستقیم در چت همان کاربر فرستاده می‌شود."""
@@ -591,6 +631,7 @@ async def start(application, bot_globals):
     app.router.add_post("/api/renew", api_renew)
     app.router.add_get("/api/wallet", api_wallet)
     app.router.add_post("/api/charge", api_charge)
+    app.router.add_post("/api/test", api_test)
     app.router.add_get("/api/admin/summary", api_admin_summary)
     app.router.add_get("/api/admin/receipt_photo", api_admin_receipt_photo)
     app.router.add_post("/api/admin/receipt", api_admin_receipt)
