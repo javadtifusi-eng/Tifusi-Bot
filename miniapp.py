@@ -923,10 +923,20 @@ async def start(application, bot_globals):
         app.router.add_static("/assets/", STATIC_DIR / "assets", append_version=False)
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
-    await web.TCPSite(runner, HOST, PORT).start()
+    # shutdown_timeout کوتاه: موقع ری‌استارت ربات، درخواست‌های نیمه‌کاره حداکثر ۳ ثانیه صبر می‌کنند
+    await web.TCPSite(runner, HOST, PORT, shutdown_timeout=3).start()
     application.bot_data["miniapp_runner"] = runner
     log.info("miniapp listening on %s:%s", HOST, PORT)
     await set_tester_buttons(application.bot)
+
+
+async def stop(application):
+    """از post_shutdown ربات: اتصال‌های باز (keep-alive ـه Caddy) را می‌بندد تا موقع خاموش شدن
+    «Task was destroyed but it is pending» در لاگ نیاید."""
+    runner = application.bot_data.pop("miniapp_runner", None)
+    if runner:
+        await runner.cleanup()
+        log.info("miniapp stopped")
 
 
 async def set_tester_buttons(bot):
