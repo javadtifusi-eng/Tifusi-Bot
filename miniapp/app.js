@@ -144,6 +144,9 @@
     }
   }
 
+  // لوگوی اندروید هم‌رنگ سیب (رنگ متن دکمه) و کمی بزرگ‌تر، چون سرِ ربات پهن و کوتاه است و هم‌اندازه کوچک‌تر دیده می‌شود
+  const androidIc = () => ic("android").replace('class="ic"', 'class="ic" style="width:24px;height:24px"');
+
   // نشانگر وضعیت داخل کارت سرویس
   function statusPill(c) {
     const [t, col] = !c.on ? ["غیرفعال", "#ff7b7b"] : c.state === "bad" ? ["تمام‌شده", "#ff7b7b"] : c.state === "warn" ? ["رو به اتمام", "#f0a43a"] : ["فعال", "#3ddc84"];
@@ -255,12 +258,12 @@
       <div class="glass svc"><div class="svctop">
         <div class="ring"><svg viewBox="0 0 118 118"><circle cx="59" cy="59" r="50" fill="none" stroke="var(--track)" stroke-width="9"/><circle cx="59" cy="59" r="50" fill="none" stroke="${frac > 0.85 && c.limit ? "#f0a43a" : "var(--cyan)"}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C * frac} ${C}"/></svg>
           <div class="c"><div>${c.limit ? `<b class="num">${gb(Math.max(0, c.limit - c.used))} GB</b><br><small>مونده از ${num(gb(c.limit))} گیگ</small>` : `<b>∞</b><br><small>نامحدود</small>`}</div></div></div>
-        <div><h3 style="direction:ltr;text-align:right">${esc(c.username)}</h3><div class="pl">${esc(c.service_name)}</div><div class="chips">${c.service === "xray" ? '<span class="chip">VLESS</span>' : '<span class="chip">IKEv2</span><span class="chip">L2TP</span><span class="chip">PPTP</span>'}</div>${statusPill(c)}</div></div>
+        <div><h3 style="direction:ltr;text-align:right">${esc(c.username)}</h3><div class="pl">${esc(c.service_name)}</div>${statusPill(c)}</div></div>
         <div class="days"><span>${c.days_left === null ? "بدون انقضا" : `${num(c.days_left)} روز مانده`}</span></div><div class="dbar"><i style="width:${c.days_left === null ? 100 : Math.min(100, (c.days_left / 30) * 100)}%"></i></div>
         <button class="pill" type="button" data-renew="${c.id}" style="justify-content:center;width:100%">♻️ تمدید</button>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <button class="cta" type="button" data-conn="${c.id}" data-os="ios" style="padding:13px 8px;display:flex;align-items:center;justify-content:center;gap:6px">${ic("apple")} نصب پروفایل</button>
-          <button class="cta" type="button" data-conn="${c.id}" data-os="android" style="padding:13px 8px;display:flex;align-items:center;justify-content:center;gap:6px"><span style="color:#3ddc84;display:inline-flex">${ic("android")}</span> جهت اتصال</button>
+          <button class="cta" type="button" data-conn="${c.id}" data-os="android" style="padding:13px 8px;display:flex;align-items:center;justify-content:center;gap:6px">${androidIc()} جهت اتصال</button>
         </div></div>`;
     }
   };
@@ -848,7 +851,7 @@
   // بارکد ندارند: فقط دکمه‌های کپی، بدون نمایش مقدارها. آیفون: QR و نصب یک‌لمسی پروفایل.
   async function openConnect(id, os) {
     const android = os === "android";
-    const title = android ? `<span style="color:#3ddc84;display:inline-flex">${ic("android")}</span> جهت اتصال` : `${ic("apple")} نصب پروفایل`;
+    const title = android ? `${androidIc()} جهت اتصال` : `${ic("apple")} نصب پروفایل`;
     $("sheet").innerHTML = `<h3 id="sheetTitle" style="display:flex;gap:8px;align-items:center">${title}</h3>` + LOADING;
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
     let x;
