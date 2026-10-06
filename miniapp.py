@@ -435,6 +435,7 @@ async def api_qr(request):
 # ---------- کیف پول و شارژ کارت به کارت داخل مینی‌اپ ----------
 CHARGE_MIN, CHARGE_MAX = 20000, 50000000
 MAX_RECEIPT_BYTES = 8 * 1024 * 1024
+MAX_PENDING_RECEIPTS = 3
 
 
 async def api_wallet(request):
@@ -465,6 +466,9 @@ async def api_charge(request):
         return _err("amount", min=CHARGE_MIN, max=CHARGE_MAX)
     if photo is None or not hasattr(photo, "file"):
         return _err("photo")
+    # جلوی رگبار رسید الکی: هر کاربر حداکثر چند رسید منتظر تأیید
+    if db.one("SELECT COUNT(*) c FROM receipts WHERE user_id=? AND status='pending'", (uid,))["c"] >= MAX_PENDING_RECEIPTS:
+        return _err("too_many", 429)
     data = photo.file.read(MAX_RECEIPT_BYTES + 1)
     if not data or len(data) > MAX_RECEIPT_BYTES:
         return _err("photo_size")
@@ -946,6 +950,10 @@ async def api_admin_panel(request):
             _admin_log(request, f"🖥 پنل «{p['name']}» ویرایش شد: {'، '.join(k for k in fields if k != 'password') or 'پسورد'}"
                                 + ("، پسورد" if "password" in fields and len(fields) > 1 else ""))
     elif action == "delete":
+        # پنلی که هنوز سرویس فعال دارد حذف نمی‌شود (سرویس‌ها از دید ربات و مینی‌اپ گم می‌شوند)؛ اول «خارج از فروش»
+        active = db.count_panel_active_orders(p["id"])
+        if active:
+            return _err("has_orders", 409, count=active)
         db.delete_panel(p["id"])
         _admin_log(request, f"🗑 پنل «{p['name']}» حذف شد")
         return web.json_response({"ok": True, "deleted": True})

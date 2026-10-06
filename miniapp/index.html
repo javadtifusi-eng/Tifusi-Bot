@@ -54,7 +54,8 @@ body{background:radial-gradient(700px 420px at 50% -8%,var(--bg2),transparent 70
 .ptitle b{font-size:1.15rem}
 .ptitle small{color:var(--muted);font-size:.78rem}
 .ptitle .iconbtn{position:absolute;top:0;left:0;width:34px;height:34px;background:none;border:0}
-.ptitle .back{right:0;left:auto}
+.ptitle .back{right:0;left:auto;width:auto;height:34px;padding:0 10px 0 12px;gap:4px;display:flex;align-items:center;border-radius:999px;background:rgba(255,255,255,.14)!important;border:1px solid rgba(255,255,255,.3)!important;box-shadow:none!important;font:inherit;font-size:.8rem;color:#fff}
+.ptitle .back svg{width:16px;height:16px}
 /* wallet */
 .wallet{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px}
 .wallet .w{display:flex;gap:12px;align-items:center}
@@ -137,13 +138,14 @@ body{background:radial-gradient(700px 420px at 50% -8%,var(--bg2),transparent 70
 .tx .am.plus{color:var(--ok)}.tx .am.minus{color:var(--muted)}
 /* service card */
 .svc{padding:18px;display:grid;gap:14px;background:radial-gradient(260px 160px at 85% 0%,rgba(63,208,224,.25),transparent 70%),linear-gradient(160deg,var(--glass),var(--glass2))}
-.svctop{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
+.svctop{display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:center}
+.svctop>div{min-width:0}
 .ring{width:118px;height:118px;position:relative}
 .ring svg{width:100%;height:100%;transform:rotate(-90deg)}
 .ring .c{position:absolute;inset:0;display:grid;place-items:center;text-align:center;line-height:1.25}
 .ring .c b{font-size:1.35rem}
 .ring .c small{font-size:.7rem;color:var(--muted)}
-.svc h3{margin:0;font-size:1.1rem}
+.svc h3{margin:0;font-size:1.1rem;overflow-wrap:anywhere}
 .svc .pl{color:var(--muted);font-size:.82rem;margin:4px 0 8px}
 .chips{display:flex;gap:6px}
 .chip{font-size:.75rem;font-weight:700;padding:5px 12px;border-radius:10px;background:var(--glass);border:1px solid var(--edge);direction:ltr}
@@ -166,6 +168,8 @@ body{background:radial-gradient(700px 420px at 50% -8%,var(--bg2),transparent 70
 .sheet{position:fixed;inset:auto 0 0 0;max-width:440px;margin:0 auto;padding:18px 16px calc(22px + env(safe-area-inset-bottom,0px));border-radius:26px 26px 0 0;z-index:20;transform:translateY(110%);transition:transform .25s ease;display:grid;gap:12px;background:var(--bg);border:1px solid var(--edge)}
 .sheet.open{transform:none}
 .sheet h3{margin:0}
+.sheetx{position:sticky;top:0;justify-self:end;margin:-6px -4px -40px 0;z-index:2;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font:inherit;font-size:1rem;color:#fff;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);cursor:pointer}
+.sheet h3{padding-inline-end:44px}
 .field{display:grid;gap:6px;font-size:.8rem;color:var(--muted)}
 .field input{font:inherit;padding:12px;border-radius:14px;border:1px solid var(--edge);background:var(--glass);color:var(--fg);direction:ltr}
 .stepper{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center}

@@ -18,14 +18,8 @@
     } catch (e) {}
     return false;
   }
-  try {
-    const tp = JSON.parse(hash.get("tgWebAppThemeParams") || "{}");
-    if (tp.bg_color) {
-      const n = parseInt(tp.bg_color.slice(1), 16);
-      const l = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
-      document.documentElement.dataset.theme = "dark";
-    }
-  } catch (e) {}
+  // عکس زمینه شب است، پس تم همیشه تیره (حتی اگر تلگرام تم نفرستد و گوشی روی حالت روشن باشد)
+  document.documentElement.dataset.theme = "dark";
   // رویدادهایی که تلگرام به صفحه می‌فرسته (همان قرارداد telegram-web-app.js)
   const safe = { top: 0, bottom: 0 }, content = { top: 0, bottom: 0 };
   function applySafe() {
@@ -40,6 +34,7 @@
     else if (type === "home_screen_added") toast("✅ تیفوسی به صفحه‌ی گوشی اضافه شد");
     else if (type === "home_screen_checked" && data.status === "added") document.documentElement.classList.add("on-home");
     else if (type === "fullscreen_failed") document.documentElement.classList.remove("fs");
+    else if (type === "back_button_pressed") goBack();
   };
   window.Telegram = window.Telegram || {};
   window.Telegram.WebView = { receiveEvent: onEvent };
@@ -172,7 +167,7 @@
       const sec = S.asec || "rc";
       if (sec === "rc") return `<div class="ptitle"><b>مدیریت</b><small>فروش و رسیدها</small></div>
         <button class="cta" type="button" data-asec="menu">⚙️ همه‌ی بخش‌های مدیریت</button>${AV.rc()}`;
-      return `<div class="ptitle"><b>${ATITLE[sec] || "مدیریت"}</b><small>مدیریت</small><button class="iconbtn back" type="button" data-asec="${sec === "menu" ? "rc" : "menu"}" aria-label="برگشت">${ic("back")}</button></div>${AV[sec]()}`;
+      return `<div class="ptitle"><b>${ATITLE[sec] || "مدیریت"}</b><small>مدیریت</small><button class="iconbtn back" type="button" data-asec="${sec === "menu" ? "rc" : "menu"}" aria-label="برگشت">${ic("back")}<span>برگشت</span></button></div>${AV[sec]()}`;
     },
     help: () => {
       const q = (S.hq || "").toLowerCase();
@@ -208,7 +203,7 @@
           <div class="mt"><span class="dot ${x.on ? x.state : "bad"}"></span><span>${x.on ? custLine(x) : '<span class="offtag">غیرفعال</span>'}</span></div></div><span style="color:var(--muted)">‹</span></button>`).join("") || '<div class="empty">سرویسی پیدا نشد.</div>'}`;
       }
       const C = 2 * Math.PI * 50, frac = c.limit ? Math.min(c.used / c.limit, 1) : 1;
-      return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small><button class="iconbtn back" type="button" data-tab="customers" aria-label="برگشت به کاربران">${ic("back")}</button></div>
+      return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small><button class="iconbtn back" type="button" data-tab="customers" aria-label="برگشت به کاربران">${ic("back")}<span>برگشت</span></button></div>
       <div class="glass svc"><div class="svctop">
         <div class="ring"><svg viewBox="0 0 118 118"><circle cx="59" cy="59" r="50" fill="none" stroke="var(--track)" stroke-width="9"/><circle cx="59" cy="59" r="50" fill="none" stroke="${frac > 0.85 && c.limit ? "#f0a43a" : "var(--cyan)"}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C * frac} ${C}"/></svg>
           <div class="c"><div>${c.limit ? `<b class="num">${gb(Math.max(0, c.limit - c.used))} GB</b><br><small>مونده از ${num(gb(c.limit))} گیگ</small>` : `<b>∞</b><br><small>نامحدود</small>`}</div></div></div>
@@ -540,7 +535,7 @@
       if (body.action === "test") toast(j.ok ? `✅ آنلاین (${j.ms}ms)${j.diff ? " · " + j.diff : ""}` : "❌ آفلاین: " + (j.error || ""));
       else if (okMsg) toast(okMsg);
       render(); return j;
-    } catch (e) { if (btn) btn.disabled = false; toast(e.message === "panel" ? "❌ پنل جواب نداد" : "انجام نشد"); return null; }
+    } catch (e) { if (btn) btn.disabled = false; toast(e.message === "panel" ? "❌ پنل جواب نداد" : e.message === "has_orders" ? "این پنل هنوز سرویس فعال داره؛ حذف نمی‌شه. اگه نمی‌خوای ازش بفروشی «خارج از فروش» رو بزن" : "انجام نشد"); return null; }
   }
   function openPanelEdit(id) {
     const p = panelById(id); if (!p) return;
@@ -783,6 +778,7 @@
     $("tabs").style.gridTemplateColumns = `repeat(${tabs.length},1fr)`;
     const cur = S.tab === "card" ? "customers" : S.tab;
     $("tabs").innerHTML = tabs.map(([k, i, l]) => `<button type="button" role="tab" aria-selected="${k === cur}" data-tab="${k}">${ic(i)}${l}</button>`).join("");
+    if (typeof syncBack === "function") syncBack();
   }
   // ---------- نصب پروفایل و اطلاعات اتصال (حضوری) و ارسال کامل برای مشتری ----------
   const connCache = {};
@@ -993,7 +989,7 @@
       toast("✅ رسید فرستاده شد؛ بعد از تأیید شارژ می‌شه"); S.amt = null; S.wallet = null; render();
     } catch (e) {
       btn.disabled = false; btn.textContent = "ارسال رسید برای تأیید";
-      toast({ amount: "مبلغ درست نیست", photo: "عکس رسید رو انتخاب کن", photo_size: "عکس خیلی بزرگه (حداکثر 8 مگ)" }[e.message] || "ارسال نشد؛ دوباره امتحان کن");
+      toast({ amount: "مبلغ درست نیست", photo: "عکس رسید رو انتخاب کن", photo_size: "عکس خیلی بزرگه (حداکثر 8 مگ)", too_many: "چند تا رسید منتظر تأیید داری؛ صبر کن تا بررسی بشن" }[e.message] || "ارسال نشد؛ دوباره امتحان کن");
     }
   }
   async function loadAdmin() {
@@ -1028,6 +1024,28 @@
     } catch (e) {}
   }
   const closeSheet = () => { $("sheet").classList.remove("open"); $("scrim").classList.remove("open"); };
+  // ---------- برگشت: دکمه‌ی Back خود تلگرام (و دکمه‌ی برگشت گوشی اندروید) ----------
+  function canBack() {
+    return $("sheet").classList.contains("open") || S.tab !== "home";
+  }
+  function goBack() {
+    if ($("sheet").classList.contains("open")) closeSheet();
+    else if (S.tab === "admin" && S.asec && S.asec !== "rc") { S.asec = S.asec === "menu" ? "rc" : "menu"; if (S.asec === "rc") S.admin = null; render(); scrollTo(0, 0); }
+    else if (S.tab === "card") { S.card = null; S.tab = "customers"; render(); scrollTo(0, 0); }
+    else if (S.tab !== "home") { S.tab = "home"; render(); scrollTo(0, 0); }
+    syncBack();
+  }
+  let backShown = null;
+  function syncBack() {
+    const v = canBack();
+    if (v !== backShown) { backShown = v; tg("web_app_setup_back_button", { is_visible: v }); }
+  }
+  // یک ✕ ثابت بالای هر شیت، تا با باز شدن کیبورد هم راه بیرون آمدن باشد
+  function addSheetX() {
+    const sh = $("sheet");
+    if (!sh.querySelector(":scope > .sheetx")) sh.insertAdjacentHTML("afterbegin", `<button class="sheetx" type="button" data-act="close" aria-label="بستن">✕</button>`);
+  }
+  new MutationObserver(() => { addSheetX(); syncBack(); }).observe($("sheet"), { attributes: true, attributeFilter: ["class"], childList: true });
   const byId = (id) => S.customers.find((c) => c.id === +id);
   function openLink(url) { if (!tg("web_app_open_link", { url })) window.open(url, "_blank"); }
 
