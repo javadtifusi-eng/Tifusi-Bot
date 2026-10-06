@@ -36,8 +36,12 @@
     else if (type === "fullscreen_failed") document.documentElement.classList.remove("fs");
     else if (type === "back_button_pressed") goBack();
   };
+  // تلگرام هر پلتفرم از یکی از این راه‌ها خبر می‌فرستد (همان سه راه telegram-web-app.js)؛
+  // آیفون از TelegramGameProxy استفاده می‌کند و قبلاً خبرها (فاصله‌ی بالا، دکمه‌ی Back) به ما نمی‌رسید
   window.Telegram = window.Telegram || {};
   window.Telegram.WebView = { receiveEvent: onEvent };
+  window.TelegramGameProxy = { receiveEvent: onEvent };
+  window.TelegramGameProxy_receiveEvent = onEvent;
   window.addEventListener("message", (e) => { try { const m = JSON.parse(e.data); if (m && m.eventType) onEvent(m.eventType, m.eventData); } catch (err) {} });
 
   tg("web_app_ready");

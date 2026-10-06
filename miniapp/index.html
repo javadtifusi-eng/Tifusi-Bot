@@ -177,7 +177,7 @@ body{background:radial-gradient(700px 420px at 50% -8%,var(--bg2),transparent 70
 .sum{display:grid;gap:6px;font-size:.9rem}
 .sum div{display:flex;justify-content:space-between}
 .sum span:last-child{font-weight:700}
-.toast{position:fixed;top:calc(14px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:999px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30}
+.toast{position:fixed;top:calc(14px + max(var(--tg-top,0px), env(safe-area-inset-top,0px)));left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:999px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30}
 .toast.show{opacity:1}
 .tag{position:fixed;top:8px;left:8px;font-size:.65rem;padding:4px 9px;border-radius:999px;background:var(--glass);border:1px solid var(--edge);color:var(--muted);z-index:5}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -240,6 +240,8 @@ body{background:
 .herospace{height:min(66vw,290px)}
 
 .app{padding-top:calc(10px + var(--tg-top,0px))}
+/* تمام‌صفحه: حتی اگر تلگرام فاصله را نفرستد، محتوا زیر دکمه‌های Close و ••• نرود */
+.fs .app{padding-top:calc(10px + max(var(--tg-top,0px), env(safe-area-inset-top,0px) + 52px))}
 .tabs{bottom:calc(12px + env(safe-area-inset-bottom,0px) + var(--tg-bottom,0px))}
 .addhome{font-size:.78rem;padding:9px 14px}
 .on-home .addhome{display:none}
