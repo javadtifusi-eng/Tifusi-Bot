@@ -868,11 +868,11 @@
       const servers = [["IKEv2", x.ikev2 && x.ikev2.server], ["L2TP", x.l2tp && x.l2tp.server], ["PPTP", x.pptp && x.pptp.server]].filter(([, v]) => v);
       const same = new Set(servers.map(([, v]) => v)).size === 1;
       const serverBtns = same ? cbtn("کپی آدرس سرور", servers[0][1], "phone") : servers.map(([k, v]) => cbtn(`کپی سرور ${k}`, v, "phone")).join("");
-      body = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      body = `${x.sub ? `<div class="glass sec" style="display:grid;justify-items:center;padding:14px"><img data-qr="sub" data-qid="${x.id}" alt="QR لینک ساب" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px"></div>` : ""}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           ${cbtn("کپی نام کاربری", x.username, "user")}${cbtn("کپی رمز", x.password, "shield")}
           ${serverBtns}${x.l2tp && x.l2tp.secret ? cbtn("کپی کلید L2TP", x.l2tp.secret, "layers") : ""}
-        </div>
-        <small style="color:var(--muted);line-height:1.9">تنظیمات گوشی ← اتصال‌ها ← VPN ← افزودن · نوع: ${x.ikev2 ? "IKEv2/IPSec MSCHAPv2" : ""}${x.ikev2 && x.l2tp ? " یا " : ""}${x.l2tp ? "L2TP/IPSec PSK" : ""} · «شناسه IPSec» خالی بمونه.</small>`;
+        </div>`;
     } else {
       const ios = (k, t) => x[k] && x[k].install ? `<div class="glass sec" style="display:grid;gap:10px;justify-items:center;text-align:center">
           <b>${t}</b>
