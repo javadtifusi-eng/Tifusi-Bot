@@ -35,6 +35,7 @@ SHOP_SERVICES = {"ikev2": "L2TP و IKEv2", "xray": "V2Ray"}
 LIVE_ORDER_STATUSES = ("active", "delreq_pending")
 
 ns = {}
+_APP = {}  # "app": تلگرام Application، برای تکمیل خرید معلق از داخل rc_approve
 _panel_cache = {}  # panel_id -> (time, {username: panel user})
 
 
@@ -96,6 +97,14 @@ def _panel_users(panel):
     return users
 
 
+def _guide_url(order):
+    """صفحه‌ی آموزش فقط برای اتصال‌های L2TP/PPTP (پلن IPsec)؛ V2Ray فقط لینک اشتراک و QR می‌گیرد."""
+    sub = ns["public_sub_url"](order["sub_url"] or "").rstrip("/")
+    if order["protocol"] not in ns["IPSEC_SERVICES"] or not sub.startswith("https://"):
+        return None
+    return sub + "/guide"
+
+
 def _customer(order, pu):
     expire = int(order["expire_at"] or 0)
     left_days = max(0, -(-(expire - int(time.time())) // 86400)) if expire else None
@@ -114,7 +123,7 @@ def _customer(order, pu):
         "service_name": SHOP_SERVICES.get(order["protocol"]) or ns["service_name"](order["protocol"]),
         "used": used, "limit": limit, "expire": expire or None, "days_left": left_days,
         "panel_status": pstatus, "on": pstatus != "disabled", "state": state,
-        "guide": sub + "/guide" if sub.startswith("https://") else None,
+        "guide": _guide_url(order),
     }
 
 
@@ -125,6 +134,7 @@ async def api_me(request):
     return web.json_response({
         "id": uid, "balance": db.get_balance(uid), "orders": len(orders),
         "is_admin": bool(ns["is_admin"](uid)),
+        "free_pass": bool(ns["has_free_pass"](uid)),
         # پشتیبانی و گرفتن شماره کارت: چت مستقیم تلگرام با همین یوزرنیم (تنظیم support_username)
         "support": (db.setting("support_username", "") or "").lstrip("@"),
         "test_enabled": db.setting("test_enabled", "0") == "1",
@@ -243,79 +253,292 @@ async def _free_username(client, base, taken):
     return None
 
 
-async def api_buy(request):
-    """خرید از کیف پول، مثل finalize_wallet_purchase ربات: کسر اتمیک، ساخت روی پنل، برگشت وجه اگر نشد،
-    کارت تحویل در چت. موبایل‌فروش می‌تواند چند اکانت با هم بسازد (qty) که پشت سر هم نام‌گذاری می‌شوند."""
-    uid = request["uid"]
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+async def _create_accounts(app, uid, plan, service, base, password, qty, free=False):
+    """ساخت qty اکانت پشت سر هم با یک پنل؛ هر اکانت جدا از کیف پول کسر می‌شود (مگر Free Pass) و اگر
+    روی پنل ساخته نشد، همان مبلغ برمی‌گردد. مشترک بین خرید مستقیم و تکمیل خرید معلق بعد از شارژ."""
     db = ns["db"]
-    service = str(body.get("service") or "")
-    plan = ns["user_plan"](int(body.get("plan_id") or 0), uid)
-    if service not in SHOP_SERVICES or service not in ns["SERVICES"] or not plan or not plan["active"] \
-            or not ns["plan_fits"](plan, service):
-        return _err("plan")
-    try:
-        qty = max(1, min(MAX_BULK, int(body.get("qty") or 1)))
-    except (TypeError, ValueError):
-        qty = 1
-    base = str(body.get("username") or "").strip()
-    if base and not USERNAME_RE.fullmatch(base):
-        return _err("username")
-    password = str(body.get("password") or "").strip().translate(
-        str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
-    ipsec = service in ns["IPSEC_SERVICES"]
-    if ipsec and password and not ns["IPSEC_PASSWORD_RE"].fullmatch(password):
-        return _err("password")
-    total = plan["price"] * qty
-    if db.get_balance(uid) < total:
-        return _err("balance", 402, need=total - db.get_balance(uid))
     panel = ns["pick_panel"](service)
     if not panel:
-        return _err("capacity", 503)
+        return [], "capacity"
+    ipsec = service in ns["IPSEC_SERVICES"]
+    # Free Pass: سفارش با قیمت صفر ثبت می‌شود تا در فروش و درآمد حساب نشود
+    order_plan = dict(plan, price=0) if free else plan
+    client = ns["panel_client"](panel)
+    if not base:
+        base = "u" + "".join(secrets.choice("abcdefghjkmnpqrstuvwxyz23456789") for _ in range(6))
+    ctx = SimpleNamespace(bot=app.bot, application=app, job_queue=app.job_queue, args=[])
+    made, taken, failed = [], set(), None
+    for _ in range(qty):
+        try:
+            name = await _free_username(client, base, taken)
+        except Exception as e:
+            failed = f"panel: {e}"
+            break
+        if not name:
+            failed = "username_taken"
+            break
+        if not free and not db.try_spend(uid, plan["price"]):
+            failed = "balance"
+            break
+        pw = password if (password and qty == 1) else (ns["random_ipsec_password"]() if ipsec else None)
+        try:
+            order, opanel = await asyncio.to_thread(
+                ns["create_service_on_panel"], uid, order_plan, service, name, panel["id"], pw)
+        except Exception as e:
+            if not free:
+                db.add_balance(uid, plan["price"])  # بازگشت وجه
+            failed = str(e)[:200]
+            break
+        taken.add(name)
+        made.append(_made_json(order))
+        try:
+            await ns["deliver_service"](ctx, uid, order, opanel, quiet=True)
+        except Exception as e:
+            log.warning("miniapp deliver %s failed: %s", order["id"], e)
+    _panel_cache.pop(panel["id"], None)
+    return made, failed
 
+
+def _made_json(order):
+    """اکانت تازه برای مینی‌اپ: V2Ray لینک اشتراک (و QR از /api/qr) می‌گیرد؛ آموزش فقط برای L2TP/PPTP."""
+    sub = ns["public_sub_url"](order["sub_url"] or "")
+    return {"id": order["id"], "username": order["username"], "password": order["password"],
+            "service": order["protocol"], "sub": sub if order["protocol"] not in ns["IPSEC_SERVICES"] else None,
+            "guide": _guide_url(order)}
+
+
+def _parse_buy(body, uid):
+    """(service, plan, qty, base, password) یا (None, کد خطا)."""
+    service = str(body.get("service") or "")
+    plan = ns["user_plan"](_int(body.get("plan_id")), uid)
+    if service not in SHOP_SERVICES or service not in ns["SERVICES"] or not plan or not plan["active"] \
+            or not ns["plan_fits"](plan, service):
+        return None, "plan"
+    qty = max(1, min(MAX_BULK, _int(body.get("qty"), 1)))
+    base = str(body.get("username") or "").strip()
+    if base and not USERNAME_RE.fullmatch(base):
+        return None, "username"
+    password = str(body.get("password") or "").strip().translate(
+        str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    if service in ns["IPSEC_SERVICES"] and password and not ns["IPSEC_PASSWORD_RE"].fullmatch(password):
+        return None, "password"
+    return (service, plan, qty, base, password), None
+
+
+# ---------- خرید معلق: موجودی کم بود؛ بعد از تأیید شارژ توسط ادمین خودکار تکمیل می‌شود ----------
+PENDING_KEY = "pending_buy_app:{}"
+
+
+def _pending(uid):
+    db = ns["db"]
+    try:
+        data = json.loads(db.setting(PENDING_KEY.format(uid)) or "null")
+    except ValueError:
+        return None
+    if not data or time.time() - data.get("saved_at", 0) > ns["PENDING_BUY_TTL"]:
+        return None
+    return data
+
+
+def _clear_pending(uid):
+    if ns["db"].setting(PENDING_KEY.format(uid)):
+        ns["db"].set_setting(PENDING_KEY.format(uid), "")
+
+
+def _pending_json(uid):
+    p = _pending(uid)
+    plan = ns["user_plan"](p["plan_id"], uid) if p else None
+    if not p or not plan or not plan["active"]:
+        return None
+    total = plan["price"] * p["qty"]
+    return {"service": p["service"], "service_label": SHOP_SERVICES.get(p["service"], p["service"]),
+            "plan": {"id": plan["id"], "gb": plan["volume_gb"], "days": plan["days"], "price": plan["price"],
+                     "users": plan["user_limit"] or 0},
+            "qty": p["qty"], "username": p.get("username") or "", "total": total,
+            "need": max(0, total - ns["db"].get_balance(uid))}
+
+
+async def resume_pending_buy(bot, uid):
+    """بعد از تأیید شارژ کیف پول (offer_pending_buy در rc_approve): اگر خرید معلق مینی‌اپ هست و موجودی
+    حالا کافی است، همان پلن و یوزرنیم و تعداد ساخته می‌شود. True یعنی خرید معلقی بود (کاملش کرد یا هنوز کم دارد)."""
+    p = _pending(uid)
+    if not p or _APP.get("app") is None:
+        return False
+    db = ns["db"]
+    plan = ns["user_plan"](p["plan_id"], uid)
+    if not plan or not plan["active"] or not ns["plan_fits"](plan, p["service"]):
+        _clear_pending(uid)
+        await ns["tell"](bot, uid, "⚠️ پلنی که برای خرید معلقت انتخاب کرده بودی دیگه فروخته نمی‌شه؛ از تب خرید یه پلن دیگه انتخاب کن.")
+        return True
+    total = plan["price"] * p["qty"]
+    if db.get_balance(uid) < total:
+        await ns["tell"](bot, uid, f"🛒 خرید معلقت هنوز {ns['fmt'](total - db.get_balance(uid))} تومان کم داره؛ بعد از شارژ بعدی خودکار ساخته می‌شه.",
+                         kind="wallet")
+        return True
+    lock = _buy_locks.setdefault(uid, asyncio.Lock())
+    async with lock:
+        _clear_pending(uid)
+        made, failed = await _create_accounts(_APP["app"], uid, plan, p["service"], p.get("username") or "",
+                                              p.get("password") or "", p["qty"])
+    if made:
+        names = "، ".join(m["username"] for m in made)
+        await ns["tell"](bot, uid, f"✅ خرید معلقت خودکار تکمیل شد: {names}\n"
+                                   f"💎 موجودی فعلی: {ns['fmt'](db.get_balance(uid))} تومان"
+                                   + (f"\n⚠️ بقیه ساخته نشد ({failed})؛ پولش به کیف پول برگشت." if failed else ""),
+                         kind="wallet", order_id=made[0]["id"])
+        ns["notify_group"](bot, f"🛍 خرید معلق بعد از شارژ تکمیل شد\n👤 {ns['who'](uid)} | {len(made)} اکانت", topic="sales")
+    else:
+        await ns["tell"](bot, uid, f"❌ خرید معلقت ساخته نشد ({failed}); پولت توی کیف پول مونده. از تب خرید دوباره امتحان کن.",
+                         kind="refund")
+    return True
+
+
+async def api_buy(request):
+    """خرید از کیف پول، مثل finalize_wallet_purchase ربات: کسر اتمیک، ساخت روی پنل، برگشت وجه اگر نشد،
+    کارت تحویل در چت. موبایل‌فروش می‌تواند چند اکانت با هم بسازد (qty) که پشت سر هم نام‌گذاری می‌شوند.
+    موجودی کم: خرید معلق ذخیره می‌شود (402) و بعد از تأیید شارژ خودکار تکمیل می‌شود.
+    Free Pass: بدون بررسی و کسر موجودی."""
+    uid = request["uid"]
+    parsed, err = _parse_buy(await _body(request), uid)
+    if err:
+        return _err(err)
+    service, plan, qty, base, password = parsed
+    db = ns["db"]
+    free = ns["has_free_pass"](uid)
+    total = plan["price"] * qty
+    if not free and db.get_balance(uid) < total:
+        db.set_setting(PENDING_KEY.format(uid), json.dumps({
+            "service": service, "plan_id": plan["id"], "qty": qty, "username": base, "password": password,
+            "saved_at": time.time()}))
+        return _err("balance", 402, need=total - db.get_balance(uid), pending=True)
+    if not ns["pick_panel"](service):
+        return _err("capacity", 503)
     lock = _buy_locks.setdefault(uid, asyncio.Lock())
     if lock.locked():
         return _err("busy", 429)
     async with lock:
-        client = ns["panel_client"](panel)
-        if not base:
-            base = "u" + "".join(secrets.choice("abcdefghjkmnpqrstuvwxyz23456789") for _ in range(6))
-        app = request.app["tg_app"]
-        ctx = SimpleNamespace(bot=app.bot, application=app, job_queue=app.job_queue, args=[])
-        made, taken, failed = [], set(), None
-        for _ in range(qty):
-            try:
-                name = await _free_username(client, base, taken)
-            except Exception as e:
-                failed = f"panel: {e}"
-                break
-            if not name:
-                failed = "username_taken"
-                break
-            if not db.try_spend(uid, plan["price"]):
-                failed = "balance"
-                break
-            pw = password if (password and qty == 1) else (ns["random_ipsec_password"]() if ipsec else None)
-            try:
-                order, opanel = await asyncio.to_thread(
-                    ns["create_service_on_panel"], uid, plan, service, name, panel["id"], pw)
-            except Exception as e:
-                db.add_balance(uid, plan["price"])  # بازگشت وجه
-                failed = str(e)[:200]
-                break
-            taken.add(name)
-            made.append({"id": order["id"], "username": order["username"], "password": order["password"],
-                         "guide": ns["public_sub_url"](order["sub_url"]).rstrip("/") + "/guide" if order["sub_url"] else None})
-            try:
-                await ns["deliver_service"](ctx, uid, order, opanel, quiet=True)
-            except Exception as e:
-                log.warning("miniapp deliver %s failed: %s", order["id"], e)
-        _panel_cache.pop(panel["id"], None)
+        made, failed = await _create_accounts(request.app["tg_app"], uid, plan, service, base, password, qty, free=free)
+    if made:
+        _clear_pending(uid)
     return web.json_response({"ok": bool(made), "made": made, "failed": failed,
                               "balance": db.get_balance(uid)}, status=200 if made else 502)
+
+
+async def api_pending(request):
+    uid = request["uid"]
+    db = ns["db"]
+    rows = db.q("SELECT d.*, t.reply FROM direct_orders d LEFT JOIN tickets t ON t.id = d.ticket_id "
+                "WHERE d.user_id=? AND d.status IN ('open','receipt') ORDER BY d.id DESC", (uid,))
+    return web.json_response({"pending": _pending_json(uid), "direct": [_direct_json(r) for r in rows]})
+
+
+async def api_pending_cancel(request):
+    _clear_pending(request["uid"])
+    return web.json_response({"ok": True})
+
+
+# ---------- پرداخت مستقیم (کارت به کارت) از طریق تیکت ----------
+def _direct_json(r):
+    return {"id": r["id"], "ticket": r["ticket_id"], "status": r["status"], "service": r["service"],
+            "service_label": SHOP_SERVICES.get(r["service"], r["service"]), "username": r["username"],
+            "password": r["password"] or "", "amount": r["amount"], "plan_id": r["plan_id"],
+            "card": r["reply"] or "", "at": r["created_at"]}
+
+
+async def api_direct(request):
+    """شماره کارت ثابتی در برنامه نیست: یک تیکت خرید ساخته می‌شود تا ادمین شماره کارت را جواب بدهد؛
+    کاربر بعد رسید را برای همین سفارش می‌فرستد (api_direct_receipt) و تأیید ادمین اکانت را می‌سازد."""
+    uid = request["uid"]
+    parsed, err = _parse_buy(await _body(request), uid)
+    if err:
+        return _err(err)
+    service, plan, _qty, base, password = parsed
+    db = ns["db"]
+    if db.one("SELECT COUNT(*) c FROM direct_orders WHERE user_id=? AND status IN ('open','receipt')", (uid,))["c"] >= MAX_PENDING_RECEIPTS:
+        return _err("too_many", 429)
+    panel = ns["pick_panel"](service)
+    if not panel:
+        return _err("capacity", 503)
+    # یوزرنیم همین حالا روی پنل چک می‌شود تا بعد از پرداخت به اسم تکراری نخورد
+    try:
+        reserved = {r["username"] for r in db.q("SELECT username FROM direct_orders WHERE status IN ('open','receipt')")}
+        name = await _free_username(ns["panel_client"](panel), base or "u" + secrets.token_hex(3), reserved)
+    except Exception as e:
+        log.warning("miniapp direct username check failed: %s", e)
+        return _err("capacity", 503)
+    if not name:
+        return _err("username_taken", 409)
+    if service in ns["IPSEC_SERVICES"] and not password:
+        password = ns["random_ipsec_password"]()
+    fmt = ns["fmt"]
+    plan_text = ns["plan_label"](plan)
+    text = (f"🛒 درخواست خرید با پرداخت مستقیم (کارت به کارت)\n"
+            f"📦 {plan_text}\n🧩 سرویس: {SHOP_SERVICES.get(service, service)}\n👤 یوزرنیم: {name}\n"
+            f"💰 مبلغ: {fmt(plan['price'])} تومان\n\n"
+            f"✍️ لطفاً شماره کارت و نام صاحب حساب را در پاسخ همین تیکت بفرستید.")
+    tid = db.create_ticket(uid, text)
+    did = db.x("INSERT INTO direct_orders (user_id,ticket_id,plan_id,service,username,password,amount,status,created_at) "
+               "VALUES (?,?,?,?,?,?,?,'open',?)", (uid, tid, plan["id"], service, name, password, plan["price"], int(time.time())))
+    bot = request.app["tg_app"].bot
+    ns["notify_group"](bot, f"🎫 تیکت خرید مستقیم #{tid}\n👤 {ns['who'](uid)} | 💸 {fmt(plan['price'])} تومان", topic="tickets")
+    btn = ns["btn"]
+    await ns["notify_admin"](bot, f"🎫 تیکت #{tid} — {text}",
+                             reply_markup=ns["InlineKeyboardMarkup"]([[btn("✍️ پاسخ (شماره کارت)", f"tk:reply:{tid}"),
+                                                                       btn("🔒 بستن", f"tk:close:{tid}")]]))
+    return web.json_response({"ok": True, "direct": _direct_json(
+        db.one("SELECT d.*, NULL reply FROM direct_orders d WHERE d.id=?", (did,)))})
+
+
+def _own_direct(uid, did):
+    r = ns["db"].one("SELECT d.*, t.reply FROM direct_orders d LEFT JOIN tickets t ON t.id = d.ticket_id "
+                     "WHERE d.id=? AND d.user_id=?", (did, uid))
+    return r
+
+
+async def api_direct_receipt(request):
+    """رسید یک سفارش مستقیم: مثل api_charge آپلود می‌شود، ولی رسیدِ «خرید» با مشخصات همان سفارش ثبت می‌شود
+    تا تأیید ادمین (rc_approve) مستقیم اکانت را بسازد. بدون تأیید ادمین هیچ اکانتی ساخته نمی‌شود."""
+    uid = request["uid"]
+    db = ns["db"]
+    try:
+        form = await request.post()
+        did = _int(form.get("id"))
+        photo = form.get("photo")
+    except Exception:
+        return _err("form")
+    r = _own_direct(uid, did)
+    if not r or r["status"] != "open":
+        return _err("not_found", 404)
+    if photo is None or not hasattr(photo, "file"):
+        return _err("photo")
+    data = photo.file.read(MAX_RECEIPT_BYTES + 1)
+    if not data or len(data) > MAX_RECEIPT_BYTES:
+        return _err("photo_size")
+    photo_id = await _upload_receipt_photo(request.app["tg_app"].bot, uid, data,
+                                           f"🧾 رسید پرداخت مستقیم — {ns['fmt'](r['amount'])} تومان — {r['username']}")
+    if not photo_id:
+        return _err("telegram", 502)
+    meta = {"plan_id": r["plan_id"], "protocol": r["service"], "username": r["username"], "panel_id": None,
+            "ipsec_password": r["password"] or None, "direct_order_id": r["id"]}
+    rid = db.create_receipt(uid, r["amount"], "purchase", photo_id, meta)
+    db.x("UPDATE direct_orders SET status='receipt', receipt_id=? WHERE id=?", (rid, r["id"]))
+    rec = db.get_receipt(rid)
+    await ns["send_receipt_to_admins"](request.app["tg_app"].bot, rid, photo_id,
+                                       ns["receipt_caption"](rec, f"پرداخت مستقیم خرید (تیکت #{r['ticket_id']}) — {r['username']}"))
+    return web.json_response({"ok": True, "receipt": rid})
+
+
+async def api_direct_cancel(request):
+    uid = request["uid"]
+    r = _own_direct(uid, _int((await _body(request)).get("id")))
+    if not r or r["status"] != "open":
+        return _err("not_found", 404)
+    ns["db"].x("UPDATE direct_orders SET status='cancelled' WHERE id=?", (r["id"],))
+    if r["ticket_id"]:
+        t = ns["db"].get_ticket(r["ticket_id"])
+        if t and t["status"] == "open":
+            ns["db"].set_ticket(t["id"], "closed")
+    return web.json_response({"ok": True})
 
 
 # ---------- تمدید داخل مینی‌اپ (کیف پول) ----------
@@ -358,14 +581,16 @@ async def api_renew(request):
         return _err("busy", 429)
     async with lock:
         bal_before = db.get_balance(uid)
-        if not db.try_spend(uid, plan["price"]):
+        free = ns["has_free_pass"](uid)
+        if not free and not db.try_spend(uid, plan["price"]):
             return _err("balance", 402, need=plan["price"] - bal_before)
         app = request.app["tg_app"]
         ctx = SimpleNamespace(bot=app.bot, application=app, job_queue=app.job_queue, args=[])
         try:
             await ns["do_renew_and_deliver"](None, ctx, uid, order["id"], plan["id"], quiet=True)
         except Exception as e:
-            db.add_balance(uid, plan["price"])
+            if not free:
+                db.add_balance(uid, plan["price"])
             log.warning("miniapp renew %s failed: %s", order["id"], e)
             return _err("renew", 502, detail=str(e)[:200])
         _panel_cache.pop(order["panel_id"], None)
@@ -385,7 +610,7 @@ async def _order_connect(order):
     """اطلاعات اتصال همان‌طور که پنل الان می‌دهد (رمز از پنل، نه از سفارش، تا همانی باشد که نود چک می‌کند)."""
     info = {"id": order["id"], "username": order["username"], "service": order["protocol"],
             "password": order["password"] or "", "sub": ns["public_sub_url"](order["sub_url"] or ""),
-            "guide": ns["public_sub_url"](order["sub_url"]).rstrip("/") + "/guide" if (order["sub_url"] or "").startswith("https://") else None,
+            "guide": _guide_url(order),
             "ikev2": None, "l2tp": None}
     if order["protocol"] not in ns["IPSEC_SERVICES"]:
         return info
@@ -451,6 +676,27 @@ async def api_wallet(request):
     })
 
 
+async def _upload_receipt_photo(bot, uid, data, title):
+    """عکس یک بار در تاپیک «💳 رسید و پرداخت» گروه گزارش آپلود می‌شود تا file_id تلگرام را داشته باشیم؛
+    در چت خود مشتری چیزی نمی‌آید. اگر گروه تنظیم نبود یا نشد، مثل قبل در چت خود مشتری. None اگر نشد."""
+    db = ns["db"]
+    sent = None
+    target = ns["_chat_target"](db.setting("group_id"))
+    if target is not None:
+        try:
+            sent = await bot.send_photo(target, data, message_thread_id=ns["group_thread"]("pay"),
+                                        caption=f"{title}\n👤 {ns['who'](uid)}")
+        except Exception as e:
+            log.warning("miniapp receipt upload to group failed: %s", e)
+    if sent is None:
+        try:
+            sent = await bot.send_photo(uid, data, caption=f"{title}\n✅ ثبت شد و برای ادمین فرستاده شد؛ بعد از تأیید انجام می‌شه.")
+        except Exception as e:
+            log.warning("miniapp receipt photo for %s failed: %s", uid, e)
+            return None
+    return sent.photo[-1].file_id
+
+
 async def api_charge(request):
     """عکس رسید از مینی‌اپ: اول در گروه گزارش آپلود می‌شود (تا file_id تلگرام داشته باشیم)،
     بعد همان مسیر رسید ربات: create_receipt و send_receipt_to_admins."""
@@ -472,25 +718,11 @@ async def api_charge(request):
     data = photo.file.read(MAX_RECEIPT_BYTES + 1)
     if not data or len(data) > MAX_RECEIPT_BYTES:
         return _err("photo_size")
+    photo_id = await _upload_receipt_photo(request.app["tg_app"].bot, uid, data,
+                                           f"🧾 عکس رسید شارژ از مینی‌اپ — {ns['fmt'](amount)} تومان")
+    if not photo_id:
+        return _err("telegram", 502)
     bot = request.app["tg_app"].bot
-    # عکس یک بار در تاپیک «💳 رسید و پرداخت» گروه گزارش آپلود می‌شود تا file_id تلگرام را داشته باشیم؛
-    # در چت خود مشتری چیزی نمی‌آید. اگر گروه تنظیم نبود یا نشد، مثل قبل در چت خود مشتری.
-    sent = None
-    target = ns["_chat_target"](db.setting("group_id"))
-    if target is not None:
-        try:
-            sent = await bot.send_photo(target, data, message_thread_id=ns["group_thread"]("pay"),
-                                        caption=f"🧾 عکس رسید شارژ از مینی‌اپ — {ns['fmt'](amount)} تومان\n👤 {ns['who'](uid)}")
-        except Exception as e:
-            log.warning("miniapp receipt upload to group failed: %s", e)
-    if sent is None:
-        try:
-            sent = await bot.send_photo(uid, data, caption=f"🧾 رسید شارژ کیف پول: {ns['fmt'](amount)} تومان\n"
-                                                          f"✅ ثبت شد و برای ادمین فرستاده شد؛ بعد از تأیید، کیف پول شارژ می‌شود.")
-        except Exception as e:
-            log.warning("miniapp receipt photo for %s failed: %s", uid, e)
-            return _err("telegram", 502)
-    photo_id = sent.photo[-1].file_id
     rid = db.create_receipt(uid, amount, "wallet_charge", photo_id)
     db.set_state(uid, "none")
     r = db.get_receipt(rid)
@@ -1259,6 +1491,7 @@ async def app_js(request):
 async def start(application, bot_globals):
     """از post_init ربات صدا زده می‌شود."""
     ns.update(bot_globals)
+    _APP["app"] = application
     app = web.Application(middlewares=[auth_mw], client_max_size=8 * 1024 * 1024)
     app.router.add_get("/", index)
     app.router.add_get("/app.js", app_js)
@@ -1276,6 +1509,11 @@ async def start(application, bot_globals):
     app.router.add_post("/api/renew", api_renew)
     app.router.add_get("/api/wallet", api_wallet)
     app.router.add_post("/api/charge", api_charge)
+    app.router.add_get("/api/pending", api_pending)
+    app.router.add_post("/api/pending/cancel", api_pending_cancel)
+    app.router.add_post("/api/direct", api_direct)
+    app.router.add_post("/api/direct/receipt", api_direct_receipt)
+    app.router.add_post("/api/direct/cancel", api_direct_cancel)
     app.router.add_post("/api/test", api_test)
     app.router.add_get("/api/admin/summary", api_admin_summary)
     app.router.add_get("/api/admin/receipt_photo", api_admin_receipt_photo)

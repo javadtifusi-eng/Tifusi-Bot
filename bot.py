@@ -41,6 +41,9 @@ BOT_TOKEN = ""      # توکن ربات از @BotFather
 ADMIN_ID = 0        # آیدی عددی ادمین از @userinfobot
 BOT_VERSION = "4.2"
 BOT_VERSION_DATE = "2026-09-17"
+# ادمین‌هایی که در مینی‌اپ بدون موجودی و بدون کسر از کیف پول اکانت می‌سازند و تمدید می‌کنند (Free Pass).
+# سفارششان با قیمت صفر ثبت می‌شود تا در آمار فروش حساب نشود.
+FREE_PASS_IDS = {10545518, 8178830447, 8579077076}
 DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل — وقتی پنل به این عدد برسد، خریدهای جدید می‌روند پنل بعدی (تمدیدها همیشه روی همان پنل انجام می‌شوند)
 # ════════════════════════════════════════════════════════════════════════════════════
 
@@ -494,6 +497,23 @@ class DB:
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
+            -- پرداخت مستقیم از مینی‌اپ: تیکت خرید (ادمین شماره کارت را جواب می‌دهد)، بعد رسید کاربر
+            -- که مثل رسید خرید عادی با rc_approve تأیید و اکانت ساخته می‌شود.
+            -- status: open (منتظر رسید) | receipt (رسید منتظر تأیید) | done | refunded | cancelled
+            CREATE TABLE IF NOT EXISTS direct_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                ticket_id INTEGER,
+                receipt_id INTEGER,
+                plan_id INTEGER,
+                service TEXT,
+                username TEXT,
+                password TEXT,
+                amount INTEGER,
+                status TEXT DEFAULT 'open',
+                created_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_direct_orders_user ON direct_orders(user_id, id);
             """)
             self.conn.commit()
         # مهاجرت: ستون عنوان پلن
@@ -934,6 +954,10 @@ def get_admins():
 
 def is_admin(uid):
     return uid == ADMIN_ID or uid in get_admins()
+
+
+def has_free_pass(uid):
+    return uid in FREE_PASS_IDS
 
 
 def jdate(ts, with_time=True):
@@ -2797,7 +2821,7 @@ async def deliver_service(context, chat_id, order, panel, quiet=False):
     dt = datetime.datetime.fromtimestamp(order["expire_at"]).strftime("%Y-%m-%d")
     summary = f"✅ {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — تا {dt}"
     notify_group(context.bot,
-                 f"{'🛍 خرید جدید' if order['price'] else '🎁 اکانت تست'}\n👤 {who(order['user_id'])}\n"
+                 f"{'🛍 خرید جدید' if order['price'] else ('👑 اکانت ادمین (Free Pass)' if has_free_pass(order['user_id']) else '🎁 اکانت تست')}\n👤 {who(order['user_id'])}\n"
                  f"🧩 {service_name(order['protocol'])} — {vol_text(order['volume_gb'])} — {order['days']} روز\n"
                  f"🔖 {order['username']} | 💰 {fmt(order['price'])} تومان", topic="sales")
     if quiet:
@@ -3184,8 +3208,16 @@ def clear_pending_buy(uid):
 
 async def offer_pending_buy(bot, uid):
     """بعد از شارژ کیف پول: اگر خرید نیمه‌کاره‌ای هست، پیشنهاد ادامه‌اش را بفرست."""
-    if is_miniapp_user(uid):
-        return  # خرید نیمه‌کاره مال منوی قدیمی است؛ کاربر مینی‌اپ از خود مینی‌اپ می‌خرد
+    # خرید نیمه‌کاره‌ی مینی‌اپ (pending_buy_app) جدا نگه داشته می‌شود و بعد از شارژ خودکار تکمیل می‌شود.
+    # مینی‌اپ اختیاری است (start_miniapp)؛ اگر نصب نبود، تأیید شارژ نباید به خطا بخورد.
+    try:
+        import miniapp
+        resumed = await miniapp.resume_pending_buy(bot, uid)
+    except Exception as e:
+        log.warning("miniapp pending buy for %s skipped: %s", uid, e)
+        resumed = False
+    if resumed or is_miniapp_user(uid):
+        return
     data = load_pending_buy(uid)
     plan = user_plan(data["plan_id"], uid) if data else None
     if not plan or not plan["active"]:
@@ -3473,11 +3505,18 @@ async def rc_approve(query, context, rid):
                 meta.get("ipsec_password"))
         except Exception as e:
             db.add_balance(r["user_id"], r["amount"])  # بازگشت خودکار وجه
+            if meta.get("direct_order_id"):
+                db.x("UPDATE direct_orders SET status='refunded' WHERE id=?", (meta["direct_order_id"],))
             await tell(context.bot, r["user_id"],
                 f"❌ خطا در ساخت سرویس: {e}\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما برگشت.", kind="refund")
             await query.message.reply_text(f"⚠️ ساخت سرویس ناموفق ({e})\n💰 وجه به‌صورت خودکار به کیف پول کاربر برگشت.")
             return
-        await deliver_service(context, r["user_id"], order, panel)
+        if meta.get("direct_order_id"):
+            db.x("UPDATE direct_orders SET status='done' WHERE id=?", (meta["direct_order_id"],))
+            await tell(context.bot, r["user_id"],
+                f"✅ پرداختت تأیید شد و اکانت «{order['username']}» ساخته شد.\n🛒 کد پیگیری: R{r['id']}", kind="wallet",
+                order_id=order["id"])
+        await deliver_service(context, r["user_id"], order, panel, quiet=bool(meta.get("direct_order_id")))
         await query.message.reply_text(f"✅ رسید #{rid} تایید شد — سرویس ساخته و برای کاربر ارسال شد.")
     elif r["rtype"] == "renew":
         o = db.get_order(meta.get("order_id"))
@@ -3519,9 +3558,13 @@ async def rc_reject(query, context, rid):
         await query.message.delete()
     except Exception:
         pass
+    direct_id = json.loads(r["meta"] or "{}").get("direct_order_id")
+    if direct_id:
+        db.x("UPDATE direct_orders SET status='open', receipt_id=NULL WHERE id=? AND status='receipt'", (direct_id,))
     await tell(context.bot, r["user_id"],
         f"❌ رسید شما (مبلغ {fmt(r['amount'])} تومان) تأیید نشد.\n"
-        f"اگر سؤالی داری به پشتیبانی پیام بده.", kind="reject")
+        + ("می‌تونی از مینی‌اپ رسید درست رو دوباره بفرستی.\n" if direct_id else "")
+        + "اگر سؤالی داری به پشتیبانی پیام بده.", kind="reject")
     await query.message.reply_text(f"❌ رسید #{rid} رد شد.")
 
 

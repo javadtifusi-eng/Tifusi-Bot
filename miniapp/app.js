@@ -108,6 +108,42 @@
   const S = { me: null, customers: [], stats: { ok: 0, warn: 0, bad: 0 }, shop: [], tab: "home", filt: "all", q: "", kind: null, card: null };
   const TABS = [["home", "home", "خانه"], ["customers", "users", "کاربران"], ["buy", "bag", "خرید"], ["wallet", "wallet", "کیف پول"], ["help", "help", "آموزش"]];
 
+  // خرید معلق (موجودی کم بود) و خریدهای «پرداخت مستقیم» باز، بالای تب کیف پول
+  function pendingCards() {
+    const pd = S.pend && S.pend.pending, dirs = (S.pend && S.pend.direct) || [];
+    const pname = (p) => `${p.gb ? `${num(p.gb)} گیگ` : `نامحدود${p.users ? ` ${num(p.users)} کاربره` : ""}`} · ${num(p.days)} روزه`;
+    let out = "";
+    if (pd) out += `<div class="glass sec" style="display:grid;gap:8px"><b>🛒 خرید معلق</b>
+      <div class="lrow"><span class="d">${esc(pd.service_label)}</span><span class="v">${pname(pd.plan)}${pd.qty > 1 ? ` × ${num(pd.qty)}` : ""}</span></div>
+      <div class="lrow"><span class="d">مبلغ کل</span><span class="v">${toman(pd.total)}</span></div>
+      ${pd.need ? `<div class="lrow"><span class="d">کمبود</span><span class="v">${toman(pd.need)}</span></div>` : ""}
+      <p class="soon" style="text-align:right;margin:0">بعد از تأیید شارژ توسط ادمین، همین خرید خودکار ساخته می‌شه؛ لازم نیست دوباره پلن و حجم و مدت رو انتخاب کنی.</p>
+      <button class="pill ghost" type="button" data-pcancel="1" style="justify-content:center">لغو خرید معلق</button></div>`;
+    out += dirs.map((o) => `<div class="glass sec" style="display:grid;gap:8px"><b>💳 پرداخت مستقیم · <span class="num">${esc(o.username)}</span></b>
+      <div class="lrow"><span class="d">${esc(o.service_label)}</span><span class="v">${toman(o.amount)}</span></div>
+      ${o.card ? `<div class="glass cardno" style="display:grid;gap:6px"><span style="color:var(--muted);font-size:.8rem">پاسخ ادمین (شماره کارت)</span><span style="white-space:pre-wrap;line-height:1.9">${esc(o.card)}</span></div>`
+        : `<p class="soon" style="text-align:right;margin:0">⏳ منتظر شماره کارت از ادمین (تیکت #${num(o.ticket)})…</p>`}
+      ${o.status === "receipt" ? '<p class="soon" style="text-align:right;margin:0">🧾 رسید فرستاده شد؛ منتظر تأیید ادمین.</p>'
+        : `${o.card ? `<label class="upl" for="drc${o.id}">${ic("refresh")} <span id="drn${o.id}">انتخاب عکس رسید</span></label><input id="drc${o.id}" data-drc="${o.id}" type="file" accept="image/*" hidden>
+           <button class="cta" type="button" data-dsend="${o.id}">ارسال رسید این خرید</button>` : ""}
+           <button class="pill ghost" type="button" data-dcancel="${o.id}" style="justify-content:center">لغو این خرید</button>`}</div>`).join("");
+    return out;
+  }
+  async function directReceipt(id, btn) {
+    const input = $("drc" + id);
+    if (!input || !input.files || !input.files[0]) { toast("اول عکس رسید رو انتخاب کن"); return; }
+    const fd = new FormData(); fd.append("id", String(id)); fd.append("photo", input.files[0]);
+    btn.disabled = true; btn.textContent = "در حال ارسال…";
+    try {
+      const r = await fetch("api/direct/receipt", { method: "POST", headers: { "X-Init-Data": INIT }, body: fd });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || "error");
+      toast("✅ رسید فرستاده شد؛ بعد از تأیید ادمین اکانت ساخته می‌شه"); S.wallet = null; render();
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "ارسال رسید این خرید";
+      toast({ photo: "عکس رسید رو انتخاب کن", photo_size: "عکس خیلی بزرگه (حداکثر 8 مگ)", not_found: "این خرید دیگه باز نیست" }[e.message] || "ارسال نشد؛ دوباره امتحان کن");
+    }
+  }
+
   function custLine(c) {
     const vol = c.limit ? `${num(gb(c.used))} گیگ از ${num(gb(c.limit))} گیگ` : `نامحدود · ${num(gb(c.used))} گیگ`;
     const left = c.days_left === null ? "بدون انقضا" : c.state === "bad" ? "تمام شده" : `${num(c.days_left)} روز مانده`;
@@ -155,6 +191,7 @@
       if (!w) { loadWallet(); return '<div class="loading">در حال بارگذاری…</div>'; }
       const st = { pending: ["در انتظار تأیید", "warn"], approved: ["تأیید شد", "ok"], rejected: ["رد شد", "bad"] };
       return `<div class="ptitle"><b>کیف پول</b><small>موجودی و شارژ</small></div>
+      ${pendingCards()}
       <div class="glass bigw"><div class="top"><div><div style="color:var(--muted);font-size:.85rem">موجودی کیف پول</div><div class="v">${toman(w.balance)}</div></div><div class="wicon" aria-hidden="true"></div></div></div>
       <div class="amts">${[50000, 100000, 200000, 500000].map((a) => `<button type="button" data-amt="${a}" aria-pressed="${S.amt === a}">${num(a / 1000)} هزار</button>`).join("")}</div>
       <label class="field" for="camt">یا مبلغ دلخواه (تومان)<input id="camt" inputmode="numeric" placeholder="${n(w.min)} تا ${n(w.max)}" value="${S.amt && ![50000, 100000, 200000, 500000].includes(S.amt) ? S.amt : ""}"></label>
@@ -891,12 +928,13 @@
     S.buy = { svc, p, qty: 1 };
     const name = p.gb ? `${num(p.gb)} گیگ` : `نامحدود${p.users ? ` ${num(p.users)} کاربره` : ""}`;
     $("sheet").innerHTML = `<h3 id="sheetTitle">خرید ${esc(svc.label)}</h3>
-      <div class="sum"><div><span>پلن</span><span>${name} · ${num(p.days)} روزه</span></div><div><span>قیمت هر اکانت</span><span>${toman(p.price)}</span></div><div><span>موجودی</span><span>${toman(S.me.balance)}</span></div></div>
+      <div class="sum"><div><span>پلن</span><span>${name} · ${num(p.days)} روزه</span></div><div><span>قیمت هر اکانت</span><span>${toman(p.price)}</span></div>${S.me.free_pass ? '<div><span>پرداخت</span><span>👑 رایگان (Free Pass)</span></div>' : `<div><span>موجودی</span><span>${toman(S.me.balance)}</span></div>`}</div>
       <label class="field" for="bu">یوزرنیم (یه اسم تصادفی گذاشتیم؛ اگه خواستی عوضش کن)<input id="bu" autocomplete="off" placeholder="ali12" maxlength="20" value="${randName()}"></label>
       ${ipsec ? '<label class="field" for="bp">رمز 6 رقمی (خالی بذاری خودش می‌سازه)<input id="bp" inputmode="numeric" maxlength="6" placeholder="123456"></label>' : ""}
       <div class="stepper"><button class="pill ghost" type="button" data-q="-1" aria-label="کمتر">−</button><output id="bq"></output><button class="pill ghost" type="button" data-q="1" aria-label="بیشتر">+</button></div>
       <p class="soon" id="bnote" style="margin:0"></p>
       <button class="cta" type="button" id="bpay">پرداخت از کیف پول</button>
+      ${S.me.free_pass ? "" : '<button class="pill" type="button" id="bdirect" style="justify-content:center">💳 پرداخت مستقیم (کارت به کارت)</button>'}
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
     updBuy();
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
@@ -905,17 +943,39 @@
     const b = S.buy, total = b.p.price * b.qty, short = total - S.me.balance;
     $("bq").innerHTML = `${num(b.qty)} اکانت · ${toman(total)}`;
     $("bnote").textContent = b.qty > 1 ? "یوزرنیم‌ها پشت سر هم ساخته می‌شن (ali12، ali122، …) و هر کدوم رمز جدا می‌گیره." : "";
-    const btn = $("bpay");
-    if (short > 0) { btn.textContent = `موجودی کافی نیست (${n(short)} تومان کم داری) · شارژ`; btn.dataset.short = "1"; }
+    const btn = $("bpay"), direct = $("bdirect");
+    if (direct) direct.hidden = b.qty > 1;  // پرداخت مستقیم یک اکانت در هر درخواست
+    if (S.me.free_pass) { btn.textContent = "👑 ساخت رایگان (Free Pass)"; delete btn.dataset.short; }
+    else if (short > 0) { btn.textContent = `${n(short)} تومان کم داری · ذخیره‌ی خرید و شارژ`; btn.dataset.short = "1"; }
     else { btn.textContent = "پرداخت از کیف پول"; delete btn.dataset.short; }
   }
-  async function payBuy() {
-    const b = S.buy, btn = $("bpay");
-    if (btn.dataset.short) { closeSheet(); S.tab = "wallet"; render(); return; }
+  function buyInputs() {
     const username = ($("bu").value || "").trim(), password = $("bp") ? ($("bp").value || "").trim() : "";
-    if (username && !/^[A-Za-z][A-Za-z0-9_]{2,19}$/.test(username)) { toast("یوزرنیم: با حرف انگلیسی شروع بشه، 3 تا 20 کاراکتر، فقط حرف و عدد و _"); return; }
-    if (password && !/^[0-9۰-۹]{6}$/.test(password)) { toast("رمز باید دقیقاً 6 رقم باشه"); return; }
-    btn.disabled = true; btn.textContent = "در حال ساخت…";
+    if (username && !/^[A-Za-z][A-Za-z0-9_]{2,19}$/.test(username)) { toast("یوزرنیم: با حرف انگلیسی شروع بشه، 3 تا 20 کاراکتر، فقط حرف و عدد و _"); return null; }
+    if (password && !/^[0-9۰-۹]{6}$/.test(password)) { toast("رمز باید دقیقاً 6 رقم باشه"); return null; }
+    return { username, password };
+  }
+  async function directBuy() {
+    const b = S.buy, btn = $("bdirect"), v = buyInputs();
+    if (!v) return;
+    btn.disabled = true; btn.textContent = "در حال ثبت درخواست…";
+    try {
+      const j = await api("direct", { method: "POST", body: JSON.stringify({ service: b.svc.service, plan_id: b.p.id, username: v.username, password: v.password }) });
+      S.wallet = null;
+      $("sheet").innerHTML = `<h3 id="sheetTitle">✅ درخواست خرید ثبت شد</h3>
+        <div class="sum"><div><span>یوزرنیم</span><span class="num">${esc(j.direct.username)}</span></div>${j.direct.password ? `<div><span>رمز</span><span class="num">${esc(j.direct.password)}</span></div>` : ""}<div><span>مبلغ</span><span>${toman(j.direct.amount)}</span></div><div><span>تیکت</span><span class="num">#${j.direct.ticket}</span></div></div>
+        <p class="soon" style="text-align:right;margin:0">ادمین شماره کارت رو برات می‌فرسته (توی 🔔 اعلان‌ها و تب کیف پول). بعد از واریز، از تب کیف پول رسید همین خرید رو بفرست؛ با تأیید ادمین اکانت ساخته می‌شه.</p>
+        <button class="cta" type="button" data-go="wallet" data-act="close">رفتن به کیف پول</button>`;
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "💳 پرداخت مستقیم (کارت به کارت)";
+      toast({ capacity: "این سرویس الان ظرفیت نداره", username: "یوزرنیم درست نیست", username_taken: "این یوزرنیم گرفته شده؛ یکی دیگه بنویس", password: "رمز باید 6 رقم باشه", plan: "این پلن دیگه فروخته نمی‌شه", too_many: "چند تا خرید مستقیم باز داری؛ اول اونا رو تموم یا لغو کن" }[e.message] || "ثبت نشد؛ دوباره امتحان کن");
+    }
+  }
+  async function payBuy() {
+    const b = S.buy, btn = $("bpay"), v = buyInputs();
+    if (!v) return;
+    const { username, password } = v;
+    btn.disabled = true; btn.textContent = btn.dataset.short ? "در حال ذخیره‌ی خرید…" : "در حال ساخت…";
     try {
       const r = await fetch("api/buy", { method: "POST", headers: { "X-Init-Data": INIT, "Content-Type": "application/json" },
         body: JSON.stringify({ service: b.svc.service, plan_id: b.p.id, qty: b.qty, username, password }) });
@@ -925,6 +985,12 @@
       showMade(j.made, j.failed);
       reload();
     } catch (e) {
+      if (e.j && e.j.pending) {
+        // خرید معلق ذخیره شد: بعد از تأیید شارژ، همین پلن خودکار ساخته می‌شه
+        closeSheet(); S.amt = e.j.need; S.wallet = null; S.tab = "wallet"; render(); scrollTo(0, 0);
+        toast("🛒 خریدت ذخیره شد؛ بعد از تأیید شارژ خودکار ساخته می‌شه");
+        return;
+      }
       btn.disabled = false; updBuy();
       const m = { balance: "موجودی کافی نیست", capacity: "این سرویس الان ظرفیت نداره", username: "یوزرنیم درست نیست", password: "رمز باید 6 رقم باشه", busy: "یه خرید دیگه در جریانه", plan: "این پلن دیگه فروخته نمی‌شه" }[e.message];
       toast(m || "ساخت نشد؛ پولت برگشت به کیف پول");
@@ -936,12 +1002,14 @@
       ${made.map((m, i) => `<div class="glass sec" style="display:grid;gap:8px;padding:12px 14px">
         <div class="lrow"><span class="d">${ic("user")} یوزرنیم</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.username)}</span><button class="pill ghost" type="button" data-copy="${esc(m.username)}" aria-label="کپی یوزرنیم">کپی</button></span></div>
         ${m.password ? `<div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.password)}</span><button class="pill ghost" type="button" data-copy="${esc(m.password)}" aria-label="کپی رمز">کپی</button></span></div>` : ""}
-        <button class="cta" type="button" data-conn="${m.id}" style="padding:13px">${ic("apple")} نصب پروفایل و اطلاعات اتصال</button>
+        ${m.sub ? `<div style="display:grid;gap:8px;justify-items:center"><img data-qr="sub" data-qid="${m.id}" alt="QR لینک اشتراک" style="width:180px;height:180px;border-radius:14px;background:#fff;padding:8px">${crow("لینک اشتراک", m.sub)}</div>`
+          : `<button class="cta" type="button" data-conn="${m.id}" style="padding:13px">${ic("apple")} نصب پروفایل و اطلاعات اتصال</button>`}
         <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill ghost" type="button" data-send="${m.id}" style="justify-content:center">${ic("link")} ارسال برای مشتری</button>${m.guide ? `<button class="pill ghost" type="button" data-mguide="${i}" style="justify-content:center">${ic("help")} راهنما</button>` : ""}</div>
       </div>`).join("")}
       ${failed ? `<p class="soon" style="color:#ff9a9a">بقیه ساخته نشد (${esc(failed)})؛ پولش به کیف پول برگشت.</p>` : ""}
       <p class="soon">همه‌ی اطلاعات توی تب «کاربران» هم هست.</p>
       <button class="cta" type="button" data-act="close">باشه</button>`;
+    loadQrs();
   }
   async function openRenew(oid) {
     let j;
@@ -958,9 +1026,10 @@
   function pickRenew(pid) {
     const r = S.renew; r.pick = r.plans.find((p) => p.id === +pid);
     document.querySelectorAll("[data-rp]").forEach((x) => x.setAttribute("aria-pressed", String(+x.dataset.rp === r.pick.id)));
-    const btn = $("rpay"), short = r.pick.price - S.me.balance;
+    const btn = $("rpay"), short = S.me.free_pass ? 0 : r.pick.price - S.me.balance;
     btn.disabled = false;
-    if (short > 0) { btn.textContent = `${n(short)} تومان کم داری · شارژ`; btn.dataset.short = "1"; }
+    if (S.me.free_pass) { btn.textContent = "👑 تمدید رایگان (Free Pass)"; delete btn.dataset.short; }
+    else if (short > 0) { btn.textContent = `${n(short)} تومان کم داری · شارژ`; btn.dataset.short = "1"; }
     else { btn.textContent = `تمدید با ${n(r.pick.price)} تومان از کیف پول`; delete btn.dataset.short; }
   }
   async function payRenew() {
@@ -978,7 +1047,12 @@
     } catch (e) { btn.disabled = false; pickRenew(r.pick.id); toast(e.message === "balance" ? "موجودی کافی نیست" : "تمدید نشد؛ پولت برگشت به کیف پول"); }
   }
   async function loadWallet() {
-    try { S.wallet = await api("wallet"); S.me.balance = S.wallet.balance; if (S.tab === "wallet") render(); } catch (e) { toast("الان نشد اطلاعات کیف پول رو بگیرم"); }
+    try {
+      const [w, p] = await Promise.all([api("wallet"), api("pending")]);
+      S.wallet = w; S.pend = p; S.me.balance = w.balance;
+      if (S.amt == null && p.pending && p.pending.need) S.amt = p.pending.need;
+      if (S.tab === "wallet") render();
+    } catch (e) { toast("الان نشد اطلاعات کیف پول رو بگیرم"); }
   }
   async function sendReceipt() {
     const input = $("rcpt"), btn = $("csend");
@@ -1058,7 +1132,7 @@
     const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
     if (d.tab) { closeSheet(); S.tab = d.tab; render(); scrollTo(0, 0); return; }
     if (d.cardlist) { S.card = null; render(); scrollTo(0, 0); return; }
-    if (d.go) { S.tab = d.go; render(); scrollTo(0, 0); return; }
+    if (d.go) { closeSheet(); S.tab = d.go; render(); scrollTo(0, 0); return; }
     if (d.f) { S.filt = d.f; S.tab = "customers"; render(); return; }
     if (d.kind) { S.kind = d.kind; render(); return; }
     if (d.card) { S.card = +d.card; S.tab = "card"; render(); scrollTo(0, 0); return; }
@@ -1074,6 +1148,17 @@
     if (d.mguide) { const m = S.made[+d.mguide]; if (m) openLink(m.guide); return; }
     if (d.msend) { const m = S.made[+d.msend]; if (m) openSend({ id: m.id }); return; }
     if (b.id === "bpay") { payBuy(); return; }
+    if (b.id === "bdirect") { directBuy(); return; }
+    if (d.pcancel) { api("pending/cancel", { method: "POST", body: "{}" }).then(() => { S.amt = null; S.wallet = null; render(); toast("خرید معلق لغو شد"); }).catch(() => toast("الان نشد؛ دوباره امتحان کن")); return; }
+    if (d.dsend) { directReceipt(+d.dsend, b); return; }
+    if (d.dcancel) {
+      $("sheet").innerHTML = `<h3 id="sheetTitle">این خرید لغو بشه؟</h3>
+        <p style="margin:0;line-height:1.9">اگه پول رو واریز کردی، لغو نکن؛ رسیدش رو بفرست.</p>
+        <button class="cta" type="button" data-dcancelyes="${d.dcancel}" style="background:linear-gradient(180deg,#ff7b7b,#d63a3a);color:#fff">بله، لغو کن</button>
+        <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+      $("sheet").classList.add("open"); $("scrim").classList.add("open"); return;
+    }
+    if (d.dcancelyes) { api("direct/cancel", { method: "POST", body: JSON.stringify({ id: +d.dcancelyes }) }).then(() => { closeSheet(); S.wallet = null; render(); toast("خرید لغو شد"); }).catch(() => toast("الان نشد؛ دوباره امتحان کن")); return; }
     if (d.goto === "buy") { S.tab = "buy"; render(); scrollTo(0, 0); return; }
     if (d.goto === "support") { support(); return; }
     if (d.goto === "test") { testAccount(b); return; }
@@ -1156,7 +1241,10 @@
     if (t.dataset && t.dataset.tkt) { (S.tkr = S.tkr || {})[t.dataset.tkt] = t.value; return; }
   });
   document.addEventListener("input", (e) => { if (e.target.id === "hq") { S.hq = e.target.value; const p = e.target.selectionStart; render(); const x = $("hq"); x.focus(); x.setSelectionRange(p, p); return; } if (e.target.id === "cq") { S.cq = e.target.value; const p = e.target.selectionStart; render(); const x = $("cq"); x.focus(); x.setSelectionRange(p, p); return; } if (e.target.id === "q") { S.q = e.target.value; const p = e.target.selectionStart; render(); const x = $("q"); x.focus(); x.setSelectionRange(p, p); } });
-  document.addEventListener("change", (e) => { if (e.target.id === "rcpt" && e.target.files[0]) { const l = $("rname"); if (l) l.textContent = "✓ " + e.target.files[0].name; } });
+  document.addEventListener("change", (e) => {
+    if (e.target.id === "rcpt" && e.target.files[0]) { const l = $("rname"); if (l) l.textContent = "✓ " + e.target.files[0].name; }
+    if (e.target.dataset && e.target.dataset.drc && e.target.files[0]) { const l = $("drn" + e.target.dataset.drc); if (l) l.textContent = "✓ " + e.target.files[0].name; }
+  });
   $("scrim").onclick = closeSheet;
 
   async function boot() {
