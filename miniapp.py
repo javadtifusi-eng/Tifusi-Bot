@@ -124,6 +124,8 @@ def _customer(order, pu):
         "used": used, "limit": limit, "expire": expire or None, "days_left": left_days,
         "panel_status": pstatus, "on": pstatus != "disabled", "state": state,
         "guide": _guide_url(order),
+        # لینک اشتراک برای کپی و بارکد در جزئیات کاربر (QR از /api/qr?kind=sub)
+        "sub": sub if sub.startswith("https://") else None,
     }
 
 

@@ -252,13 +252,20 @@
         <div><h3 style="direction:ltr;text-align:right">${esc(c.username)}</h3><div class="pl">${esc(c.service_name)}</div><div class="chips">${c.service === "xray" ? '<span class="chip">VLESS</span>' : '<span class="chip">IKEv2</span><span class="chip">L2TP</span>'}</div></div></div>
         <div class="days"><span>${c.days_left === null ? "بدون انقضا" : `${num(c.days_left)} روز مانده`}</span></div><div class="dbar"><i style="width:${c.days_left === null ? 100 : Math.min(100, (c.days_left / 30) * 100)}%"></i></div>
         <button class="cta" type="button" data-conn="${c.id}">${ic("apple")} نصب پروفایل و اطلاعات اتصال</button>
-        <div class="sacts"><button class="pill" type="button" data-renew="${c.id}">تمدید</button><button class="pill ghost" type="button" data-send="${c.id}">${ic("link")} ارسال</button><button class="pill ghost" type="button" data-guide="${c.id}">${ic("help")} راهنما</button></div></div>
+        <div class="sacts"${c.guide ? "" : ' style="grid-template-columns:1fr 1fr"'}><button class="pill" type="button" data-renew="${c.id}">تمدید</button><button class="pill ghost" type="button" data-send="${c.id}">${ic("link")} ارسال</button>${c.guide ? `<button class="pill ghost" type="button" data-guide="${c.id}">${ic("help")} راهنما</button>` : ""}</div></div>
       <div class="glass sec info">
         <div class="lrow"><span class="d">${ic("user")} نام کاربری</span><span class="v">${esc(c.username)}</span></div>
         <div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="v num" id="cpw">…</span><button class="pill ghost" type="button" id="cpwcopy" hidden>کپی</button></span></div>
         <div class="lrow"><span class="d">${ic("layers")} سرویس</span><span class="v">${esc(c.service_name)}</span></div>
         <div class="lrow"><span class="d">${ic("check")} وضعیت</span><span style="color:${c.on ? "var(--ok)" : "#ff7b7b"};font-weight:700">${c.on ? "فعال" : "غیرفعال"}</span></div>
-      </div>`;
+      </div>
+      ${c.sub ? `<div class="glass sec" style="display:grid;gap:10px;justify-items:center">
+        <b style="justify-self:start">${ic("link")} لینک اشتراک</b>
+        <img data-qr="sub" data-qid="${c.id}" alt="QR لینک اشتراک ${esc(c.username)}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
+        <div class="num" style="width:100%;direction:ltr;text-align:left;word-break:break-all;font-size:.74rem;line-height:1.7;padding:10px 12px;border-radius:12px;background:var(--glass);user-select:all">${esc(c.sub)}</div>
+        <button class="cta" type="button" data-copy="${esc(c.sub)}" style="width:100%">${ic("link")} کپی لینک اشتراک</button>
+        <small style="color:var(--muted);line-height:1.8;text-align:center">مشتری با اپ (v2rayNG، Hiddify، …) این بارکد رو اسکن کنه یا لینک رو کپی و وارد کنه.</small>
+      </div>` : ""}`;
     }
   };
 
@@ -814,7 +821,7 @@
   function render() {
     $("app").innerHTML = V[S.tab]();
     if (S.tab === "admin") loadReceiptImages();
-    if (S.tab === "card" && S.card) loadCardPw(S.card);
+    if (S.tab === "card" && S.card) { loadCardPw(S.card); loadQrs(); }
     $("bgart").classList.toggle("dim", S.tab !== "home");
     const tabs = S.me && S.me.is_admin ? TABS.concat([["admin", "crown", "مدیریت"]]) : TABS;
     $("tabs").style.gridTemplateColumns = `repeat(${tabs.length},1fr)`;
