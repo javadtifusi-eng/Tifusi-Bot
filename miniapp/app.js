@@ -144,6 +144,12 @@
     }
   }
 
+  // نشانگر وضعیت داخل کارت سرویس
+  function statusPill(c) {
+    const [t, col] = !c.on ? ["غیرفعال", "#ff7b7b"] : c.state === "bad" ? ["تمام‌شده", "#ff7b7b"] : c.state === "warn" ? ["رو به اتمام", "#f0a43a"] : ["فعال", "#3ddc84"];
+    return `<span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 11px;border-radius:99px;font-size:.78rem;font-weight:700;color:${col};background:${col}1f;border:1px solid ${col}55"><i style="width:7px;height:7px;border-radius:50%;background:${col};box-shadow:0 0 8px ${col}"></i>${t}</span>`;
+  }
+
   function custLine(c) {
     const vol = c.limit ? `${num(gb(c.used))} گیگ از ${num(gb(c.limit))} گیگ` : `نامحدود · ${num(gb(c.used))} گیگ`;
     const left = c.days_left === null ? "بدون انقضا" : c.state === "bad" ? "تمام شده" : `${num(c.days_left)} روز مانده`;
@@ -249,23 +255,13 @@
       <div class="glass svc"><div class="svctop">
         <div class="ring"><svg viewBox="0 0 118 118"><circle cx="59" cy="59" r="50" fill="none" stroke="var(--track)" stroke-width="9"/><circle cx="59" cy="59" r="50" fill="none" stroke="${frac > 0.85 && c.limit ? "#f0a43a" : "var(--cyan)"}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C * frac} ${C}"/></svg>
           <div class="c"><div>${c.limit ? `<b class="num">${gb(Math.max(0, c.limit - c.used))} GB</b><br><small>مونده از ${num(gb(c.limit))} گیگ</small>` : `<b>∞</b><br><small>نامحدود</small>`}</div></div></div>
-        <div><h3 style="direction:ltr;text-align:right">${esc(c.username)}</h3><div class="pl">${esc(c.service_name)}</div><div class="chips">${c.service === "xray" ? '<span class="chip">VLESS</span>' : '<span class="chip">IKEv2</span><span class="chip">L2TP</span>'}</div></div></div>
+        <div><h3 style="direction:ltr;text-align:right">${esc(c.username)}</h3><div class="pl">${esc(c.service_name)}</div><div class="chips">${c.service === "xray" ? '<span class="chip">VLESS</span>' : '<span class="chip">IKEv2</span><span class="chip">L2TP</span><span class="chip">PPTP</span>'}</div>${statusPill(c)}</div></div>
         <div class="days"><span>${c.days_left === null ? "بدون انقضا" : `${num(c.days_left)} روز مانده`}</span></div><div class="dbar"><i style="width:${c.days_left === null ? 100 : Math.min(100, (c.days_left / 30) * 100)}%"></i></div>
-        <button class="cta" type="button" data-conn="${c.id}">${ic("apple")} نصب پروفایل و اطلاعات اتصال</button>
-        <div class="sacts"${c.guide ? "" : ' style="grid-template-columns:1fr 1fr"'}><button class="pill" type="button" data-renew="${c.id}">تمدید</button><button class="pill ghost" type="button" data-send="${c.id}">${ic("link")} ارسال</button>${c.guide ? `<button class="pill ghost" type="button" data-guide="${c.id}">${ic("help")} راهنما</button>` : ""}</div></div>
-      <div class="glass sec info">
-        <div class="lrow"><span class="d">${ic("user")} نام کاربری</span><span class="v">${esc(c.username)}</span></div>
-        <div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="v num" id="cpw">…</span><button class="pill ghost" type="button" id="cpwcopy" hidden>کپی</button></span></div>
-        <div class="lrow"><span class="d">${ic("layers")} سرویس</span><span class="v">${esc(c.service_name)}</span></div>
-        <div class="lrow"><span class="d">${ic("check")} وضعیت</span><span style="color:${c.on ? "var(--ok)" : "#ff7b7b"};font-weight:700">${c.on ? "فعال" : "غیرفعال"}</span></div>
-      </div>
-      ${c.sub ? `<div class="glass sec" style="display:grid;gap:10px;justify-items:center">
-        <b style="justify-self:start">${ic("link")} لینک اشتراک</b>
-        <img data-qr="sub" data-qid="${c.id}" alt="QR لینک اشتراک ${esc(c.username)}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
-        <div class="num" style="width:100%;direction:ltr;text-align:left;word-break:break-all;font-size:.74rem;line-height:1.7;padding:10px 12px;border-radius:12px;background:var(--glass);user-select:all">${esc(c.sub)}</div>
-        <button class="cta" type="button" data-copy="${esc(c.sub)}" style="width:100%">${ic("link")} کپی لینک اشتراک</button>
-        <small style="color:var(--muted);line-height:1.8;text-align:center">مشتری با اپ (v2rayNG، Hiddify، …) این بارکد رو اسکن کنه یا لینک رو کپی و وارد کنه.</small>
-      </div>` : ""}`;
+        <button class="pill" type="button" data-renew="${c.id}" style="justify-content:center;width:100%">♻️ تمدید</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <button class="cta" type="button" data-conn="${c.id}" data-os="ios" style="padding:13px 8px;display:flex;align-items:center;justify-content:center;gap:6px">${ic("apple")} نصب پروفایل</button>
+          <button class="cta" type="button" data-conn="${c.id}" data-os="android" style="padding:13px 8px;display:flex;align-items:center;justify-content:center;gap:6px"><span style="color:#3ddc84;display:inline-flex">${ic("android")}</span> جهت اتصال</button>
+        </div></div>`;
     }
   };
 
@@ -821,7 +817,7 @@
   function render() {
     $("app").innerHTML = V[S.tab]();
     if (S.tab === "admin") loadReceiptImages();
-    if (S.tab === "card" && S.card) { loadCardPw(S.card); loadQrs(); }
+
     $("bgart").classList.toggle("dim", S.tab !== "home");
     const tabs = S.me && S.me.is_admin ? TABS.concat([["admin", "crown", "مدیریت"]]) : TABS;
     $("tabs").style.gridTemplateColumns = `repeat(${tabs.length},1fr)`;
@@ -848,26 +844,43 @@
     return lines.join("\n");
   }
   const crow = (label, v) => `<div class="lrow"><span class="d">${label}</span><span class="cacts"><span class="num" style="font-weight:700;direction:ltr">${esc(v)}</span><button class="pill ghost" type="button" data-copy="${esc(v)}">کپی</button></span></div>`;
-  async function openConnect(id) {
-    $("sheet").innerHTML = '<h3 id="sheetTitle">نصب و اطلاعات اتصال</h3>' + LOADING;
+  // نصب پروفایل (اپل) / جهت اتصال (اندروید). VLESS: بارکد + کپی لینک ساب. IKEv2/L2TP/PPTP روی اندروید
+  // بارکد ندارند: فقط دکمه‌های کپی، بدون نمایش مقدارها. آیفون: QR و نصب یک‌لمسی پروفایل.
+  async function openConnect(id, os) {
+    const android = os === "android";
+    const title = android ? `<span style="color:#3ddc84;display:inline-flex">${ic("android")}</span> جهت اتصال` : `${ic("apple")} نصب پروفایل`;
+    $("sheet").innerHTML = `<h3 id="sheetTitle" style="display:flex;gap:8px;align-items:center">${title}</h3>` + LOADING;
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
     let x;
     try { x = await getConn(id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
-    const ios = (k, title) => x[k] && x[k].install ? `<div class="glass sec" style="display:grid;gap:10px;justify-items:center;text-align:center">
-        <b>${title}</b>
-        <img data-qr="${k}" data-qid="${x.id}" alt="QR نصب ${title}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
-        <small style="color:var(--muted);line-height:1.8">آیفون مشتری: دوربین رو باز کنه و این QR رو اسکن کنه، پروفایل روی گوشی خودش نصب می‌شه.</small>
-        <button class="pill" type="button" data-install="${esc(x[k].install)}" style="justify-content:center;width:100%">${ic("apple")} نصب روی همین گوشی</button></div>` : "";
-    const andr = (k) => x[k] ? `<div class="glass sec" style="padding:8px 14px"><b style="font-size:.88rem">${k === "ikev2" ? "IKEv2 (پیشنهادی)" : "L2TP (گوشی‌های قدیمی‌تر)"}</b>
-        ${crow("نوع", TYPE[k])}${crow("سرور", x[k].server)}${crow("نام کاربری", x.username)}${x.password ? crow("رمز", x.password) : ""}
-        ${k === "l2tp" && x.l2tp.secret ? crow("کلید IPSec (Secret)", x.l2tp.secret) + '<small style="color:var(--muted)">«شناسه IPSec» خالی بمونه.</small>' : ""}</div>` : "";
-    const ipsec = x.ikev2 || x.l2tp;
-    $("sheet").innerHTML = `<h3 id="sheetTitle" style="display:flex;gap:8px;align-items:center">${ic("apple")} ${esc(x.username)}</h3>
-      ${ipsec ? `<div class="filters"><button type="button" aria-pressed="${S.cos !== "android"}" data-cos="ios">🍎 آیفون</button><button type="button" aria-pressed="${S.cos === "android"}" data-cos="android">🤖 اندروید</button></div>
-        <div data-cpane="ios"${S.cos === "android" ? " hidden" : ""} style="display:grid;gap:10px">${ios("ikev2", "IKEv2 (پیشنهادی)")}${ios("l2tp", "L2TP")}</div>
-        <div data-cpane="android"${S.cos === "android" ? "" : " hidden"} style="display:grid;gap:10px">${andr("ikev2")}${andr("l2tp")}<small style="color:var(--muted);line-height:1.8">تنظیمات گوشی ← اتصال‌ها ← VPN ← افزودن، و همین‌ها رو وارد کن.</small></div>`
-      : `<div class="glass sec" style="display:grid;gap:10px;justify-items:center"><img data-qr="sub" data-qid="${x.id}" alt="QR لینک اشتراک" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">${x.sub ? crow("لینک اشتراک", x.sub) : ""}</div>`}
-      ${x.guide ? `<button class="pill ghost" type="button" data-openurl="${esc(x.guide)}" style="justify-content:center">${ic("help")} راهنمای تصویری قدم‌به‌قدم</button>` : ""}
+    const cbtn = (label, v, icon) => v ? `<button class="pill" type="button" data-copy="${esc(v)}" style="justify-content:center;gap:6px;padding:12px 8px">${icon ? ic(icon) : ""}${label}</button>` : "";
+    const ipsec = x.ikev2 || x.l2tp || x.pptp;
+    let body;
+    if (!ipsec) {
+      body = `<div class="glass sec" style="display:grid;gap:12px;justify-items:center">
+        <img data-qr="sub" data-qid="${x.id}" alt="QR لینک ساب" style="width:200px;height:200px;border-radius:14px;background:#fff;padding:8px">
+        ${x.sub ? `<button class="cta" type="button" data-copy="${esc(x.sub)}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px">${ic("link")} کپی لینک ساب</button>` : ""}
+        <small style="color:var(--muted);line-height:1.8;text-align:center">بارکد رو با اپ (v2rayNG، Hiddify، V2Box، …) اسکن کن یا لینک رو کپی و وارد کن.</small></div>`;
+    } else if (android) {
+      const servers = [["IKEv2", x.ikev2 && x.ikev2.server], ["L2TP", x.l2tp && x.l2tp.server], ["PPTP", x.pptp && x.pptp.server]].filter(([, v]) => v);
+      const same = new Set(servers.map(([, v]) => v)).size === 1;
+      const serverBtns = same ? cbtn("کپی آدرس سرور", servers[0][1], "phone") : servers.map(([k, v]) => cbtn(`کپی سرور ${k}`, v, "phone")).join("");
+      body = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          ${cbtn("کپی نام کاربری", x.username, "user")}${cbtn("کپی رمز", x.password, "shield")}
+          ${serverBtns}${x.l2tp && x.l2tp.secret ? cbtn("کپی کلید L2TP", x.l2tp.secret, "layers") : ""}
+        </div>
+        <small style="color:var(--muted);line-height:1.9">تنظیمات گوشی ← اتصال‌ها ← VPN ← افزودن · نوع: ${x.ikev2 ? "IKEv2/IPSec MSCHAPv2" : ""}${x.ikev2 && x.l2tp ? " یا " : ""}${x.l2tp ? "L2TP/IPSec PSK" : ""} · «شناسه IPSec» خالی بمونه.</small>`;
+    } else {
+      const ios = (k, t) => x[k] && x[k].install ? `<div class="glass sec" style="display:grid;gap:10px;justify-items:center;text-align:center">
+          <b>${t}</b>
+          <img data-qr="${k}" data-qid="${x.id}" alt="QR نصب ${t}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
+          <small style="color:var(--muted);line-height:1.8">آیفون مشتری: با دوربین این QR رو اسکن کنه، پروفایل روی گوشی خودش نصب می‌شه.</small>
+          <button class="pill" type="button" data-install="${esc(x[k].install)}" style="justify-content:center;width:100%">${ic("apple")} نصب روی همین گوشی</button></div>` : "";
+      body = ios("ikev2", "IKEv2 (پیشنهادی)") + ios("l2tp", "L2TP") || '<div class="empty">پروفایل آیفون برای این سرویس آماده نیست؛ از «جهت اتصال» استفاده کن.</div>';
+    }
+    $("sheet").innerHTML = `<h3 id="sheetTitle" style="display:flex;gap:8px;align-items:center">${title} · <span class="num">${esc(x.username)}</span></h3>
+      ${body}
+      ${ipsec && x.guide ? `<button class="pill ghost" type="button" data-openurl="${esc(x.guide)}" style="justify-content:center">${ic("help")} راهنمای تصویری قدم‌به‌قدم</button>` : ""}
       <button class="cta" type="button" data-send="${x.id}">📤 ارسال برای مشتری</button>
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
     loadQrs();
@@ -1009,7 +1022,7 @@
       ${made.map((m, i) => `<div class="glass sec" style="display:grid;gap:8px;padding:12px 14px">
         <div class="lrow"><span class="d">${ic("user")} یوزرنیم</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.username)}</span><button class="pill ghost" type="button" data-copy="${esc(m.username)}" aria-label="کپی یوزرنیم">کپی</button></span></div>
         ${m.password ? `<div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.password)}</span><button class="pill ghost" type="button" data-copy="${esc(m.password)}" aria-label="کپی رمز">کپی</button></span></div>` : ""}
-        ${m.sub ? `<div style="display:grid;gap:8px;justify-items:center"><img data-qr="sub" data-qid="${m.id}" alt="QR لینک اشتراک" style="width:180px;height:180px;border-radius:14px;background:#fff;padding:8px">${crow("لینک اشتراک", m.sub)}</div>`
+        ${m.sub ? `<div style="display:grid;gap:8px;justify-items:center"><img data-qr="sub" data-qid="${m.id}" alt="QR لینک اشتراک" style="width:180px;height:180px;border-radius:14px;background:#fff;padding:8px"><button class="pill" type="button" data-copy="${esc(m.sub)}" style="justify-content:center;width:100%;gap:6px">${ic("link")} کپی لینک ساب</button></div>`
           : `<button class="cta" type="button" data-conn="${m.id}" style="padding:13px">${ic("apple")} نصب پروفایل و اطلاعات اتصال</button>`}
         <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill ghost" type="button" data-send="${m.id}" style="justify-content:center">${ic("link")} ارسال برای مشتری</button>${m.guide ? `<button class="pill ghost" type="button" data-mguide="${i}" style="justify-content:center">${ic("help")} راهنما</button>` : ""}</div>
       </div>`).join("")}
@@ -1144,7 +1157,7 @@
     if (d.kind) { S.kind = d.kind; render(); return; }
     if (d.card) { S.card = +d.card; S.tab = "card"; render(); scrollTo(0, 0); return; }
     if (d.send) { openSend({ id: +d.send }); return; }
-    if (d.conn) { openConnect(+d.conn); return; }
+    if (d.conn) { openConnect(+d.conn, d.os); return; }
     if (d.cos) { S.cos = d.cos; document.querySelectorAll("[data-cos]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.cos === d.cos))); document.querySelectorAll("[data-cpane]").forEach((x) => { x.hidden = x.dataset.cpane !== d.cos; }); return; }
     if (d.install) { if (!tg("web_app_open_link", { url: d.install, try_browser: "safari" })) window.open(d.install, "_blank"); return; }
     if (d.openurl) { openLink(d.openurl); return; }

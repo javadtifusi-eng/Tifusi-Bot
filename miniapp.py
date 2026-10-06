@@ -613,7 +613,7 @@ async def _order_connect(order):
     info = {"id": order["id"], "username": order["username"], "service": order["protocol"],
             "password": order["password"] or "", "sub": ns["public_sub_url"](order["sub_url"] or ""),
             "guide": _guide_url(order),
-            "ikev2": None, "l2tp": None}
+            "ikev2": None, "l2tp": None, "pptp": None}
     if order["protocol"] not in ns["IPSEC_SERVICES"]:
         return info
     panel = ns["db"].get_panel(order["panel_id"])
@@ -623,6 +623,9 @@ async def _order_connect(order):
             links = await asyncio.to_thread(ns["panel_client"](panel).links, order["username"])
         except Exception as e:
             log.warning("miniapp connect links %s: %s", order["username"], e)
+    pptp = ((links or {}).get("pptp_configs") or [None])[0]
+    if pptp:
+        info["pptp"] = {"server": pptp.get("server") or ""}
     for kind in ("ikev2", "l2tp"):
         cfgs = (links or {}).get(f"{kind}_configs") or []
         if cfgs:
