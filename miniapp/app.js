@@ -67,6 +67,7 @@
     card: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h4"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
     back: '<path d="m9 6 6 6-6 6"/>',
+    android: '<path fill="currentColor" stroke="none" d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.66-.38l-1.86 3.22A11.4 11.4 0 0 0 12 8.1c-1.8 0-3.5.39-4.92 1.04L5.22 5.92a.38.38 0 0 0-.66.38L6.4 9.48A10.6 10.6 0 0 0 1 18h22a10.6 10.6 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z"/>',
     phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
     shield: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 10 3 5 3-5"/>',
     bolt: '<path d="M13 3 5 13h6l-1 8 8-10h-6l1-8Z"/>',
@@ -114,7 +115,7 @@
   }
   const V = {
     home: () => `
-      <div class="bar"><span style="display:flex;gap:8px"><button class="iconbtn" type="button" data-act="notifs" aria-label="اعلان‌ها${S.me.unread ? ` (${S.me.unread} تازه)` : ""}">${ic("bell")}${S.me.unread ? '<span class="badge"></span>' : ""}</button><button class="iconbtn" type="button" data-act="support" aria-label="پشتیبانی">${ic("chat")}</button></span><button class="pill ghost addhome" type="button" data-act="addhome">${ic("phone")} افزودن به صفحه‌ی گوشی</button></div>
+      <div class="bar"><span style="display:flex;gap:8px"><button class="iconbtn" type="button" data-act="notifs" aria-label="اعلان‌ها${S.me.unread ? ` (${S.me.unread} تازه)` : ""}">${ic("bell")}${S.me.unread ? '<span class="badge"></span>' : ""}</button><button class="iconbtn" type="button" data-act="support" aria-label="پشتیبانی">${ic("chat")}</button></span><button class="pill ghost addhome" type="button" data-act="addhome"><span class="ahtxt">Add to Home Screen</span><span class="ahos" aria-hidden="true">${ic("apple")}${ic("android")}</span></button></div>
       <div class="herospace" role="img" aria-label="Tifusi"></div>
       <div class="glass wallet"><div class="w"><div class="wicon" aria-hidden="true"></div><div><div class="k">موجودی کیف پول</div><div class="v">${num(n(S.me.balance))}</div></div></div><button class="pill" type="button" data-go="wallet">${ic("refresh")} شارژ کیف پول</button></div>
       <div class="stats">

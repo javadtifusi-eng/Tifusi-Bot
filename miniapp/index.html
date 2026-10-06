@@ -241,9 +241,11 @@ body{background:
 
 .app{padding-top:calc(10px + var(--tg-top,0px))}
 /* تمام‌صفحه: حتی اگر تلگرام فاصله را نفرستد، محتوا زیر دکمه‌های Close و ••• نرود */
-.fs .app{padding-top:calc(10px + max(var(--tg-top,0px), env(safe-area-inset-top,0px) + 52px))}
+.fs .app{padding-top:calc(2px + max(var(--tg-top,0px), env(safe-area-inset-top,0px) + 48px))}
 .tabs{bottom:calc(12px + env(safe-area-inset-bottom,0px) + var(--tg-bottom,0px))}
-.addhome{font-size:.78rem;padding:9px 14px}
+.addhome{font-size:.74rem;padding:5px 14px;display:grid!important;justify-items:center;gap:2px;line-height:1.2;direction:ltr}
+.addhome .ahos{display:flex;gap:8px;opacity:.85}
+.addhome .ahos svg{width:13px;height:13px}
 .on-home .addhome{display:none}
 .nmbtn{appearance:none;background:none;border:0;padding:0;color:var(--fg);font:inherit;font-weight:700;cursor:pointer;display:block;width:100%}
 .nmbtn:focus-visible{outline:2px solid var(--cyan)}
