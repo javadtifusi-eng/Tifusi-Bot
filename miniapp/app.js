@@ -115,7 +115,7 @@
   }
   const V = {
     home: () => `
-      <div class="bar"><span style="display:flex;gap:8px"><button class="iconbtn" type="button" data-act="notifs" aria-label="اعلان‌ها${S.me.unread ? ` (${S.me.unread} تازه)` : ""}">${ic("bell")}${S.me.unread ? '<span class="badge"></span>' : ""}</button><button class="iconbtn" type="button" data-act="support" aria-label="پشتیبانی">${ic("chat")}</button></span><button class="pill ghost addhome" type="button" data-act="addhome"><span class="ahtxt">Add to Home Screen</span><span class="ahos" aria-hidden="true">${ic("apple")}${ic("android")}</span></button></div>
+      <div class="bar"><span style="display:flex;gap:8px"><button class="iconbtn" type="button" data-act="notifs" aria-label="اعلان‌ها${S.me.unread ? ` (${S.me.unread} تازه)` : ""}">${ic("bell")}${S.me.unread ? '<span class="badge"></span>' : ""}</button><button class="iconbtn" type="button" data-act="support" aria-label="پشتیبانی">${ic("chat")}</button></span><span></span></div>
       <div class="herospace" role="img" aria-label="Tifusi"></div>
       <div class="glass wallet"><div class="w"><div class="wicon" aria-hidden="true"></div><div><div class="k">موجودی کیف پول</div><div class="v">${num(n(S.me.balance))}</div></div></div><button class="pill" type="button" data-go="wallet">${ic("refresh")} شارژ کیف پول</button></div>
       <div class="stats">
