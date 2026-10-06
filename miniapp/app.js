@@ -18,6 +18,40 @@
     } catch (e) {}
     return false;
   }
+  // 🔔 دینگ اعلان تازه: صدای کوتاه دوتُنه با WebAudio (فایل صوتی لازم نیست) + ویبره‌ی اعلان تلگرام.
+  // گوشی‌ها تا اولین لمس صفحه اجازه‌ی پخش صدا نمی‌دهند، پس با اولین لمس آماده می‌شود؛ ویبره این محدودیت را ندارد.
+  let actx = null;
+  function unlockAudio() {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === "suspended") actx.resume();
+    } catch (e) {}
+  }
+  document.addEventListener("pointerdown", unlockAudio, { passive: true });
+  function ding() {
+    tg("web_app_trigger_haptic_feedback", { type: "notification", notification_type: "success" });
+    if (!actx || actx.state !== "running") return;
+    const t = actx.currentTime;
+    [[1318.5, 0], [1760, 0.13]].forEach(([freq, at]) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t + at);
+      g.gain.exponentialRampToValueAtTime(0.22, t + at + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.7);
+      o.connect(g).connect(actx.destination);
+      o.start(t + at); o.stop(t + at + 0.75);
+    });
+  }
+  function shakeBell() {
+    const b = document.querySelector('[data-act="notifs"]');
+    if (!b) return;
+    b.classList.remove("ring"); void b.offsetWidth; b.classList.add("ring");
+  }
+  (function () {
+    const st = document.createElement("style");
+    st.textContent = "@keyframes bellring{0%,100%{transform:rotate(0)}15%{transform:rotate(16deg)}30%{transform:rotate(-14deg)}45%{transform:rotate(10deg)}60%{transform:rotate(-8deg)}75%{transform:rotate(4deg)}}.iconbtn.ring .ic{animation:bellring .9s ease-in-out 2;transform-origin:50% 10%}";
+    document.head.appendChild(st);
+  })();
   // عکس زمینه شب است، پس تم همیشه تیره (حتی اگر تلگرام تم نفرستد و گوشی روی حالت روشن باشد)
   document.documentElement.dataset.theme = "dark";
   // رویدادهایی که تلگرام به صفحه می‌فرسته (همان قرارداد telegram-web-app.js)
@@ -815,7 +849,16 @@
       if (S.me.unread) { S.me.unread = 0; api("notifs/seen", { method: "POST", body: "{}" }).catch(() => {}); if (S.tab === "home") render(); }
     } catch (e) { closeSheet(); toast("الان نشد اعلان‌ها رو بگیرم"); }
   }
-  setInterval(() => { if (document.visibilityState === "visible" && S.me) api("me").then((me) => { const ch = me.unread !== S.me.unread; S.me = me; if (ch && S.tab === "home" && !$("sheet").classList.contains("open")) render(); }).catch(() => {}); }, 60000);
+  // هر ۱۵ ثانیه (فقط وقتی مینی‌اپ جلوی چشم است): اعلان تازه = دینگ + ویبره + تکان زنگوله
+  setInterval(() => {
+    if (document.visibilityState !== "visible" || !S.me) return;
+    api("me").then((me) => {
+      const fresh = me.unread > S.me.unread, ch = me.unread !== S.me.unread;
+      S.me = me;
+      if (ch && S.tab === "home" && !$("sheet").classList.contains("open")) render();
+      if (fresh) { ding(); shakeBell(); toast("🔔 اعلان تازه داری"); }
+    }).catch(() => {});
+  }, 15000);
 
   function render() {
     $("app").innerHTML = V[S.tab]();
