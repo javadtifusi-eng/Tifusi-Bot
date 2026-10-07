@@ -1,0 +1,8 @@
+python-telegram-bot[job-queue]
+requests
+qrcode
+pillow
+arabic-reshaper
+python-bidi
+aiohttp
+pytest>=8
