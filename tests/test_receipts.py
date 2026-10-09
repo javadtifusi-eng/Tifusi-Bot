@@ -89,3 +89,33 @@ def test_purchase_with_deleted_plan_is_not_built(world, plan):
     rid = bot.db.create_receipt(uid, 200_000, "purchase", "p", {"plan_id": 424242, "protocol": "xray", "username": "x1"})
     notes = _approve(world, rid)
     assert world.created == [] and any("دستی" in n for n in notes)
+
+
+def test_bot_set_value_refuses_main_only_keys_for_secondary_admin(world):
+    """The chat path (set:<key> button, then the typed value) refuses the same keys as the Mini App."""
+    from types import SimpleNamespace
+    bot.db.set_setting("admins", json.dumps([7]))
+    bot.db.set_setting("card_number", "6037-main")
+    bot.db.set_setting("faq_text", "old")
+    replies = []
+
+    class Msg:
+        text = "6037-evil"
+
+        async def reply_text(self, text, **kw):
+            replies.append(text)
+
+    def typed(uid, key):
+        bot.db.ensure_user(uid, "a", "A")
+        upd = SimpleNamespace(message=Msg(), effective_user=SimpleNamespace(id=uid))
+        assert asyncio.run(bot.handle_state(upd, None, "set_value", {"key": key}))
+
+    for key in ("card_number", "card_name", "backup_chat_id", "admins"):
+        typed(7, key)
+    assert bot.db.setting("card_number") == "6037-main"
+    assert bot.db.setting("backup_chat_id", "") == ""
+    assert bot.db.setting("admins") == "[7]", "a key outside SETTING_KEYS is never written"
+    typed(7, "faq_text")
+    assert bot.db.setting("faq_text") == "6037-evil", "ordinary settings stay open to every admin"
+    typed(1, "card_number")
+    assert bot.db.setting("card_number") == "6037-evil"
