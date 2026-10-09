@@ -137,3 +137,41 @@ def test_direct_order_creates_ticket_and_no_account(world, plan):
     assert "cardpay" in ticket["message"]
     assert cancel == 200 and again == 404
     assert bot.db.get_ticket(ticket["id"])["status"] == "closed"
+
+
+def _run_settings(world, coro_fn):
+    async def go():
+        app = web.Application(middlewares=[miniapp.auth_mw])
+        app.router.add_get("/api/admin/settings", miniapp.api_admin_settings)
+        app.router.add_post("/api/admin/settings", miniapp.api_admin_settings)
+        app["tg_app"] = world.app
+        async with TestClient(TestServer(app)) as client:
+            return await coro_fn(client)
+    return asyncio.run(go())
+
+
+def test_card_and_backup_target_are_main_admin_only(world):
+    """A secondary admin changing the card number or the backup chat could send customers' money or the
+    whole database to themselves; only ADMIN_ID (1) may change them, other settings stay open to admins."""
+    bot.db.set_setting("admins", json.dumps([7]))
+    bot.db.set_setting("card_number", "6037-main")
+
+    async def go(c):
+        out = {}
+        for uid in (7, 1):
+            for key in ("card_number", "card_name", "backup_chat_id", "faq_text"):
+                r = await c.post("/api/admin/settings", json={"key": key, "value": f"{key}-{uid}"}, headers=_h(uid))
+                out[(uid, key)] = r.status
+        r = await c.get("/api/admin/settings", headers=_h(7))
+        out["locked"] = {x["key"] for x in (await r.json())["items"] if x["locked"]}
+        out["customer"] = (await c.post("/api/admin/settings", json={"key": "faq_text", "value": "x"},
+                                        headers=_h(customer(3001)))).status
+        return out
+    out = _run_settings(world, go)
+    for key in ("card_number", "card_name", "backup_chat_id"):
+        assert out[(7, key)] == 403, key
+        assert out[(1, key)] == 200, key
+    assert out[(7, "faq_text")] == 200
+    assert out["locked"] == {"card_number", "card_name", "backup_chat_id"}
+    assert out["customer"] == 403
+    assert bot.db.setting("card_number") == "card_number-1"

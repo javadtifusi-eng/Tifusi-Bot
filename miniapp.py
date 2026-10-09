@@ -1313,7 +1313,8 @@ async def api_admin_settings(request):
     if request.method == "GET":
         return web.json_response({
             "subdomain": {"value": db.setting(SUB_DOMAIN_KEY, ""), "choices": _sub_domain_choices()},
-            "items": [{"key": k, "label": l, "value": db.setting(k, "")} for k, l in keys],
+            "items": [{"key": k, "label": l, "value": db.setting(k, ""),
+                       "locked": k in ns["MAIN_ADMIN_SETTINGS"] and request["uid"] != ns["ADMIN_ID"]} for k, l in keys],
             "toggles": [{"key": k, "label": l, "on": db.setting(k, "1" if k == "backup_auto" else "0") == "1"}
                         for k, l in SETTING_TOGGLES]})
     b = await _body(request)
@@ -1329,6 +1330,8 @@ async def api_admin_settings(request):
     labels = dict(keys + SETTING_TOGGLES)
     if key not in labels:
         return _err("key")
+    if key in ns["MAIN_ADMIN_SETTINGS"] and request["uid"] != ns["ADMIN_ID"]:
+        return _err("main_only", 403)
     if key in dict(SETTING_TOGGLES):
         value = "1" if value in ("1", "true", "True") else "0"
     elif key in ("test_volume_gb", "test_days"):

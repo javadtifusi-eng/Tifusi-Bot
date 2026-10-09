@@ -3796,6 +3796,9 @@ SETTING_KEYS = [
     ("backup_time", "🕓 ساعت بکاپ روزانه (وقت ایران)"),
     ("report_time", "🕓 ساعت گزارش روزانه (وقت ایران)"),
 ]
+# فقط ادمین اصلی: کارت مقصد پول مشتری‌ها و جایی که بکاپ کامل دیتابیس می‌رود؛ ادمین فرعی با عوض کردنشان
+# پول یا کل دیتابیس را به سمت خودش می‌برد
+MAIN_ADMIN_SETTINGS = ("card_number", "card_name", "backup_chat_id")
 # Iran has had no daylight saving since 2022: a fixed +03:30.
 IRAN_OFFSET = datetime.timedelta(hours=3, minutes=30)
 DAILY_TIMES = {"backup_time": "06:30", "report_time": "02:30"}  # the old 03:00 and 23:00 UTC
@@ -4816,6 +4819,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cmd == "set":
             key = parts[1]
+            if key not in dict(SETTING_KEYS):
+                return
+            if key in MAIN_ADMIN_SETTINGS and uid != ADMIN_ID:
+                await safe_edit(query, "⛔ این تنظیم را فقط ادمین اصلی می‌تواند عوض کند.",
+                                reply_markup=InlineKeyboardMarkup([[btn("🔙 بازگشت", "admin:settings")]]))
+                return
             db.set_state(uid, "set_value", {"key": key})
             label = dict(SETTING_KEYS).get(key, key)
             await page(query, card(f"✏️ {label}", [f"مقدار فعلی: {val(db.setting(key))}"],
@@ -5250,6 +5259,10 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
 
     # ---------- ادمین: تنظیمات ----------
     if state == "set_value" and is_admin(uid):
+        if sd.get("key") not in dict(SETTING_KEYS) or (sd["key"] in MAIN_ADMIN_SETTINGS and uid != ADMIN_ID):
+            db.set_state(uid, "none")
+            await msg.reply_text("⛔ این تنظیم را فقط ادمین اصلی می‌تواند عوض کند.")
+            return True
         if sd["key"] in ("test_volume_gb", "test_days") and not (text.isdigit() and int(text) > 0):
             await msg.reply_text("❌ یک عدد بزرگ‌تر از صفر وارد کنید:")
             return True

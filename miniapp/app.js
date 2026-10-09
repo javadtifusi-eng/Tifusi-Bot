@@ -726,7 +726,7 @@
       <small style="color:var(--muted);line-height:1.8">اگه دامنه‌ی اصلی فیلتر شد، با یه لمس همه‌ی لینک‌های اشتراک، راهنما و نصب پروفایل می‌رن روی دامنه‌ی زاپاس. آدرس سرور IKEv2 و L2TP عوض نمی‌شه.</small>
       <div class="filters">${[""].concat(sd.choices).map((d) => `<button type="button" aria-pressed="${sd.value === d}" data-subdom="${esc(d)}">${d ? esc(d) : "دامنه‌ی اصلی"}</button>`).join("")}</div></div>`;
     return dom + `<div class="glass sec">${S.aset.toggles.map((t) => `<div class="lrow"><span class="d" style="color:var(--fg)">${esc(t.label)}</span><button class="sw" type="button" role="switch" aria-checked="${t.on}" data-stog="${t.key}" aria-label="${esc(t.label)}"></button></div>`).join("")}</div>
-    <div class="glass sec">${S.aset.items.map((x) => `<button class="lrow arow" type="button" data-sedit="${x.key}"><span class="d" style="color:var(--fg)">${esc(x.label)}</span><span class="v" dir="auto" style="max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${esc(x.value) || "—"}</span></button>`).join("")}</div>
+    <div class="glass sec">${S.aset.items.map((x) => `<button class="lrow arow" type="button" data-sedit="${x.key}"><span class="d" style="color:var(--fg)">${esc(x.label)}${x.locked ? " 🔒" : ""}</span><span class="v" dir="auto" style="max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${esc(x.value) || "—"}</span></button>`).join("")}</div>
     <button class="cta" type="button" id="bkp">💾 بکاپ همین الان</button>`;
   };
   function confirmSubDomain(d) {
@@ -757,10 +757,11 @@
       const it = S.aset.items.find((x) => x.key === key); if (it) it.value = j.value;
       const tg2 = S.aset.toggles.find((x) => x.key === key); if (tg2) tg2.on = j.value === "1";
       closeSheet(); render(); toast("✅ ذخیره شد");
-    } catch (e) { if (btn) btn.disabled = false; toast({ time: "ساعت رو مثل 06:30 بنویس", number: "یه عدد بزرگ‌تر از صفر" }[e.message] || "ذخیره نشد"); }
+    } catch (e) { if (btn) btn.disabled = false; toast({ time: "ساعت رو مثل 06:30 بنویس", number: "یه عدد بزرگ‌تر از صفر", main_only: "این رو فقط ادمین اصلی می‌تونه عوض کنه" }[e.message] || "ذخیره نشد"); }
   }
   function openSetting(key) {
     const x = S.aset.items.find((i) => i.key === key); if (!x) return;
+    if (x.locked) { toast("این رو فقط ادمین اصلی می‌تونه عوض کنه"); return; }
     const long = key === "faq_text";
     $("sheet").innerHTML = `<h3 id="sheetTitle">${esc(x.label)}</h3>
       <label class="field">مقدار جدید${long ? `<textarea id="sv" rows="7" dir="auto">${esc(x.value)}</textarea>` : `<input id="sv" dir="auto" value="${esc(x.value)}">`}</label>
