@@ -216,7 +216,7 @@
       ${list.map((c) => `<div class="glass cust cust2${c.on ? "" : " off"}"><div style="min-width:0"><button type="button" class="nm nmbtn" data-card="${c.id}">${esc(c.username)} ›</button>
         <div class="mt"><span class="dot ${c.on ? c.state : "bad"}"></span><span>${c.on ? custLine(c) : '<span class="offtag">غیرفعال</span>'}</span></div></div>
         <button class="sw" type="button" role="switch" aria-checked="${c.on}" aria-label="روشن یا خاموش" data-sw="${c.id}"></button>
-        <div class="cacts"><button class="pill" type="button" data-conn="${c.id}">${ic("apple")} نصب</button><button class="pill ghost" type="button" data-send="${c.id}">ارسال</button><button class="pill dark" type="button" data-renew="${c.id}">تمدید</button></div></div>`).join("") || '<div class="empty">مشتری‌ای پیدا نشد.</div>'}`;
+        <div class="cacts"><button class="pill" type="button" data-conn="${c.id}">${ic("link")} اتصال</button><button class="pill ghost" type="button" data-send="${c.id}">ارسال</button><button class="pill dark" type="button" data-renew="${c.id}">تمدید</button></div></div>`).join("") || '<div class="empty">مشتری‌ای پیدا نشد.</div>'}`;
     },
     buy: () => {
       if (!S.shop.length) return '<div class="empty">فعلاً پلنی برای فروش نیست.</div>';
@@ -896,20 +896,28 @@
   // بارکد ندارند: فقط دکمه‌های کپی، بدون نمایش مقدارها. آیفون: QR و نصب یک‌لمسی پروفایل.
   async function openConnect(id, os) {
     const android = os === "android";
-    const title = android ? `${androidIc()} جهت اتصال` : `${ic("apple")} نصب پروفایل`;
+    // از لیست کاربران (بدون os): هر دو، تا بارکد اشتراک برای اپ Tifusi همیشه باشد
+    const both = !os;
+    const title = both ? `${ic("link")} اطلاعات اتصال` : android ? `${androidIc()} جهت اتصال` : `${ic("apple")} نصب پروفایل`;
     $("sheet").innerHTML = `<h3 id="sheetTitle" style="display:flex;gap:8px;align-items:center">${title}</h3>` + LOADING;
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
     let x;
     try { x = await getConn(id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
     const cbtn = (label, v, icon) => v ? `<button class="pill" type="button" data-copy="${esc(v)}" style="justify-content:center;gap:6px;padding:12px 8px">${icon ? ic(icon) : ""}${label}</button>` : "";
     const ipsec = x.ikev2 || x.l2tp || x.pptp;
+    const ios = (k, t) => x[k] && x[k].install ? `<div class="glass sec" style="display:grid;gap:10px;justify-items:center;text-align:center">
+        <b>${t}</b>
+        <img data-qr="${k}" data-qid="${x.id}" alt="QR نصب ${t}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
+        <small style="color:var(--muted);line-height:1.8">آیفون مشتری: با دوربین این QR رو اسکن کنه، پروفایل روی گوشی خودش نصب می‌شه.</small>
+        <button class="pill" type="button" data-install="${esc(x[k].install)}" style="justify-content:center;width:100%">${ic("apple")} نصب روی همین گوشی</button></div>` : "";
+    const iosBody = ios("ikev2", "IKEv2 (پیشنهادی)") + ios("l2tp", "L2TP");
     let body;
     if (!ipsec) {
       body = `<div class="glass sec" style="display:grid;gap:12px;justify-items:center">
         <img data-qr="sub" data-qid="${x.id}" alt="QR لینک ساب" style="width:200px;height:200px;border-radius:14px;background:#fff;padding:8px">
         ${x.sub ? `<button class="cta" type="button" data-copy="${esc(x.sub)}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px">${ic("link")} کپی لینک ساب</button>` : ""}
         <small style="color:var(--muted);line-height:1.8;text-align:center">بارکد رو با اپ (v2rayNG، Hiddify، V2Box، …) اسکن کن یا لینک رو کپی و وارد کن.</small></div>`;
-    } else if (android) {
+    } else if (android || both) {
       const servers = [["IKEv2", x.ikev2 && x.ikev2.server], ["L2TP", x.l2tp && x.l2tp.server], ["PPTP", x.pptp && x.pptp.server]].filter(([, v]) => v);
       const same = new Set(servers.map(([, v]) => v)).size === 1;
       const serverBtns = same ? cbtn("کپی آدرس سرور", servers[0][1], "phone") : servers.map(([k, v]) => cbtn(`کپی سرور ${k}`, v, "phone")).join("");
@@ -922,14 +930,9 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           ${cbtn("کپی نام کاربری", x.username, "user")}${cbtn("کپی رمز", x.password, "shield")}
           ${serverBtns}${x.l2tp && x.l2tp.secret ? cbtn("کپی کلید L2TP", x.l2tp.secret, "layers") : ""}
-        </div>`;
+        </div>${both && iosBody ? `<b style="margin-top:6px">${ic("apple")} آیفون</b>${iosBody}` : ""}`;
     } else {
-      const ios = (k, t) => x[k] && x[k].install ? `<div class="glass sec" style="display:grid;gap:10px;justify-items:center;text-align:center">
-          <b>${t}</b>
-          <img data-qr="${k}" data-qid="${x.id}" alt="QR نصب ${t}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
-          <small style="color:var(--muted);line-height:1.8">آیفون مشتری: با دوربین این QR رو اسکن کنه، پروفایل روی گوشی خودش نصب می‌شه.</small>
-          <button class="pill" type="button" data-install="${esc(x[k].install)}" style="justify-content:center;width:100%">${ic("apple")} نصب روی همین گوشی</button></div>` : "";
-      body = ios("ikev2", "IKEv2 (پیشنهادی)") + ios("l2tp", "L2TP") || '<div class="empty">پروفایل آیفون برای این سرویس آماده نیست؛ از «جهت اتصال» استفاده کن.</div>';
+      body = iosBody || '<div class="empty">پروفایل آیفون برای این سرویس آماده نیست؛ از «جهت اتصال» استفاده کن.</div>';
     }
     $("sheet").innerHTML = `<h3 id="sheetTitle" style="display:flex;gap:8px;align-items:center">${title} · <span class="num">${esc(x.username)}</span></h3>
       ${body}
