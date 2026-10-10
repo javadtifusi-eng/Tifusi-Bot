@@ -886,6 +886,7 @@
     if (srv) lines.push(`🌐 سرور: ${srv}`);
     if (x.l2tp && x.l2tp.secret) lines.push(`🗝 کلید L2TP (Secret): ${x.l2tp.secret}`);
     if (!x.ikev2 && !x.l2tp && x.sub) lines.push(`🔗 لینک اشتراک: ${x.sub}`);
+    if (x.app_url) lines.push("", `📲 اپ اندروید Tifusi: ${x.app_url}`, `بعد از نصب، این لینک اشتراک را در اپ بزنید: ${x.sub}`);
     const link = x.guide || "";
     if (link) lines.push("", `🔗 نصب و راهنما: ${link}`);
     return lines.join("\n");
@@ -912,7 +913,12 @@
       const servers = [["IKEv2", x.ikev2 && x.ikev2.server], ["L2TP", x.l2tp && x.l2tp.server], ["PPTP", x.pptp && x.pptp.server]].filter(([, v]) => v);
       const same = new Set(servers.map(([, v]) => v)).size === 1;
       const serverBtns = same ? cbtn("کپی آدرس سرور", servers[0][1], "phone") : servers.map(([k, v]) => cbtn(`کپی سرور ${k}`, v, "phone")).join("");
+      // IKEv2: اپ Tifusi همین بارکد ساب را اسکن می‌کند (یا لینک کپی‌شده را می‌گیرد) و فقط خاموش/روشن دارد
+      const app = x.app_url ? `<button class="cta" type="button" data-openurl="${esc(x.app_url)}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px">📲 دانلود اپ Tifusi</button>
+        ${x.sub ? `<button class="pill" type="button" data-copy="${esc(x.sub)}" style="justify-content:center;gap:6px;padding:12px 8px">${ic("link")} کپی لینک اشتراک (برای اپ)</button>` : ""}
+        <small style="color:var(--muted);line-height:1.8;text-align:center">اپ رو نصب کن، «اسکن بارکد» رو بزن و بارکد بالا رو اسکن کن؛ یا لینک رو کپی کن و توی اپ بزن.</small>` : "";
       body = `${x.sub ? `<div class="glass sec" style="display:grid;justify-items:center;padding:14px"><img data-qr="sub" data-qid="${x.id}" alt="QR لینک ساب" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px"></div>` : ""}
+        ${app}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           ${cbtn("کپی نام کاربری", x.username, "user")}${cbtn("کپی رمز", x.password, "shield")}
           ${serverBtns}${x.l2tp && x.l2tp.secret ? cbtn("کپی کلید L2TP", x.l2tp.secret, "layers") : ""}

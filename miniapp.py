@@ -30,7 +30,8 @@ INIT_DATA_MAX_AGE = 24 * 3600
 PANEL_CACHE_SECONDS = 30
 STATIC_DIR = Path(__file__).resolve().parent / "miniapp"
 # سرویس‌هایی که مینی‌اپ می‌فروشد؛ «ikev2» همان پلن یکی برای IKEv2، L2TP و PPTP است
-SHOP_SERVICES = {"ikev2": "L2TP و IKEv2", "xray": "V2Ray"}
+# سه پلن، به همین ترتیب در فروشگاه: V2Ray، «L2TP · PPTP» با تنظیمات خود گوشی، و IKEv2 با اپ Tifusi
+SHOP_SERVICES = {"xray": "V2Ray", "l2tp": "L2TP · PPTP", "ikev2": "IKEv2 (اپ Tifusi)"}
 # همان وضعیت‌هایی که db.get_user_orders نشان می‌دهد
 LIVE_ORDER_STATUSES = ("active", "delreq_pending")
 
@@ -613,6 +614,8 @@ async def _order_connect(order):
     info = {"id": order["id"], "username": order["username"], "service": order["protocol"],
             "password": order["password"] or "", "sub": ns["public_sub_url"](order["sub_url"] or ""),
             "guide": _guide_url(order),
+            # IKEv2 روی اندروید با اپ Tifusi وصل می‌شود: دانلود اپ، بعد بارکد یا لینک اشتراک
+            "app_url": ns.get("TIFUSI_APP_URL") if order["protocol"] == "ikev2" else None,
             "ikev2": None, "l2tp": None, "pptp": None}
     if order["protocol"] not in ns["IPSEC_SERVICES"]:
         return info

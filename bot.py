@@ -57,9 +57,9 @@ DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل 
 # (یا چک خودکار ۵ دقیقه‌ای برسد) تا در ربات ظاهر شود؛ پروتکلی که هاستش حذف شد هم از فروش خارج می‌شود.
 SERVICES = {
     "xray": "Xray",
+    "l2tp": "L2TP · PPTP",
+    "ikev2": "IKEv2",
     "hysteria2": "Hysteria2",
-    "ikev2": "IKEv2 · L2TP · PPTP",
-    "l2tp": "L2TP",
     "pptp": "PPTP",
     "wireguard": "WireGuard",
 }
@@ -67,13 +67,19 @@ SERVICES = {
 SERVICE_PROTOCOLS = {
     "xray": ["vless", "vmess", "trojan", "shadowsocks"],
     "hysteria2": ["hysteria2"],
-    # یک پلن برای هر سه: همان نام کاربری و رمز روی IKEv2 و L2TP و PPTP کار می‌کند،
-    # پس گوشی جدید و قدیم با یک خرید وصل می‌شوند (تمدید هم دسترسی سفارش‌های قبلی را کامل می‌کند).
-    "ikev2": ["ikev2", "l2tp", "pptp"],
-    "l2tp": ["l2tp"],
+    # سه پلن جدا: Xray، «L2TP · PPTP» (با تنظیمات خود گوشی) و IKEv2 (با اپ Tifusi، TIFUSI_APP_URL).
+    # سفارش‌های IKEv2 قبلی که L2TP و PPTP هم داشتند آن‌ها را نگه می‌دارند: تمدید پروتکلی را برنمی‌دارد
+    # (PanelClient.renew_user).
+    "ikev2": ["ikev2"],
+    "l2tp": ["l2tp", "pptp"],
     "pptp": ["pptp"],
     "wireguard": ["wireguard"],
 }
+# اپ اندروید Tifusi (فقط IKEv2، بر پایه‌ی strongSwan؛ github.com/javadtifusi-eng/Tifusi-IKE): مشتری IKEv2
+# آن را نصب می‌کند و بارکد یا لینک اشتراک را در آن می‌زند. همیشه آخرین نسخه را می‌دهد.
+TIFUSI_APP_URL = "https://github.com/javadtifusi-eng/Tifusi-IKE/releases/latest/download/tifusi.apk"
+TIFUSI_APP_BTN = "📲 دانلود اپ Tifusi (اندروید)"
+
 # اکانت تست روی اولین سرویسِ در دسترس به همین ترتیب ساخته می‌شود
 TEST_SERVICE_ORDER = ["ikev2", "xray", "hysteria2", "l2tp", "pptp", "wireguard"]
 # سفارش‌های نسخه‌ی ۴.۰ که یک سرویس کلی Tifusi بودند (بدون محدودیت پروتکل)
@@ -102,21 +108,16 @@ TUT_OS = [("android", "🤖 اندروید"), ("ios", "🍎 آیفون")]
 
 TRAININGS = {
     "ikev2": {
-        "title": "🤖 اندروید: IKEv2 (بدون نصب اپ)",
-        "android": """🤖 اندروید — IKEv2، با خود تنظیمات گوشی:
+        "title": "📲 اندروید: IKEv2 با اپ Tifusi",
+        "android": """📲 اندروید — IKEv2 با اپ Tifusi:
 
-1️⃣ تنظیمات ← اتصالات ← تنظیمات بیشتر اتصال ← VPN
-   (در گوشی‌های غیرسامسونگ: تنظیمات ← شبکه و اینترنت ← VPN)
-2️⃣ «➕ افزودن نمایه‌ی VPN» را بزنید
-3️⃣ نام: Tifusi (هر اسمی)
-4️⃣ نوع: IKEv2/IPSec MSCHAPv2
-5️⃣ نشانی سرور: همان «🌐 سرور» که ربات فرستاده
-6️⃣ شناسه‌ی IPSec: نام کاربری خودتان
-7️⃣ گواهی CA: «استفاده از گواهی‌های سیستم» — گواهی سرور: «دریافت از سرور»
-8️⃣ نام کاربری و رمز عبوری که ربات فرستاده را وارد و ذخیره کنید
-9️⃣ روی نمایه بزنید و «اتصال» را بزنید ✅
+1️⃣ اپ Tifusi را دانلود و نصب کنید:
+   https://github.com/javadtifusi-eng/Tifusi-IKE/releases/latest/download/tifusi.apk
+2️⃣ اپ را باز کنید و «اسکن بارکد» را بزنید و بارکد اشتراک را اسکن کنید
+   (یا «🔗 لینک اشتراک» را کپی کنید و در اپ دکمه‌ی زیر «اسکن بارکد» را بزنید)
+3️⃣ دکمه‌ی بزرگ را بزنید و اجازه‌ی VPN را تأیید کنید ✅
 
-💡 اگر گزینه‌ی IKEv2 در گوشی‌تان نیست (اندروید ۱۰ و قدیمی‌تر)، از آموزش L2TP استفاده کنید.""",
+💡 از این به بعد فقط همان یک دکمه: روشن / خاموش.""",
     },
     "l2tp": {
         "title": "📶 L2TP (گوشی‌های قدیمی‌تر)",
@@ -358,7 +359,10 @@ class TifusiPanelAPI:
         if device_limit is not None:
             body["hwid_limit"] = int(device_limit) or None
         if protocols:
-            body["protocols"] = list(protocols)
+            # فقط اضافه می‌کند: پروتکلی که مشتری از قبل داشت (مثلاً L2TP/PPTP روی سفارش IKEv2 قدیمی)
+            # با تمدید از دستش نمی‌رود.
+            have = [p for p in (user.get("protocols") or []) if p not in protocols]
+            body["protocols"] = list(protocols) + have
         user = self._call(f"/api/users/{int(user['id'])}", "put", json=body)
         return self._with_links(user)
 
@@ -1479,9 +1483,9 @@ async def show_buy_services(query, uid):
     db.set_state(uid, "none")
     # سرویسی که هنوز پلنی ندارد نشان داده نمی‌شود تا مشتری به صفحه‌ی خالی نرسد
     services = [s for s in available_services() if db.get_plans(active_only=True, service=s)]
-    # L2TP و PPTP جدا فروخته نمی‌شوند: داخل همان پلن IKEv2 هستند. سفارش‌های قبلی‌شان تمدید می‌شوند.
-    if "ikev2" in services:
-        services = [s for s in services if s not in ("l2tp", "pptp")]
+    # PPTP جدا فروخته نمی‌شود: داخل پلن «L2TP · PPTP» است. سفارش‌های قبلی‌اش تمدید می‌شوند.
+    if "l2tp" in services:
+        services = [s for s in services if s != "pptp"]
     if not services:
         await safe_edit(query, "❌ فعلاً سرویسی برای فروش در دسترس نیست. کمی بعد دوباره امتحان کنید.", reply_markup=back_kb())
         return
@@ -2811,6 +2815,9 @@ def delivery_details_html(order, panel, links):
         parts.append(f"🍎 نصب پروفایل آیفون:\n{esc(apple_url)}")
     if order["protocol"] not in IPSEC_SERVICES and order["sub_url"]:
         parts.append(f"🔗 لینک اشتراک:\n<code>{esc(public_sub_url(order['sub_url']))}</code>")
+    if order["protocol"] == "ikev2":
+        parts.insert(0, f"📲 <b>اندروید:</b> اپ Tifusi را نصب کنید و لینک اشتراک زیر را در آن بزنید:\n{esc(TIFUSI_APP_URL)}"
+                        + (f"\n<code>{esc(public_sub_url(order['sub_url']))}</code>" if order["sub_url"] else ""))
     return "\n\n".join(parts)
 
 
@@ -2851,6 +2858,12 @@ async def deliver_service(context, chat_id, order, panel, quiet=False):
             if gb:
                 rows.append([gb])
             rows.append([InlineKeyboardButton(ANDROID_BTN, callback_data=f"andr:{order['id']}")])
+        if order["protocol"] == "ikev2":
+            # IKEv2 روی اندروید با اپ Tifusi: نصب، بعد زدن لینک اشتراک (یا اسکن بارکدش) در اپ
+            rows.insert(0, [InlineKeyboardButton(TIFUSI_APP_BTN, url=TIFUSI_APP_URL)])
+            sub_btn = copy_text_button("🔗 کپی لینک اشتراک (برای اپ)", public_sub_url(order["sub_url"])) if order["sub_url"] else None
+            if sub_btn:
+                rows.insert(1, [sub_btn])
         if apple_url:
             # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
             rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
@@ -3006,6 +3019,11 @@ async def show_service_detail(query, uid, oid):
             f"⏳ {remaining_text(o['expire_at'])} | 🕓 {dt}")
     rows = []
     if o["status"] == "active":
+        if o["protocol"] == "ikev2":
+            rows.append([InlineKeyboardButton(TIFUSI_APP_BTN, url=TIFUSI_APP_URL)])
+            sub_btn = copy_text_button("🔗 کپی لینک اشتراک (برای اپ)", public_sub_url(o["sub_url"])) if o["sub_url"] else None
+            if sub_btn:
+                rows.append([sub_btn])
         if guide:
             gb = guide_button(o)
             if gb:
