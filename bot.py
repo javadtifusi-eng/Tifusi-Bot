@@ -354,7 +354,8 @@ class TifusiPanelAPI:
         if not user:
             return None
         expire, extra = self._limits(total_gb, expire_ts)
-        data_limit = int(user.get("used_traffic") or 0) + extra if extra else None
+        # گرد به گیگ کامل بالا، تا پنل حجم را ۴۱ نشان دهد نه ۴۰٫۵۳۳۴… (مشتری کمتر از یک گیگ اضافه می‌گیرد)
+        data_limit = -(-(int(user.get("used_traffic") or 0) + extra) // 1024 ** 3) * 1024 ** 3 if extra else None
         body = {"status": "active", "expire": expire, "data_limit": data_limit}
         if device_limit is not None:
             body["hwid_limit"] = int(device_limit) or None
