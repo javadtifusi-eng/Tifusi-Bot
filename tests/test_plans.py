@@ -1,4 +1,4 @@
-"""The three plans (V2Ray, L2TP · PPTP, IKEv2 with the Tifusi app) and what each one gives."""
+"""The four plans (V2Ray, IKEv2 with the Tifusi app, L2TP, PPTP) and what each one gives."""
 
 import asyncio
 
@@ -6,10 +6,10 @@ import bot
 import miniapp
 
 
-def test_three_plans_in_the_shop_in_order():
-    assert list(miniapp.SHOP_SERVICES) == ["xray", "l2tp", "ikev2"]
-    assert bot.SERVICE_PROTOCOLS["ikev2"] == ["ikev2"]
-    assert bot.SERVICE_PROTOCOLS["l2tp"] == ["l2tp", "pptp"]
+def test_four_separate_plans_in_the_shop_in_order():
+    assert list(miniapp.SHOP_SERVICES) == ["xray", "ikev2", "l2tp", "pptp"]
+    for service in ("ikev2", "l2tp", "pptp"):
+        assert bot.SERVICE_PROTOCOLS[service] == [service], "a buyer connects with what they bought and nothing else"
 
 
 def test_renew_never_takes_a_protocol_away():
@@ -59,7 +59,46 @@ def test_connect_carries_the_panels_short_link_for_ikev2(world, monkeypatch):
     monkeypatch.setitem(miniapp.ns, "db", type("D", (), {"get_panel": staticmethod(lambda pid: {"id": pid})})())
     monkeypatch.setitem(miniapp.ns, "panel_client", lambda panel: type("C", (), {"links": staticmethod(lambda name: links)})())
     assert asyncio.run(miniapp._order_connect(order))["share"] == "https://panel.example/app/s/uK7Q3MZP2"
-    assert asyncio.run(miniapp._order_connect({**order, "protocol": "l2tp"}))["share"] is None
+    links = {"share_url": "https://panel.example/app/s/uK7Q3MZP2", "l2tp_configs": [{"server": "vpn.example", "password": "p"}]}
+    l2tp = asyncio.run(miniapp._order_connect({**order, "protocol": "l2tp"}))
+    assert l2tp["share"] is None and l2tp["app_url"] is None, "the app and its short link are IKEv2 only"
+
+
+def _old_order(monkeypatch, last_protocol, protocols=("ikev2", "l2tp", "pptp")):
+    """An order from when one account carried IKEv2 + L2TP + PPTP together."""
+    order = {"id": 1, "username": "negar", "password": "", "sub_url": "https://panel.example/sub/abc", "panel_id": 3,
+             "protocol": "ikev2"}
+    links = {"user": {"username": "negar", "protocols": list(protocols) if protocols else None},
+             "share_url": "https://panel.example/app/s/negarK7Q3MZP2", "last_protocol": last_protocol,
+             "ikev2_configs": [{"server": "ike.example", "password": "123456", "install_url": "https://panel.example/sub/abc/ikev2"}],
+             "l2tp_configs": [{"server": "l2tp.example", "password": "123456", "psk": "secret"}],
+             "pptp_configs": [{"server": "pptp.example"}]}
+    monkeypatch.setitem(miniapp.ns, "db", type("D", (), {"get_panel": staticmethod(lambda pid: {"id": pid})})())
+    monkeypatch.setitem(miniapp.ns, "panel_client", lambda panel: type("C", (), {"links": staticmethod(lambda name: links)})())
+    return order
+
+
+def test_an_old_combined_order_shows_only_what_the_customer_connects_with(world, monkeypatch):
+    order = _old_order(monkeypatch, "l2tp")
+    x = asyncio.run(miniapp._order_connect(order))
+    assert x["narrowed"] == "l2tp" and x["l2tp"]["server"] == "l2tp.example" and x["l2tp"]["secret"] == "secret"
+    assert x["ikev2"] is None and x["pptp"] is None
+    assert x["app_url"] is None and x["share"] is None, "no Tifusi app for someone on L2TP"
+
+    x = asyncio.run(miniapp._order_connect(_old_order(monkeypatch, "ikev2")))
+    assert x["narrowed"] == "ikev2" and x["l2tp"] is None and x["pptp"] is None
+    assert x["app_url"] == bot.TIFUSI_APP_URL and x["share"] and x["ikev2"]["install"].endswith("/ikev2")
+
+    everything = asyncio.run(miniapp._order_connect(order, show_all=True))
+    assert everything["narrowed"] is None and all(everything[k] for k in ("ikev2", "l2tp", "pptp"))
+
+
+def test_an_order_nobody_has_connected_with_yet_shows_everything(world, monkeypatch):
+    for last in (None, "xray"):
+        x = asyncio.run(miniapp._order_connect(_old_order(monkeypatch, last)))
+        assert x["narrowed"] is None and all(x[k] for k in ("ikev2", "l2tp", "pptp")), last
+    unrestricted = asyncio.run(miniapp._order_connect(_old_order(monkeypatch, "pptp", protocols=None)))
+    assert unrestricted["narrowed"] is None and unrestricted["ikev2"], "an account with no protocol limit is left alone"
 
 
 def test_a_users_special_gb_price_and_days_apply_only_to_them(world):

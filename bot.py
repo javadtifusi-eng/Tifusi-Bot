@@ -57,7 +57,7 @@ DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل 
 # (یا چک خودکار ۵ دقیقه‌ای برسد) تا در ربات ظاهر شود؛ پروتکلی که هاستش حذف شد هم از فروش خارج می‌شود.
 SERVICES = {
     "xray": "Xray",
-    "l2tp": "L2TP · PPTP",
+    "l2tp": "L2TP",
     "ikev2": "IKEv2",
     "hysteria2": "Hysteria2",
     "pptp": "PPTP",
@@ -67,11 +67,11 @@ SERVICES = {
 SERVICE_PROTOCOLS = {
     "xray": ["vless", "vmess", "trojan", "shadowsocks"],
     "hysteria2": ["hysteria2"],
-    # سه پلن جدا: Xray، «L2TP · PPTP» (با تنظیمات خود گوشی) و IKEv2 (با اپ Tifusi، TIFUSI_APP_URL).
-    # سفارش‌های IKEv2 قبلی که L2TP و PPTP هم داشتند آن‌ها را نگه می‌دارند: تمدید پروتکلی را برنمی‌دارد
-    # (PanelClient.renew_user).
+    # چهار پلن جدا: Xray، IKEv2 (با اپ Tifusi، TIFUSI_APP_URL)، L2TP و PPTP (با تنظیمات خود گوشی)؛
+    # خریدار هر کدام فقط با همان وصل می‌شود. سفارش‌های قبلی که چند پروتکل با هم داشتند همان‌ها را
+    # نگه می‌دارند: تمدید پروتکلی را برنمی‌دارد (PanelClient.renew_user).
     "ikev2": ["ikev2"],
-    "l2tp": ["l2tp", "pptp"],
+    "l2tp": ["l2tp"],
     "pptp": ["pptp"],
     "wireguard": ["wireguard"],
 }
@@ -322,7 +322,9 @@ class TifusiPanelAPI:
                 "share_url": links.get("share_url", ""),
                 "ikev2_configs": links.get("ikev2_configs") or [],
                 "l2tp_configs": links.get("l2tp_configs") or [],
-                "pptp_configs": links.get("pptp_configs") or []}
+                "pptp_configs": links.get("pptp_configs") or [],
+                # پروتکلی که کاربر آخرین بار با آن وصل شد (پنل قدیمی یا کاربر دیده‌نشده: None)
+                "last_protocol": links.get("last_protocol") or user.get("last_protocol")}
 
     def links(self, username):
         """لینک‌ها و اطلاعات اتصال IKEv2/L2TP کاربر همان‌طور که پنل الان می‌دهد؛ None اگر کاربر روی پنل نبود."""
@@ -1503,9 +1505,6 @@ async def show_buy_services(query, uid):
     db.set_state(uid, "none")
     # سرویسی که هنوز پلنی ندارد نشان داده نمی‌شود تا مشتری به صفحه‌ی خالی نرسد
     services = [s for s in available_services() if db.get_plans(active_only=True, service=s)]
-    # PPTP جدا فروخته نمی‌شود: داخل پلن «L2TP · PPTP» است. سفارش‌های قبلی‌اش تمدید می‌شوند.
-    if "l2tp" in services:
-        services = [s for s in services if s != "pptp"]
     if not services:
         await safe_edit(query, "❌ فعلاً سرویسی برای فروش در دسترس نیست. کمی بعد دوباره امتحان کنید.", reply_markup=back_kb())
         return
