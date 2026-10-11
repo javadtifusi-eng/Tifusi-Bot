@@ -60,3 +60,17 @@ def test_connect_carries_the_panels_short_link_for_ikev2(world, monkeypatch):
     monkeypatch.setitem(miniapp.ns, "panel_client", lambda panel: type("C", (), {"links": staticmethod(lambda name: links)})())
     assert asyncio.run(miniapp._order_connect(order))["share"] == "https://panel.example/app/s/uK7Q3MZP2"
     assert asyncio.run(miniapp._order_connect({**order, "protocol": "l2tp"}))["share"] is None
+
+
+def test_a_users_special_gb_price_and_days_apply_only_to_them(world):
+    """One customer: every volume plan at 5,000 a GB and 35 days; everyone else keeps the plan as it is."""
+    db = bot.db
+    pid = db.add_plan(20, 30, 140000, title="20 گیگ", user_limit=1, service="ikev2")
+    db.ensure_user(101, "special", "special")
+    db.ensure_user(102, "other", "other")
+    db.x("UPDATE users SET gb_price=5000, plan_days=35, discount_pct=50 WHERE id=101")
+    special, normal = bot.user_plan(pid, 101), bot.user_plan(pid, 102)
+    assert (special["price"], special["days"]) == (100000, 35)  # the special price replaces the discount
+    assert (normal["price"], normal["days"]) == (140000, 30)
+    db.x("UPDATE users SET gb_price=0, plan_days=0 WHERE id=101")
+    assert (bot.user_plan(pid, 101)["price"], bot.user_plan(pid, 101)["days"]) == (70000, 30)
