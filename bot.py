@@ -548,7 +548,10 @@ class DB:
         # مهاجرت: صفحه‌ی مدیریت کاربر — درصد تخفیف، سقف اکانت تست و آخرین استفاده از ربات
         for sql in ("ALTER TABLE users ADD COLUMN discount_pct INTEGER DEFAULT 0",
                     "ALTER TABLE users ADD COLUMN test_limit INTEGER DEFAULT 1",
-                    "ALTER TABLE users ADD COLUMN last_seen INTEGER DEFAULT 0"):
+                    "ALTER TABLE users ADD COLUMN last_seen INTEGER DEFAULT 0",
+                    # قیمت ویژه‌ی یک کاربر: تومان برای هر گیگ و روزِ همه‌ی پلن‌ها (۰ = مثل بقیه)
+                    "ALTER TABLE users ADD COLUMN gb_price INTEGER DEFAULT 0",
+                    "ALTER TABLE users ADD COLUMN plan_days INTEGER DEFAULT 0"):
             try:
                 self.x(sql)
             except Exception:
@@ -998,13 +1001,28 @@ def user_discount(uid):
         return 0
 
 
+def user_special(uid):
+    """(تومان برای هر گیگ، روز) ویژه‌ی این کاربر؛ ۰ یعنی همان پلن عادی."""
+    u = db.get_user(uid)
+    try:
+        return max(0, int(u["gb_price"] or 0)), max(0, int(u["plan_days"] or 0))
+    except (IndexError, KeyError, TypeError, ValueError):
+        return 0, 0
+
+
 def user_plan(pid, uid):
-    """پلن با قیمتِ همین کاربر (درصد تخفیفی که ادمین برایش گذاشته). همه‌ی مسیرهای خرید و تمدید
-    مشتری از این می‌خوانند تا پیش‌فاکتور، کیف پول و رسید کارت به کارت یک عدد ببینند."""
+    """پلن با قیمتِ همین کاربر (قیمت ویژه‌ی هر گیگ و روز، یا درصد تخفیفی که ادمین برایش گذاشته). همه‌ی
+    مسیرهای خرید و تمدید مشتری از این می‌خوانند تا پیش‌فاکتور، کیف پول و رسید کارت به کارت یک عدد ببینند."""
     p = db.get_plan(pid) if pid else None
     if not p:
         return None
     p = dict(p)
+    gb_price, days = user_special(uid)
+    if days:
+        p["days"] = days
+    if gb_price and int(p["volume_gb"] or 0) > 0:
+        p["price"] = int(p["volume_gb"]) * gb_price
+        return p
     off = user_discount(uid)
     if off:
         p["price"] = int(p["price"] * (100 - off) / 100)
@@ -3512,7 +3530,8 @@ async def rc_approve(query, context, rid):
         await query.message.reply_text(f"✅ رسید #{rid} تایید شد — کیف پول کاربر شارژ شد.",
             reply_markup=InlineKeyboardMarkup([[btn("⚙️ مدیریت کاربر", f"au:panel:{r['user_id']}")]]))
     elif r["rtype"] == "purchase":
-        plan = db.get_plan(meta.get("plan_id"))
+        # روزهای ویژه‌ی کاربر هم مثل پیش‌فاکتورش
+        plan = user_plan(meta.get("plan_id"), r["user_id"])
         if not plan:
             await query.message.reply_text("❌ پلن حذف شده؛ وجه را دستی برگردانید.")
             return
@@ -3677,6 +3696,8 @@ async def admin_user_panel(query, uid_target, notice=None):
         f"🔰 مبلغ کل پرداختی: <b>{fmt(one('SELECT SUM(amount) c FROM receipts WHERE user_id=? AND status=?', t, 'approved'))}</b> تومان",
         f"🔰 جمع کل خرید: <b>{fmt(one('SELECT SUM(price) c ' + paid_sql, t))}</b> تومان",
         f"🔰 درصد تخفیف: <b>{user_discount(t)}٪</b>",
+        f"🔰 قیمت ویژه: <b>{(fmt(user_special(t)[0]) + ' تومان هر گیگ') if user_special(t)[0] else 'ندارد'}</b>"
+        f" · روز ویژه: <b>{user_special(t)[1] or 'ندارد'}</b>",
         f"🔰 فروش یک ساعت گذشته: <b>{one('SELECT COUNT(*) c ' + paid_sql + ' AND created_at>?', t, hour)}</b> عدد"
         f" · <b>{fmt(one('SELECT SUM(price) c ' + paid_sql + ' AND created_at>?', t, hour))}</b> تومان",
         f"🔰 فروش یک ماه گذشته: <b>{one('SELECT COUNT(*) c ' + paid_sql + ' AND created_at>?', t, month)}</b> عدد"
@@ -3691,6 +3712,7 @@ async def admin_user_panel(query, uid_target, notice=None):
         [btn("👇 کم کردن موجودی", f"au:deduct:{t}"), btn("👆 افزایش موجودی", f"au:charge:{t}")],
         [btn("🔓 رفع مسدودی کاربر", f"au:unblock:{t}"), btn("🔒 مسدود کردن کاربر", f"au:block:{t}")],
         [btn("✍️ ارسال پیام به کاربر", f"au:msg:{t}"), btn("🎁 درصد تخفیف", f"au:disc:{t}")],
+        [btn("💲 قیمت ویژه هر گیگ", f"au:gbp:{t}"), btn("📅 روز ویژه پلن‌ها", f"au:pdays:{t}")],
         [btn("🛍 مشاهده سفارشات کاربر", f"au:svcs:{t}")],
         [btn("👥 زیرمجموعه های کاربر", f"au:refs:{t}")],
         [btn("🔄 حذف زیرمجموعه‌ها", f"au:delrefs:{t}"), btn("🔄 خارج کردن از زیر", f"au:unref:{t}")],
@@ -3771,10 +3793,12 @@ async def admin_user_action(query, context, uid, action, target):
         await page(query, card("💡 نتیجه", [f"✅ {ok} سرویس {verb}."] + ([f"❌ {fail} سرویس ناموفق (پنل در دسترس نبود)."] if fail else [])),
                    [back_row(f"au:panel:{target}")])
         return
-    elif action in ("msg", "disc", "tlim", "xfer"):
+    elif action in ("msg", "disc", "tlim", "xfer", "gbp", "pdays"):
         prompts = {
             "msg": ("✍️ ارسال پیام به کاربر", "متن پیام را بفرستید؛ همان‌طور برای کاربر ارسال می‌شود."),
             "disc": ("🎁 درصد تخفیف", f"فعلی: {user_discount(target)}٪ — یک عدد از ۰ تا ۱۰۰ بفرستید (۰ یعنی بدون تخفیف)."),
+            "gbp": ("💲 قیمت ویژه هر گیگ", f"فعلی: {fmt(user_special(target)[0]) if user_special(target)[0] else 'ندارد'} — قیمت هر گیگ را به تومان بفرستید؛ همه‌ی پلن‌های حجمی برای این کاربر «حجم × این عدد» می‌شوند (۰ یعنی مثل بقیه)."),
+            "pdays": ("📅 روز ویژه پلن‌ها", f"فعلی: {user_special(target)[1] or 'ندارد'} — تعداد روز همه‌ی پلن‌ها برای این کاربر را بفرستید (۱ تا ۳۶۵؛ ۰ یعنی مثل بقیه)."),
             "tlim": ("➕ محدودیت اکانت تست", f"فعلی: {u['test_limit'] if u['test_limit'] is not None else 1} — تعداد اکانت تستی که این کاربر می‌تواند بگیرد را بفرستید (۰ تا ۲۰)."),
             "xfer": ("🔀 انتقال حساب کاربری", "آیدی عددی حساب مقصد را بفرستید. موجودی و همه‌ی سرویس‌های این کاربر به آن حساب منتقل می‌شوند (مقصد باید یک بار ربات را استارت کرده باشد)."),
         }
@@ -5237,7 +5261,7 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
                              reply_markup=InlineKeyboardMarkup(rows + [[btn("🔙 بازگشت", "admin:g:users")]]), parse_mode="HTML")
         return True
 
-    if state in ("au_msg", "au_disc", "au_tlim", "au_xfer") and is_admin(uid):
+    if state in ("au_msg", "au_disc", "au_tlim", "au_xfer", "au_gbp", "au_pdays") and is_admin(uid):
         target = sd["target"]
         num = text.strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
         if state == "au_msg":
@@ -5252,6 +5276,18 @@ async def handle_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state
                 return True
             db.x("UPDATE users SET discount_pct=? WHERE id=?", (int(num), target))
             await msg.reply_text(f"✅ تخفیف این کاربر {int(num)}٪ شد؛ روی خرید و تمدیدهای بعدی‌اش اعمال می‌شود.")
+        elif state == "au_gbp":
+            if not num.isdigit() or int(num) > 10_000_000:
+                await msg.reply_text("❌ قیمت هر گیگ را به تومان بفرستید (۰ یعنی مثل بقیه):")
+                return True
+            db.x("UPDATE users SET gb_price=? WHERE id=?", (int(num), target))
+            await msg.reply_text(f"✅ قیمت ویژه‌ی این کاربر {fmt(int(num)) + ' تومان هر گیگ' if int(num) else 'برداشته'} شد؛ روی خرید و تمدیدهای بعدی‌اش اعمال می‌شود.")
+        elif state == "au_pdays":
+            if not num.isdigit() or int(num) > 365:
+                await msg.reply_text("❌ یک عدد از ۰ تا ۳۶۵ بفرستید:")
+                return True
+            db.x("UPDATE users SET plan_days=? WHERE id=?", (int(num), target))
+            await msg.reply_text(f"✅ روز پلن‌های این کاربر {str(int(num)) + ' روز' if int(num) else 'مثل بقیه'} شد؛ روی خرید و تمدیدهای بعدی‌اش اعمال می‌شود.")
         elif state == "au_tlim":
             if not num.isdigit() or int(num) > 20:
                 await msg.reply_text("❌ یک عدد از ۰ تا ۲۰ بفرستید:")
