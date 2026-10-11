@@ -223,7 +223,7 @@
       const svc = S.shop.find((x) => x.service === S.kind) || S.shop[0];
       S.kind = svc.service;
       return `<div class="ptitle"><b>خرید سرویس</b><small>انتخاب نوع سرویس و پلن مورد نظر</small></div>
-      <div class="kinds">${S.shop.map((x) => `<button class="glass kind" type="button" data-kind="${x.service}" aria-pressed="${x.service === S.kind}">${ic(x.service === "xray" ? "shield" : "phone")}<b>${esc(x.label)}</b><small>${x.service === "xray" ? "مخصوص کامپیوتر و سایر دستگاه‌ها" : "مخصوص موبایل و تبلت"}</small></button>`).join("")}</div>
+      <div class="kinds">${S.shop.map((x) => `<button class="glass kind" type="button" data-kind="${x.service}" aria-pressed="${x.service === S.kind}">${ic(x.service === "xray" ? "shield" : "phone")}<b>${esc(x.label)}</b><small>${{ xray: "مخصوص کامپیوتر و سایر دستگاه‌ها", ikev2: "موبایل · با اپ خودمون (پیشنهادی)", l2tp: "موبایل · تنظیمات خود گوشی", pptp: "گوشی‌های خیلی قدیمی" }[x.service] || "مخصوص موبایل و تبلت"}</small></button>`).join("")}</div>
       <div class="h2"><b>پلن‌های ${esc(svc.label)}</b></div>
       <div class="plans">${svc.plans.map((p) => `<button class="glass plan" type="button" data-plan="${p.id}">${ic(p.gb ? "bolt" : "inf")}
         <span class="gb">${p.gb ? `${num(p.gb)} <small>گیگ</small>` : "نامحدود"}</span>${p.gb ? "" : `<span class="dy">${p.users ? `${num(p.users)} کاربره` : "بدون محدودیت"}</span>`}
@@ -874,18 +874,20 @@
   }
   // ---------- نصب پروفایل و اطلاعات اتصال (حضوری) و ارسال کامل برای مشتری ----------
   const connCache = {};
-  async function getConn(id) {
-    if (!connCache[id]) connCache[id] = await api("connect?order_id=" + id);
-    return connCache[id];
+  // all: همه‌ی پروتکل‌های سفارش قدیمی، نه فقط همانی که مشتری با آن وصل می‌شود
+  async function getConn(id, all) {
+    const key = id + (all ? ":all" : "");
+    if (!connCache[key]) connCache[key] = await api("connect?order_id=" + id + (all ? "&all=1" : ""));
+    return connCache[key];
   }
   const TYPE = { ikev2: "IKEv2/IPSec MSCHAPv2", l2tp: "L2TP/IPSec PSK" };
   function shareText(x) {
-    const srv = (x.ikev2 || x.l2tp || {}).server;
+    const srv = (x.ikev2 || x.l2tp || x.pptp || {}).server;
     const lines = ["🔐 اطلاعات اتصال تیفوسی", `👤 نام کاربری: ${x.username}`];
-    if (x.password && (x.ikev2 || x.l2tp)) lines.push(`🔑 رمز: ${x.password}`);
+    if (x.password && (x.ikev2 || x.l2tp || x.pptp)) lines.push(`🔑 رمز: ${x.password}`);
     if (srv) lines.push(`🌐 سرور: ${srv}`);
     if (x.l2tp && x.l2tp.secret) lines.push(`🗝 کلید L2TP (Secret): ${x.l2tp.secret}`);
-    if (!x.ikev2 && !x.l2tp && x.sub) lines.push(`🔗 لینک اشتراک: ${x.sub}`);
+    if (!x.ikev2 && !x.l2tp && !x.pptp && x.sub) lines.push(`🔗 لینک اشتراک: ${x.sub}`);
     if (x.share) lines.push("", `📲 اندروید، نصب اپ و اتصال با یک لمس: ${x.share}`);
     else if (x.app_url) lines.push("", `📲 اپ اندروید Tifusi: ${x.app_url}`, `بعد از نصب، این لینک اشتراک را در اپ بزنید: ${x.sub}`);
     const link = x.share ? "" : x.guide || "";  // لینک کوتاه خودش همان صفحه‌ی راهنماست
@@ -895,7 +897,7 @@
   const crow = (label, v) => `<div class="lrow"><span class="d">${label}</span><span class="cacts"><span class="num" style="font-weight:700;direction:ltr">${esc(v)}</span><button class="pill ghost" type="button" data-copy="${esc(v)}">کپی</button></span></div>`;
   // نصب پروفایل (اپل) / جهت اتصال (اندروید). VLESS: بارکد + کپی لینک ساب. IKEv2/L2TP/PPTP روی اندروید
   // بارکد ندارند: فقط دکمه‌های کپی، بدون نمایش مقدارها. آیفون: QR و نصب یک‌لمسی پروفایل.
-  async function openConnect(id, os) {
+  async function openConnect(id, os, all) {
     const android = os === "android";
     // از لیست کاربران (بدون os): هر دو، تا بارکد اشتراک برای اپ Tifusi همیشه باشد
     const both = !os;
@@ -903,12 +905,13 @@
     $("sheet").innerHTML = `<h3 id="sheetTitle" style="display:flex;gap:8px;align-items:center">${title}</h3>` + LOADING;
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
     let x;
-    try { x = await getConn(id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
+    try { x = await getConn(id, all); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
+    const qall = all ? ' data-qall="1"' : "";
     const cbtn = (label, v, icon) => v ? `<button class="pill" type="button" data-copy="${esc(v)}" style="justify-content:center;gap:6px;padding:12px 8px">${icon ? ic(icon) : ""}${label}</button>` : "";
     const ipsec = x.ikev2 || x.l2tp || x.pptp;
     const ios = (k, t) => x[k] && x[k].install ? `<div class="glass sec" style="display:grid;gap:10px;justify-items:center;text-align:center">
         <b>${t}</b>
-        <img data-qr="${k}" data-qid="${x.id}" alt="QR نصب ${t}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
+        <img data-qr="${k}" data-qid="${x.id}"${qall} alt="QR نصب ${t}" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px">
         <small style="color:var(--muted);line-height:1.8">آیفون مشتری: با دوربین این QR رو اسکن کنه، پروفایل روی گوشی خودش نصب می‌شه.</small>
         <button class="pill" type="button" data-install="${esc(x[k].install)}" style="justify-content:center;width:100%">${ic("apple")} نصب روی همین گوشی</button></div>` : "";
     const iosBody = ios("ikev2", "IKEv2 (پیشنهادی)") + ios("l2tp", "L2TP");
@@ -926,7 +929,10 @@
       const app = x.app_url ? `<button class="cta" type="button" data-openurl="${esc(x.app_url)}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px">📲 دانلود اپ Tifusi</button>
         ${x.sub ? `<button class="pill" type="button" data-copy="${esc(x.sub)}" style="justify-content:center;gap:6px;padding:12px 8px">${ic("link")} کپی لینک اشتراک (برای اپ)</button>` : ""}
         <small style="color:var(--muted);line-height:1.8;text-align:center">اپ رو نصب کن، «اسکن بارکد» رو بزن و بارکد بالا رو اسکن کن؛ یا لینک رو کپی کن و توی اپ بزن.</small>` : "";
-      body = `${x.sub ? `<div class="glass sec" style="display:grid;justify-items:center;padding:14px"><img data-qr="sub" data-qid="${x.id}" alt="QR لینک ساب" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px"></div>` : ""}
+      // بارکد اشتراک فقط به کار اپ Tifusi (IKEv2) می‌آید؛ L2TP و PPTP دستی در تنظیمات گوشی زده می‌شوند
+      const NAMES = { ikev2: "IKEv2", l2tp: "L2TP", pptp: "PPTP" };
+      const only = x.narrowed ? `<div class="glass sec" style="display:grid;gap:8px;text-align:center"><small style="color:var(--muted);line-height:1.8">این مشتری با <b>${NAMES[x.narrowed]}</b> وصل می‌شه؛ فقط همون رو نشون می‌دم.</small><button class="pill ghost" type="button" data-connall="${x.id}" data-os="${os || ""}" style="justify-content:center">نمایش همه‌ی پروتکل‌ها</button></div>` : "";
+      body = `${only}${x.ikev2 && x.sub ? `<div class="glass sec" style="display:grid;gap:8px;justify-items:center;padding:14px"><b>بارکد اپ Tifusi (IKEv2)</b><img data-qr="sub" data-qid="${x.id}" alt="QR لینک ساب" style="width:190px;height:190px;border-radius:14px;background:#fff;padding:8px"></div>` : ""}
         ${app}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           ${cbtn("کپی نام کاربری", x.username, "user")}${cbtn("کپی رمز", x.password, "shield")}
@@ -947,7 +953,7 @@
     document.querySelectorAll("[data-qr]").forEach(async (img) => {
       const key = img.dataset.qid + ":" + img.dataset.qr;
       if (!qrCache[key]) {
-        try { const r = await fetch(`api/qr?order_id=${img.dataset.qid}&kind=${img.dataset.qr}`, { headers: { "X-Init-Data": INIT } }); if (!r.ok) { img.hidden = true; return; } qrCache[key] = URL.createObjectURL(await r.blob()); }
+        try { const r = await fetch(`api/qr?order_id=${img.dataset.qid}&kind=${img.dataset.qr}${img.dataset.qall ? "&all=1" : ""}`, { headers: { "X-Init-Data": INIT } }); if (!r.ok) { img.hidden = true; return; } qrCache[key] = URL.createObjectURL(await r.blob()); }
         catch (e) { img.hidden = true; return; }
       }
       img.src = qrCache[key];
@@ -1215,6 +1221,7 @@
     if (d.card) { S.card = +d.card; S.tab = "card"; render(); scrollTo(0, 0); return; }
     if (d.send) { openSend({ id: +d.send }); return; }
     if (d.conn) { openConnect(+d.conn, d.os); return; }
+    if (d.connall) { openConnect(+d.connall, d.os || undefined, true); return; }
     if (d.cos) { S.cos = d.cos; document.querySelectorAll("[data-cos]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.cos === d.cos))); document.querySelectorAll("[data-cpane]").forEach((x) => { x.hidden = x.dataset.cpane !== d.cos; }); return; }
     if (d.install) { if (!tg("web_app_open_link", { url: d.install, try_browser: "safari" })) window.open(d.install, "_blank"); return; }
     if (d.openurl) { openLink(d.openurl); return; }

@@ -29,9 +29,9 @@ MINIAPP_URL = "https://app.bomalo.ir/"
 INIT_DATA_MAX_AGE = 24 * 3600
 PANEL_CACHE_SECONDS = 30
 STATIC_DIR = Path(__file__).resolve().parent / "miniapp"
-# سرویس‌هایی که مینی‌اپ می‌فروشد؛ «ikev2» همان پلن یکی برای IKEv2، L2TP و PPTP است
-# سه پلن، به همین ترتیب در فروشگاه: V2Ray، «L2TP · PPTP» با تنظیمات خود گوشی، و IKEv2 با اپ Tifusi
-SHOP_SERVICES = {"xray": "V2Ray", "l2tp": "L2TP · PPTP", "ikev2": "IKEv2 (اپ Tifusi)"}
+# سرویس‌هایی که مینی‌اپ می‌فروشد
+# چهار پلن جدا، به همین ترتیب در فروشگاه: V2Ray، IKEv2 با اپ Tifusi، و L2TP و PPTP با تنظیمات خود گوشی
+SHOP_SERVICES = {"xray": "V2Ray", "ikev2": "IKEv2 (اپ Tifusi)", "l2tp": "L2TP", "pptp": "PPTP"}
 # همان وضعیت‌هایی که db.get_user_orders نشان می‌دهد
 LIVE_ORDER_STATUSES = ("active", "delreq_pending")
 
@@ -609,14 +609,19 @@ def _own_order(db, uid, order_id):
     return order
 
 
-async def _order_connect(order):
-    """اطلاعات اتصال همان‌طور که پنل الان می‌دهد (رمز از پنل، نه از سفارش، تا همانی باشد که نود چک می‌کند)."""
+IPSEC_KINDS = ("ikev2", "l2tp", "pptp")
+
+
+async def _order_connect(order, show_all=False):
+    """اطلاعات اتصال همان‌طور که پنل الان می‌دهد (رمز از پنل، نه از سفارش، تا همانی باشد که نود چک می‌کند).
+    سفارش قدیمی که چند پروتکل با هم دارد فقط همانی را نشان می‌دهد که مشتری آخرین بار با آن وصل شد
+    (narrowed)، مگر show_all؛ تا وقتی پنل هنوز او را ندیده، همه."""
     info = {"id": order["id"], "username": order["username"], "service": order["protocol"],
             "password": order["password"] or "", "sub": ns["public_sub_url"](order["sub_url"] or ""),
             "guide": _guide_url(order),
             # IKEv2 روی اندروید با اپ Tifusi وصل می‌شود: دانلود اپ، بعد بارکد یا لینک اشتراک
             "app_url": ns.get("TIFUSI_APP_URL") if order["protocol"] == "ikev2" else None,
-            "share": None, "ikev2": None, "l2tp": None, "pptp": None}
+            "share": None, "ikev2": None, "l2tp": None, "pptp": None, "narrowed": None}
     if order["protocol"] not in ns["IPSEC_SERVICES"]:
         return info
     panel = ns["db"].get_panel(order["panel_id"])
@@ -626,9 +631,6 @@ async def _order_connect(order):
             links = await asyncio.to_thread(ns["panel_client"](panel).links, order["username"])
         except Exception as e:
             log.warning("miniapp connect links %s: %s", order["username"], e)
-    # لینک کوتاه پنل برای واتساپ/پیامک: صفحه‌ی راهنما با دانلود اپ و اتصال یک‌لمسی (پنل قدیمی ندارد)
-    if order["protocol"] == "ikev2" and (links or {}).get("share_url"):
-        info["share"] = ns["public_sub_url"](links["share_url"])
     pptp = ((links or {}).get("pptp_configs") or [None])[0]
     if pptp:
         info["pptp"] = {"server": pptp.get("server") or ""}
@@ -640,6 +642,19 @@ async def _order_connect(order):
             info[kind] = {"server": c.get("server") or "", "remote_id": c.get("remote_id") or "",
                           "secret": c.get("psk") or "" if kind == "l2tp" else "",
                           "install": ns["public_sub_url"](c.get("install_url") or c.get("mobileconfig_url") or "")}
+    have = [k for k in IPSEC_KINDS if info[k]]
+    used = (links or {}).get("last_protocol")
+    # کاربر بدون محدودیت پروتکل روی پنل (protocols خالی) دست نمی‌خورد
+    if not show_all and len(have) > 1 and used in have and ((links or {}).get("user") or {}).get("protocols"):
+        for k in have:
+            if k != used:
+                info[k] = None
+        info["narrowed"] = used
+    if links:
+        # اپ Tifusi و لینک کوتاه پنل (صفحه‌ی راهنما با دانلود اپ و اتصال یک‌لمسی) فقط به کار IKEv2 می‌آیند
+        info["app_url"] = ns.get("TIFUSI_APP_URL") if info["ikev2"] else None
+        if info["ikev2"] and links.get("share_url"):
+            info["share"] = ns["public_sub_url"](links["share_url"])
     return info
 
 
@@ -647,7 +662,7 @@ async def api_connect(request):
     order = _own_order(ns["db"], request["uid"], request.query.get("order_id"))
     if not order:
         return _err("not_found", 404)
-    return web.json_response(await _order_connect(order))
+    return web.json_response(await _order_connect(order, show_all=request.query.get("all") == "1"))
 
 
 async def api_qr(request):
@@ -656,7 +671,7 @@ async def api_qr(request):
     order = _own_order(ns["db"], request["uid"], request.query.get("order_id"))
     if not order:
         return _err("not_found", 404)
-    info = await _order_connect(order)
+    info = await _order_connect(order, show_all=request.query.get("all") == "1")
     kind = request.query.get("kind")
     data = info["sub"] if kind == "sub" else (info.get(kind) or {}).get("install") if kind in ("ikev2", "l2tp") else None
     if not data:

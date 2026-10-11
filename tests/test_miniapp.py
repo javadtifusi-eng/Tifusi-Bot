@@ -115,7 +115,7 @@ def test_buy_validation(world, plan):
     async def go(c):
         bad_plan = await c.post("/api/buy", json={"service": "xray", "plan_id": 999}, headers=_h(uid))
         bad_name = await c.post("/api/buy", json={"service": "xray", "plan_id": plan["id"], "username": "1bad"}, headers=_h(uid))
-        bad_service = await c.post("/api/buy", json={"service": "pptp", "plan_id": plan["id"]}, headers=_h(uid))
+        bad_service = await c.post("/api/buy", json={"service": "wireguard", "plan_id": plan["id"]}, headers=_h(uid))
         return [bad_plan.status, bad_name.status, bad_service.status]
     assert _run(world, go) == [400, 400, 400]
     assert world.created == [] and bot.db.get_balance(uid) == 10**7
