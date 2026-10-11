@@ -319,6 +319,7 @@ class TifusiPanelAPI:
         links = self._call(f"/api/users/{int(user['id'])}/links") or {}
         return {"user": user, "subscription_url": links.get("subscription_url", ""),
                 "app_code": links.get("app_code", ""),
+                "share_url": links.get("share_url", ""),
                 "ikev2_configs": links.get("ikev2_configs") or [],
                 "l2tp_configs": links.get("l2tp_configs") or [],
                 "pptp_configs": links.get("pptp_configs") or []}
@@ -2259,7 +2260,7 @@ def public_sub_url(url):
     if not host or not url:
         return url
     parts = urllib.parse.urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.path.startswith("/sub/"):
+    if parts.scheme not in ("http", "https") or not parts.path.startswith(("/sub/", "/app/s/")):
         return url
     return urllib.parse.urlunsplit(("https", host, parts.path, parts.query, parts.fragment))
 

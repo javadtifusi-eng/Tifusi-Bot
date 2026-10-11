@@ -616,7 +616,7 @@ async def _order_connect(order):
             "guide": _guide_url(order),
             # IKEv2 روی اندروید با اپ Tifusi وصل می‌شود: دانلود اپ، بعد بارکد یا لینک اشتراک
             "app_url": ns.get("TIFUSI_APP_URL") if order["protocol"] == "ikev2" else None,
-            "ikev2": None, "l2tp": None, "pptp": None}
+            "share": None, "ikev2": None, "l2tp": None, "pptp": None}
     if order["protocol"] not in ns["IPSEC_SERVICES"]:
         return info
     panel = ns["db"].get_panel(order["panel_id"])
@@ -626,6 +626,9 @@ async def _order_connect(order):
             links = await asyncio.to_thread(ns["panel_client"](panel).links, order["username"])
         except Exception as e:
             log.warning("miniapp connect links %s: %s", order["username"], e)
+    # لینک کوتاه پنل برای واتساپ/پیامک: صفحه‌ی راهنما با دانلود اپ و اتصال یک‌لمسی (پنل قدیمی ندارد)
+    if order["protocol"] == "ikev2" and (links or {}).get("share_url"):
+        info["share"] = ns["public_sub_url"](links["share_url"])
     pptp = ((links or {}).get("pptp_configs") or [None])[0]
     if pptp:
         info["pptp"] = {"server": pptp.get("server") or ""}

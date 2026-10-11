@@ -886,8 +886,9 @@
     if (srv) lines.push(`🌐 سرور: ${srv}`);
     if (x.l2tp && x.l2tp.secret) lines.push(`🗝 کلید L2TP (Secret): ${x.l2tp.secret}`);
     if (!x.ikev2 && !x.l2tp && x.sub) lines.push(`🔗 لینک اشتراک: ${x.sub}`);
-    if (x.app_url) lines.push("", `📲 اپ اندروید Tifusi: ${x.app_url}`, `بعد از نصب، این لینک اشتراک را در اپ بزنید: ${x.sub}`);
-    const link = x.guide || "";
+    if (x.share) lines.push("", `📲 اندروید، نصب اپ و اتصال با یک لمس: ${x.share}`);
+    else if (x.app_url) lines.push("", `📲 اپ اندروید Tifusi: ${x.app_url}`, `بعد از نصب، این لینک اشتراک را در اپ بزنید: ${x.sub}`);
+    const link = x.share ? "" : x.guide || "";  // لینک کوتاه خودش همان صفحه‌ی راهنماست
     if (link) lines.push("", `🔗 نصب و راهنما: ${link}`);
     return lines.join("\n");
   }
@@ -965,7 +966,7 @@
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
     let x;
     try { x = await getConn(c.id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
-    S.sendText = shareText(x); S.sendLink = x.guide || x.sub || "";
+    S.sendText = shareText(x); S.sendLink = x.share || x.guide || x.sub || "";
     $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
       <div class="glass sec" dir="auto" style="white-space:pre-wrap;line-height:1.9;font-size:.85rem">${esc(S.sendText)}</div>
       <button class="cta" type="button" data-share="tg">ارسال در تلگرام</button>

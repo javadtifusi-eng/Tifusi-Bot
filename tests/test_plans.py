@@ -49,3 +49,14 @@ def test_renew_rounds_the_new_limit_up_to_whole_gigabytes():
     sent.clear()
     api.renew_user("u", 40, 2_000_000_000)
     assert sent["body"]["data_limit"] == 40 * 1024 ** 3
+
+
+def test_connect_carries_the_panels_short_link_for_ikev2(world, monkeypatch):
+    """The short link (guide page + app download + one-tap import) goes into the share text instead of the long sub link."""
+    order = {"id": 1, "username": "u", "password": "", "sub_url": "https://panel.example/sub/abc", "panel_id": 3,
+             "protocol": "ikev2"}
+    links = {"share_url": "https://panel.example/app/s/uK7Q3MZP2", "ikev2_configs": [{"server": "vpn.example", "password": "p"}]}
+    monkeypatch.setitem(miniapp.ns, "db", type("D", (), {"get_panel": staticmethod(lambda pid: {"id": pid})})())
+    monkeypatch.setitem(miniapp.ns, "panel_client", lambda panel: type("C", (), {"links": staticmethod(lambda name: links)})())
+    assert asyncio.run(miniapp._order_connect(order))["share"] == "https://panel.example/app/s/uK7Q3MZP2"
+    assert asyncio.run(miniapp._order_connect({**order, "protocol": "l2tp"}))["share"] is None
