@@ -881,19 +881,9 @@
     return connCache[key];
   }
   const TYPE = { ikev2: "IKEv2/IPSec MSCHAPv2", l2tp: "L2TP/IPSec PSK" };
-  function shareText(x) {
-    const srv = (x.ikev2 || x.l2tp || x.pptp || {}).server;
-    const lines = ["🔐 اطلاعات اتصال تیفوسی", `👤 نام کاربری: ${x.username}`];
-    if (x.password && (x.ikev2 || x.l2tp || x.pptp)) lines.push(`🔑 رمز: ${x.password}`);
-    if (srv) lines.push(`🌐 سرور: ${srv}`);
-    if (x.l2tp && x.l2tp.secret) lines.push(`🗝 کلید L2TP (Secret): ${x.l2tp.secret}`);
-    if (!x.ikev2 && !x.l2tp && !x.pptp && x.sub) lines.push(`🔗 لینک اشتراک: ${x.sub}`);
-    if (x.share) lines.push("", `📲 اندروید، نصب اپ و اتصال با یک لمس: ${x.share}`);
-    else if (x.app_url) lines.push("", `📲 اپ اندروید Tifusi: ${x.app_url}`, `بعد از نصب، این لینک اشتراک را در اپ بزنید: ${x.sub}`);
-    const link = x.share ? "" : x.guide || "";  // لینک کوتاه خودش همان صفحه‌ی راهنماست
-    if (link) lines.push("", `🔗 نصب و راهنما: ${link}`);
-    return lines.join("\n");
-  }
+  // آنچه برای مشتری فرستاده می‌شود فقط یک لینک است: نه نام کاربری، نه رمز، نه آموزش.
+  // آن صفحه برای IKEv2 سه دکمه دارد (دانلود اپ، جفت‌سازی اندروید، پروفایل آیفون) و برای V2Ray فقط بارکد اشتراک.
+  function shareText(x) { return x.share || x.guide || x.sub || ""; }
   const crow = (label, v) => `<div class="lrow"><span class="d">${label}</span><span class="cacts"><span class="num" style="font-weight:700;direction:ltr">${esc(v)}</span><button class="pill ghost" type="button" data-copy="${esc(v)}">کپی</button></span></div>`;
   // نصب پروفایل (اپل) / جهت اتصال (اندروید). VLESS: بارکد + کپی لینک ساب. IKEv2/L2TP/PPTP روی اندروید
   // بارکد ندارند: فقط دکمه‌های کپی، بدون نمایش مقدارها. آیفون: QR و نصب یک‌لمسی پروفایل.
@@ -1225,7 +1215,7 @@
     if (d.cos) { S.cos = d.cos; document.querySelectorAll("[data-cos]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.cos === d.cos))); document.querySelectorAll("[data-cpane]").forEach((x) => { x.hidden = x.dataset.cpane !== d.cos; }); return; }
     if (d.install) { if (!tg("web_app_open_link", { url: d.install, try_browser: "safari" })) window.open(d.install, "_blank"); return; }
     if (d.openurl) { openLink(d.openurl); return; }
-    if (d.share) { const t = S.sendText; if (d.share === "tg") { const u = `https://t.me/share/url?url=${encodeURIComponent(S.sendLink)}&text=${encodeURIComponent(t)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); } else openLink(`https://wa.me/?text=${encodeURIComponent(t)}`); return; }
+    if (d.share) { const t = S.sendText; if (d.share === "tg") { const u = `https://t.me/share/url?url=${encodeURIComponent(S.sendLink)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); } else openLink(`https://wa.me/?text=${encodeURIComponent(t)}`); return; }
     if (d.guide) { const c = byId(d.guide); if (c && c.guide) openLink(c.guide); return; }
     if (d.copy) { copy(d.copy); return; }
     if (d.nrc) { closeSheet(); S.tab = "admin"; S.asec = "rc"; S.admin = null; render(); scrollTo(0, 0); return; }

@@ -99,9 +99,10 @@ def _panel_users(panel):
 
 
 def _guide_url(order):
-    """صفحه‌ی آموزش فقط برای اتصال‌های L2TP/PPTP (پلن IPsec)؛ V2Ray فقط لینک اشتراک و QR می‌گیرد."""
+    """صفحه‌ای که برای مشتری فرستاده می‌شود: برای IKEv2 سه دکمه (اپ، جفت‌سازی، پروفایل آیفون)،
+    برای V2Ray فقط بارکد اشتراک، برای L2TP/PPTP راهنمای قدم‌به‌قدم (پنل خودش تشخیص می‌دهد)."""
     sub = ns["public_sub_url"](order["sub_url"] or "").rstrip("/")
-    if order["protocol"] not in ns["IPSEC_SERVICES"] or not sub.startswith("https://"):
+    if not sub.startswith("https://"):
         return None
     return sub + "/guide"
 
