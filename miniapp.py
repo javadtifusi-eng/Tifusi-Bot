@@ -1514,6 +1514,25 @@ async def index(request):
     return web.FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
 
+_SMS_PAGE = r"""<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Tifusi</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Tahoma,system-ui,sans-serif;background:#031546;color:#f4f7ff}
+a{display:block;padding:18px 26px;border-radius:18px;background:#12d6e0;color:#031546;font-size:18px;font-weight:700;text-decoration:none}</style></head>
+<body><a id="go" href="#">باز کردن پیامک</a>
+<script>
+// The link to send comes in ?b= and never reaches the HTML itself: only an https address is put into the sms: link.
+const b=new URLSearchParams(location.search).get("b")||"", ok=/^https:\/\/[^\s<>"']{8,400}$/.test(b);
+const go=document.getElementById("go");
+if(ok){go.href="sms:?&body="+encodeURIComponent(b);location.href=go.href}else{go.textContent="لینک نامعتبر است";go.removeAttribute("href")}
+</script></body></html>"""
+
+
+async def sms_page(request):
+    """«ارسال با پیامک»: تلگرام داخل مینی‌اپ لینک sms: را باز نمی‌کند، پس مینی‌اپ این صفحه را در مرورگر
+    خود گوشی باز می‌کند و صفحه برنامه‌ی پیامک را با همان لینک صدا می‌زند. شماره را خود فروشنده انتخاب می‌کند."""
+    return web.Response(text=_SMS_PAGE, content_type="text/html", charset="utf-8", headers={"Cache-Control": "no-store"})
+
+
 async def app_js(request):
     return web.FileResponse(STATIC_DIR / "app.js", headers={"Cache-Control": "no-store"})
 
@@ -1524,6 +1543,7 @@ async def start(application, bot_globals):
     _APP["app"] = application
     app = web.Application(middlewares=[auth_mw], client_max_size=8 * 1024 * 1024)
     app.router.add_get("/", index)
+    app.router.add_get("/sms", sms_page)
     app.router.add_get("/app.js", app_js)
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/customers", api_customers)

@@ -967,8 +967,9 @@
       <div class="glass sec" dir="auto" style="white-space:pre-wrap;line-height:1.9;font-size:.85rem">${esc(S.sendText)}</div>
       <button class="cta" type="button" data-share="tg">ارسال در تلگرام</button>
       <button class="pill ghost" type="button" data-share="wa" style="justify-content:center">ارسال در واتساپ</button>
+      <button class="pill ghost" type="button" data-share="sms" style="justify-content:center">ارسال با پیامک</button>
       <button class="pill ghost" type="button" data-copy="${esc(S.sendText)}" style="justify-content:center">${ic("link")} کپی همه</button>
-      <p class="soon">اطلاعات اتصال رو فقط توی تلگرام یا واتساپ بفرست؛ پیام‌رسان‌های داخلی پیام‌ها رو می‌خونن.</p>
+      <p class="soon">هر کسی این لینک رو داشته باشه می‌تونه همین سرویس رو نصب کنه؛ فقط برای خود مشتری بفرست.</p>
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
   }
   function support() {
@@ -1215,7 +1216,7 @@
     if (d.cos) { S.cos = d.cos; document.querySelectorAll("[data-cos]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.cos === d.cos))); document.querySelectorAll("[data-cpane]").forEach((x) => { x.hidden = x.dataset.cpane !== d.cos; }); return; }
     if (d.install) { if (!tg("web_app_open_link", { url: d.install, try_browser: "safari" })) window.open(d.install, "_blank"); return; }
     if (d.openurl) { openLink(d.openurl); return; }
-    if (d.share) { const t = S.sendText; if (d.share === "tg") { const u = `https://t.me/share/url?url=${encodeURIComponent(S.sendLink)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); } else openLink(`https://wa.me/?text=${encodeURIComponent(t)}`); return; }
+    if (d.share) { const t = S.sendText; if (d.share === "tg") { const u = `https://t.me/share/url?url=${encodeURIComponent(S.sendLink)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); } else if (d.share === "sms") openLink(`${location.origin}/sms?b=${encodeURIComponent(S.sendLink)}`); else openLink(`https://wa.me/?text=${encodeURIComponent(t)}`); return; }
     if (d.guide) { const c = byId(d.guide); if (c && c.guide) openLink(c.guide); return; }
     if (d.copy) { copy(d.copy); return; }
     if (d.nrc) { closeSheet(); S.tab = "admin"; S.asec = "rc"; S.admin = null; render(); scrollTo(0, 0); return; }
