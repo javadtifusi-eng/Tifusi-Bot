@@ -2420,7 +2420,7 @@ def guide_button(order):
     url = public_sub_url(order["sub_url"] or "").rstrip("/")
     if order["protocol"] not in ("ikev2", "l2tp") or not url.startswith("https://"):
         return None
-    return InlineKeyboardButton(GUIDE_BTN, web_app=WebAppInfo(url=url + "/guide"))
+    return InlineKeyboardButton(GUIDE_BTN, web_app=WebAppInfo(url=url + "/guide?full=1"))
 
 
 def android_html(order, links):
