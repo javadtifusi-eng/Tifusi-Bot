@@ -916,9 +916,9 @@
       const same = new Set(servers.map(([, v]) => v)).size === 1;
       const serverBtns = same ? cbtn("کپی آدرس سرور", servers[0][1], "phone") : servers.map(([k, v]) => cbtn(`کپی سرور ${k}`, v, "phone")).join("");
       // IKEv2: اپ Tifusi همین بارکد ساب را اسکن می‌کند (یا لینک کپی‌شده را می‌گیرد) و فقط خاموش/روشن دارد
-      const app = x.app_url ? `<button class="cta" type="button" data-openurl="${esc(x.app_url)}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px">📲 دانلود اپ Tifusi</button>
+      const app = x.app_url ? `<button class="cta" type="button" data-openurl="${esc(x.app_url)}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px">📲 دانلود اپ اختصاصی Tifusi</button>
         ${x.sub ? `<button class="pill" type="button" data-copy="${esc(x.sub)}" style="justify-content:center;gap:6px;padding:12px 8px">${ic("link")} کپی لینک اشتراک (برای اپ)</button>` : ""}
-        <small style="color:var(--muted);line-height:1.8;text-align:center">اپ رو نصب کن، «اسکن بارکد» رو بزن و بارکد بالا رو اسکن کن؛ یا لینک رو کپی کن و توی اپ بزن.</small>` : "";
+        <small style="color:var(--muted);line-height:1.8;text-align:center">لینک دانلود مخصوص همین مشتریه: اپ رو نصب کنه و باز کنه، اشتراکش خودش بالا میاد؛ فقط دکمه‌ی اتصال رو بزنه.</small>` : "";
       // بارکد اشتراک فقط به کار اپ Tifusi (IKEv2) می‌آید؛ L2TP و PPTP دستی در تنظیمات گوشی زده می‌شوند
       const NAMES = { ikev2: "IKEv2", l2tp: "L2TP", pptp: "PPTP" };
       const only = x.narrowed ? `<div class="glass sec" style="display:grid;gap:8px;text-align:center"><small style="color:var(--muted);line-height:1.8">این مشتری با <b>${NAMES[x.narrowed]}</b> وصل می‌شه؛ فقط همون رو نشون می‌دم.</small><button class="pill ghost" type="button" data-connall="${x.id}" data-os="${os || ""}" style="justify-content:center">نمایش همه‌ی پروتکل‌ها</button></div>` : "";

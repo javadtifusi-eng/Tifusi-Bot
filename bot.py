@@ -2282,6 +2282,16 @@ def public_sub_url(url):
     return urllib.parse.urlunsplit(("https", host, parts.path, parts.query, parts.fragment))
 
 
+def tifusi_app_url(sub_url):
+    """دانلود اختصاصی اپ: پنل لینک اشتراک همین کاربر را داخل APK می‌گذارد تا بی‌جفت‌سازی بالا بیاید.
+    لینکی که شکل /sub/<secret> ندارد، همان لینک عمومی گیت‌هاب را می‌گیرد."""
+    parts = urllib.parse.urlsplit(public_sub_url(sub_url or ""))
+    segs = parts.path.strip("/").split("/")
+    if parts.scheme in ("http", "https") and len(segs) == 2 and segs[0] == "sub" and segs[1]:
+        return urllib.parse.urlunsplit((parts.scheme, parts.netloc, f"/sub/{segs[1]}/tifusi.apk", "", ""))
+    return TIFUSI_APP_URL
+
+
 def apple_profile_url(order, links):
     """لینک نصب یک‌لمسی پروفایل آیفون برای همین سرویس (IKEv2 یا L2TP)؛ None اگر پنل نداد.
     install_url صفحه‌ای است که مشتری را از مرورگر تلگرام به Safari می‌برد (آیفون پروفایل را فقط
@@ -2835,8 +2845,7 @@ def delivery_details_html(order, panel, links):
     if order["protocol"] not in IPSEC_SERVICES and order["sub_url"]:
         parts.append(f"🔗 لینک اشتراک:\n<code>{esc(public_sub_url(order['sub_url']))}</code>")
     if order["protocol"] == "ikev2":
-        parts.insert(0, f"📲 <b>اندروید:</b> اپ Tifusi را نصب کنید و لینک اشتراک زیر را در آن بزنید:\n{esc(TIFUSI_APP_URL)}"
-                        + (f"\n<code>{esc(public_sub_url(order['sub_url']))}</code>" if order["sub_url"] else ""))
+        parts.insert(0, f"📲 <b>اندروید:</b> اپ اختصاصی Tifusi را از لینک زیر نصب کنید؛ اشتراک خودش داخلش است، فقط دکمه‌ی اتصال را بزنید:\n{esc(tifusi_app_url(order['sub_url']))}")
     return "\n\n".join(parts)
 
 
@@ -2879,7 +2888,7 @@ async def deliver_service(context, chat_id, order, panel, quiet=False):
             rows.append([InlineKeyboardButton(ANDROID_BTN, callback_data=f"andr:{order['id']}")])
         if order["protocol"] == "ikev2":
             # IKEv2 روی اندروید با اپ Tifusi: نصب، بعد زدن لینک اشتراک (یا اسکن بارکدش) در اپ
-            rows.insert(0, [InlineKeyboardButton(TIFUSI_APP_BTN, url=TIFUSI_APP_URL)])
+            rows.insert(0, [InlineKeyboardButton(TIFUSI_APP_BTN, url=tifusi_app_url(order["sub_url"]))])
             sub_btn = copy_text_button("🔗 کپی لینک اشتراک (برای اپ)", public_sub_url(order["sub_url"])) if order["sub_url"] else None
             if sub_btn:
                 rows.insert(1, [sub_btn])
@@ -3039,7 +3048,7 @@ async def show_service_detail(query, uid, oid):
     rows = []
     if o["status"] == "active":
         if o["protocol"] == "ikev2":
-            rows.append([InlineKeyboardButton(TIFUSI_APP_BTN, url=TIFUSI_APP_URL)])
+            rows.append([InlineKeyboardButton(TIFUSI_APP_BTN, url=tifusi_app_url(o["sub_url"]))])
             sub_btn = copy_text_button("🔗 کپی لینک اشتراک (برای اپ)", public_sub_url(o["sub_url"])) if o["sub_url"] else None
             if sub_btn:
                 rows.append([sub_btn])

@@ -621,7 +621,7 @@ async def _order_connect(order, show_all=False):
             "password": order["password"] or "", "sub": ns["public_sub_url"](order["sub_url"] or ""),
             "guide": _guide_url(order),
             # IKEv2 روی اندروید با اپ Tifusi وصل می‌شود: دانلود اپ، بعد بارکد یا لینک اشتراک
-            "app_url": ns.get("TIFUSI_APP_URL") if order["protocol"] == "ikev2" else None,
+            "app_url": ns["tifusi_app_url"](order["sub_url"]) if order["protocol"] == "ikev2" else None,
             "share": None, "ikev2": None, "l2tp": None, "pptp": None, "narrowed": None}
     if order["protocol"] not in ns["IPSEC_SERVICES"]:
         return info
@@ -653,7 +653,7 @@ async def _order_connect(order, show_all=False):
         info["narrowed"] = used
     if links:
         # اپ Tifusi و لینک کوتاه پنل (صفحه‌ی راهنما با دانلود اپ و اتصال یک‌لمسی) فقط به کار IKEv2 می‌آیند
-        info["app_url"] = ns.get("TIFUSI_APP_URL") if info["ikev2"] else None
+        info["app_url"] = ns["tifusi_app_url"](order["sub_url"]) if info["ikev2"] else None
         if info["ikev2"] and links.get("share_url"):
             info["share"] = ns["public_sub_url"](links["share_url"])
     return info
