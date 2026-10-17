@@ -19,6 +19,7 @@ import time
 from types import SimpleNamespace
 from pathlib import Path
 from urllib.parse import parse_qsl
+import urllib.request
 
 from aiohttp import web
 
@@ -125,7 +126,7 @@ def _customer(order, pu):
         "service_name": SHOP_SERVICES.get(order["protocol"]) or ns["service_name"](order["protocol"]),
         "used": used, "limit": limit, "expire": expire or None, "days_left": left_days,
         "panel_status": pstatus, "on": pstatus != "disabled", "state": state,
-        "guide": _guide_url(order),
+        "guide": _guide_url(order), "delreq": order["status"] == "delreq_pending",
         # لینک اشتراک برای کپی و بارکد در جزئیات کاربر (QR از /api/qr?kind=sub)
         "sub": sub if sub.startswith("https://") else None,
     }
@@ -196,6 +197,29 @@ async def api_plans(request):
             {"id": p["id"], "gb": p["volume_gb"], "days": p["days"], "price": p["price"],
              "users": p["user_limit"] or 0, "title": p["title"]} for p in plans]})
     return web.json_response({"services": shop})
+
+
+async def api_delreq(request):
+    """همان «🗑 درخواست حذف» ربات: ادمین در ربات تأیید می‌کند (dq:ok) و مبلغ باقی‌مانده برمی‌گردد."""
+    uid = request["uid"]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    db = ns["db"]
+    oid = int(body.get("order_id") or 0)
+    o = db.get_order(oid)
+    if not o or o["user_id"] != uid:
+        return web.json_response({"error": "not_found"}, status=404)
+    if not db.claim_order(oid, "active", "delreq_pending"):
+        return web.json_response({"error": "not_active"}, status=409)
+    bot = request.app["tg_app"].bot
+    ns["notify_group"](bot, f"🗑 درخواست حذف سرویس #{oid} — {o['username']} (مینی‌اپ)\n👤 {ns['who'](uid)}", topic="tickets")
+    btn = ns["btn"]
+    await ns["notify_admin"](bot, f"🗑 درخواست حذف سرویس (مینی‌اپ)\n👤 کاربر: {uid}\n🛍 سرویس #{oid} — {o['username']}",
+                             reply_markup=ns["InlineKeyboardMarkup"]([[btn("✅ تایید حذف + بازگشت وجه", f"dq:ok:{oid}"),
+                                                                       btn("❌ رد درخواست", f"dq:no:{oid}")]]))
+    return web.json_response({"ok": True})
 
 
 async def api_toggle(request):
@@ -1537,6 +1561,100 @@ async def app_js(request):
     return web.FileResponse(STATIC_DIR / "app.js", headers={"Cache-Control": "no-store"})
 
 
+# ---------- اپ اختصاصی Tifusi: لینک اشتراک داخل APK، و طرح نماینده (برند) اگر داشت ----------
+APK_DIR = STATIC_DIR / "apk"  # tifusi.apk (کش نسخه‌ی گیت‌هاب) + brands.json: {"<آیدی ربات نماینده>": "<brand>.apk"}
+APK_REFRESH_SECONDS = 3600
+SECRET_RE = re.compile(r"[A-Za-z0-9_-]{8,64}")
+_apk_lock = asyncio.Lock()
+_apk_checked = [0.0]
+# همان ID که TifusiApkLink.java در اپ می‌خواند ("TIFU" little-endian)؛ بلوک امضا زیر امضای v2/v3 نیست
+_APK_LINK_ID = 0x55464954
+_APK_PADDING_ID = 0x42726577
+_APK_MAGIC = b"APK Sig Block 42"
+
+
+def _apk_with_link(apk: bytes, link: str) -> bytes:
+    eocd = apk.rfind(b"PK\x05\x06", max(0, len(apk) - 22 - 65535))
+    if eocd < 0:
+        raise ValueError("no end of central directory")
+    cd = int.from_bytes(apk[eocd + 16:eocd + 20], "little")
+    if apk[cd - 16:cd] != _APK_MAGIC:
+        raise ValueError("no APK signing block")
+    size = int.from_bytes(apk[cd - 24:cd - 16], "little")
+    start = cd - size - 8
+    pairs, pos = [], start + 8
+    while pos < cd - 24:
+        n = int.from_bytes(apk[pos:pos + 8], "little")
+        pid = int.from_bytes(apk[pos + 8:pos + 12], "little")
+        if pid not in (_APK_LINK_ID, _APK_PADDING_ID):
+            pairs.append(apk[pos:pos + 8 + n])
+        pos += 8 + n
+    value = link.encode()
+    pairs.append((len(value) + 4).to_bytes(8, "little") + _APK_LINK_ID.to_bytes(4, "little") + value)
+    body = b"".join(pairs)
+    total = 8 + len(body) + 24
+    if total % 4096:
+        pad = 4096 - total % 4096
+        pad = pad if pad >= 12 else pad + 4096
+        body += (pad - 8).to_bytes(8, "little") + _APK_PADDING_ID.to_bytes(4, "little") + bytes(pad - 12)
+    size = len(body) + 24
+    block = size.to_bytes(8, "little") + body + size.to_bytes(8, "little") + _APK_MAGIC
+    tail = bytearray(apk[eocd:])
+    tail[16:20] = (start + len(block)).to_bytes(4, "little")
+    return apk[:start] + block + apk[cd:eocd] + bytes(tail)
+
+
+def _download(url, dest):
+    tmp = dest.with_suffix(".part")
+    req = urllib.request.Request(url, headers={"User-Agent": "TifusiBot"})
+    with urllib.request.urlopen(req, timeout=120) as r, tmp.open("wb") as f:
+        while chunk := r.read(1 << 16):
+            f.write(chunk)
+    tmp.replace(dest)
+
+
+async def _plain_apk():
+    path = APK_DIR / "tifusi.apk"
+    async with _apk_lock:
+        if time.time() - _apk_checked[0] > APK_REFRESH_SECONDS or not path.is_file():
+            _apk_checked[0] = time.time()
+            try:
+                APK_DIR.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(_download, ns["TIFUSI_APP_URL"], path)
+            except Exception as e:
+                log.warning("tifusi apk refresh failed: %s", e)
+    return path if path.is_file() else None
+
+
+def _brand_apk(owner_id):
+    try:
+        name = json.loads((APK_DIR / "brands.json").read_text()).get(str(owner_id))
+    except (OSError, ValueError):
+        return None
+    path = APK_DIR / name if name and "/" not in name else None
+    return path if path and path.is_file() else None
+
+
+async def user_apk(request):
+    secret = request.match_info["secret"]
+    if not SECRET_RE.fullmatch(secret):
+        raise web.HTTPNotFound()
+    o = ns["db"].one("SELECT user_id, sub_url FROM orders WHERE sub_url LIKE ? ORDER BY id DESC LIMIT 1",
+                     (f"%/sub/{secret}%",))
+    if not o:
+        raise web.HTTPNotFound()
+    path = _brand_apk(o["user_id"]) or await _plain_apk()
+    if not path:
+        raise web.HTTPFound(ns["TIFUSI_APP_URL"])
+    link = ns["public_sub_url"](o["sub_url"]).rstrip("/")
+    try:
+        body = await asyncio.to_thread(lambda: _apk_with_link(path.read_bytes(), link))
+    except ValueError:
+        return web.FileResponse(path)
+    return web.Response(body=body, content_type="application/vnd.android.package-archive",
+                        headers={"Content-Disposition": 'attachment; filename="tifusi.apk"', "Cache-Control": "no-store"})
+
+
 async def start(application, bot_globals):
     """از post_init ربات صدا زده می‌شود."""
     ns.update(bot_globals)
@@ -1545,6 +1663,7 @@ async def start(application, bot_globals):
     app.router.add_get("/", index)
     app.router.add_get("/sms", sms_page)
     app.router.add_get("/app.js", app_js)
+    app.router.add_get("/app/{secret}/tifusi.apk", user_apk)
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/customers", api_customers)
     app.router.add_get("/api/connect", api_connect)
@@ -1554,6 +1673,7 @@ async def start(application, bot_globals):
     app.router.add_get("/api/plans", api_plans)
     app.router.add_post("/api/goto", api_goto)
     app.router.add_post("/api/toggle", api_toggle)
+    app.router.add_post("/api/delreq", api_delreq)
     app.router.add_post("/api/buy", api_buy)
     app.router.add_get("/api/renew_plans", api_renew_plans)
     app.router.add_post("/api/renew", api_renew)

@@ -216,7 +216,7 @@
       ${list.map((c) => `<div class="glass cust cust2${c.on ? "" : " off"}"><div style="min-width:0"><button type="button" class="nm nmbtn" data-card="${c.id}">${esc(c.username)} ›</button>
         <div class="mt"><span class="dot ${c.on ? c.state : "bad"}"></span><span>${c.on ? custLine(c) : '<span class="offtag">غیرفعال</span>'}</span></div></div>
         <button class="sw" type="button" role="switch" aria-checked="${c.on}" aria-label="روشن یا خاموش" data-sw="${c.id}"></button>
-        <div class="cacts"><button class="pill" type="button" data-conn="${c.id}">${ic("link")} اتصال</button><button class="pill ghost" type="button" data-send="${c.id}">ارسال</button><button class="pill dark" type="button" data-renew="${c.id}">تمدید</button></div></div>`).join("") || '<div class="empty">مشتری‌ای پیدا نشد.</div>'}`;
+        <div class="cacts"><button class="pill" type="button" data-conn="${c.id}">${ic("link")} اتصال</button><button class="pill ghost" type="button" data-send="${c.id}">ارسال</button><button class="pill dark" type="button" data-renew="${c.id}">تمدید</button>${c.delreq ? '<button class="pill ghost" type="button" disabled style="font-size:.7rem">⏳ در انتظار حذف</button>' : `<button class="pill ghost" type="button" data-del="${c.id}" style="color:#ff7b7b">🗑 حذف</button>`}</div></div>`).join("") || '<div class="empty">مشتری‌ای پیدا نشد.</div>'}`;
     },
     buy: () => {
       if (!S.shop.length) return '<div class="empty">فعلاً پلنی برای فروش نیست.</div>';
@@ -1239,6 +1239,23 @@
     if (d.goto === "test") { testAccount(b); return; }
     if (d.goto) { goto(d.goto); return; }
     if (d.renew) { openRenew(+d.renew); return; }
+    if (d.del) {
+      const c = byId(d.del); if (!c) return;
+      $("sheet").innerHTML = `<h3 id="sheetTitle">🗑 حذف سرویس <span dir="ltr">${esc(c.username)}</span>؟</h3>
+        <p style="margin:0;line-height:1.9">درخواست برای ادمین می‌ره؛ بعد از تأیید، سرویس از سرور پاک می‌شه و مبلغ روزهای باقی‌مونده به کیف پولت برمی‌گرده.</p>
+        <button class="cta" type="button" data-delyes="${c.id}" style="background:linear-gradient(180deg,#ff7b7b,#d63a3a);color:#fff">بله، حذف بشه</button>
+        <button class="pill ghost" type="button" data-act="close" style="justify-content:center">انصراف</button>`;
+      $("sheet").classList.add("open"); $("scrim").classList.add("open");
+      return;
+    }
+    if (d.delyes) {
+      const c = byId(d.delyes); if (!c || b.disabled) return;
+      b.disabled = true;
+      api("delreq", { method: "POST", body: JSON.stringify({ order_id: c.id }) })
+        .then(() => { c.delreq = true; closeSheet(); render(); toast("✅ درخواست حذف برای ادمین رفت"); })
+        .catch((e) => { b.disabled = false; toast(e.message === "not_active" ? "این سرویس قبلاً درخواست حذف داره" : "الان نشد؛ دوباره امتحان کن"); });
+      return;
+    }
     if (d.rp) { pickRenew(d.rp); return; }
     if (b.id === "rpay") { payRenew(); return; }
     if (b.id === "csend") { sendReceipt(); return; }
