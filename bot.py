@@ -2283,12 +2283,12 @@ def public_sub_url(url):
 
 
 def tifusi_app_url(sub_url):
-    """دانلود اختصاصی اپ: پنل لینک اشتراک همین کاربر را داخل APK می‌گذارد تا بی‌جفت‌سازی بالا بیاید.
+    """دانلود اختصاصی اپ: مینی‌اپ (user_apk) لینک اشتراک همین کاربر را داخل APK می‌گذارد تا بی‌جفت‌سازی بالا بیاید.
     لینکی که شکل /sub/<secret> ندارد، همان لینک عمومی گیت‌هاب را می‌گیرد."""
     parts = urllib.parse.urlsplit(public_sub_url(sub_url or ""))
     segs = parts.path.strip("/").split("/")
     if parts.scheme in ("http", "https") and len(segs) == 2 and segs[0] == "sub" and segs[1]:
-        return urllib.parse.urlunsplit((parts.scheme, parts.netloc, f"/sub/{segs[1]}/tifusi.apk", "", ""))
+        return f"{MINIAPP_URL}app/{segs[1]}/tifusi.apk"
     return TIFUSI_APP_URL
 
 
