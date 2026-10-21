@@ -351,14 +351,16 @@ class TifusiPanelAPI:
         return self._with_links(self._call("/api/users", "post", json=body))
 
     def renew_user(self, username, total_gb, expire_ts, protocols=None, device_limit=0):
-        """همان کاربر به‌روز می‌شود تا لینک اشتراک و شناسه عوض نشوند؛ حجم جدید روی مصرف فعلی اضافه می‌شود
-        چون پنل مصرف را صفر نمی‌کند. اگر کاربر روی پنل نبود None برمی‌گرداند."""
+        """همان کاربر به‌روز می‌شود تا لینک اشتراک و شناسه عوض نشوند؛ حجم جدید با حفظ باقی‌مانده
+        اضافه می‌شود، چون پنل مصرف را صفر نمی‌کند. اگر کاربر روی پنل نبود None برمی‌گرداند."""
         user = self.find_user(username)
         if not user:
             return None
         expire, extra = self._limits(total_gb, expire_ts)
         # گرد به گیگ کامل بالا، تا پنل حجم را ۴۱ نشان دهد نه ۴۰٫۵۳۳۴… (مشتری کمتر از یک گیگ اضافه می‌گیرد)
-        data_limit = -(-(int(user.get("used_traffic") or 0) + extra) // 1024 ** 3) * 1024 ** 3 if extra else None
+        # سهمیهٔ مصرف‌نشده حفظ می‌شود؛ مصرف بالاتر از سقف قبلی از بستهٔ جدید کم نمی‌شود.
+        base = max(int(user.get("data_limit") or 0), int(user.get("used_traffic") or 0))
+        data_limit = -(-(base + extra) // 1024 ** 3) * 1024 ** 3 if extra else None
         body = {"status": "active", "expire": expire, "data_limit": data_limit}
         if device_limit is not None:
             body["hwid_limit"] = int(device_limit) or None
