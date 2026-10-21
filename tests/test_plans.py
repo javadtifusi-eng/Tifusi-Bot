@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 import bot
 import miniapp
 
@@ -49,6 +51,33 @@ def test_renew_rounds_the_new_limit_up_to_whole_gigabytes():
     sent.clear()
     api.renew_user("u", 40, 2_000_000_000)
     assert sent["body"]["data_limit"] == 40 * 1024 ** 3
+
+
+@pytest.mark.parametrize("limit,used,extra,expected", [
+    (10, 0, 10, 20),
+    (20, 10, 10, 30),
+    (10, 10, 10, 20),
+    (10, 12, 10, 22),
+    (10, 3, 0, None),
+])
+def test_renew_preserves_remaining_traffic(limit, used, extra, expected):
+    gb = 1024 ** 3
+    api = bot.TifusiPanelAPI("https://panel.example", "admin", "pw")
+    user = {"id": 7, "data_limit": limit * gb, "used_traffic": used * gb}
+    api.find_user = lambda name: dict(user)
+    sent = {}
+
+    def call(path, method, json=None):
+        assert path == "/api/users/7" and method == "put"
+        sent.update(json)
+        return {**user, **json}
+
+    api._call = call
+    api._with_links = lambda value: value
+    result = api.renew_user("u", extra, 2_000_000_000)
+    assert sent["data_limit"] == (expected * gb if expected is not None else None)
+    assert "used_traffic" not in sent
+    assert result["used_traffic"] == used * gb
 
 
 def test_connect_carries_the_panels_short_link_for_ikev2(world, monkeypatch):
@@ -113,3 +142,7 @@ def test_a_users_special_gb_price_and_days_apply_only_to_them(world):
     assert (normal["price"], normal["days"]) == (140000, 30)
     db.x("UPDATE users SET gb_price=0, plan_days=0 WHERE id=101")
     assert (bot.user_plan(pid, 101)["price"], bot.user_plan(pid, 101)["days"]) == (70000, 30)
+
+
+def test_mini_app_sells_only_ikev2_then_xray():
+    assert miniapp.SHOP_FOR_SALE == ("ikev2", "xray"), "IKEv2 first is the default; L2TP/PPTP are not sold"
