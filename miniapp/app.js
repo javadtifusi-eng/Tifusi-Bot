@@ -947,7 +947,7 @@
     const action = (label, attr, value, cls = "cta") => value
       ? `<button class="${cls}" type="button" ${attr}="${esc(value)}">${label}</button>`
       : `<span class="delivery-unavailable">فعلاً در دسترس نیست</span>`;
-    const brand = `<div class="delivery-brand"><span class="delivery-logo" role="img" aria-label="لوگوی دو اسب تیفوسی"></span><b dir="ltr">TIFUSI</b></div>`;
+    const brand = `<div class="delivery-brand"><span class="delivery-logo" role="img" aria-label="لوگوی دو اسب تیفوسی"></span><b dir="ltr" id="sheetTitle">TIFUSI</b></div>`;
     const body = ike ? `<section class="delivery-service"><div class="delivery-chip" dir="ltr">IKEv2 ${ic("shield")}</div>
       <div class="delivery-platforms">
         <div class="delivery-platform"><div class="delivery-symbol apple" role="img" aria-label="Apple"></div><b dir="ltr">iPhone</b>
@@ -959,7 +959,7 @@
         ${action("کپی لینک اشتراک", "data-copy", x.sub, "pill")}
         <div class="delivery-apps"><a class="pill" href="https://github.com/2dust/v2rayNG/releases/latest" target="_blank" rel="noopener noreferrer">${androidIc()} Android</a><a class="pill" href="https://apps.apple.com/app/streisand/id6450534064" target="_blank" rel="noopener noreferrer">${ic("apple")} iPhone</a></div>
       </section>`;
-    return `<div class="delivery">${brand}<h3 class="delivery-title" id="sheetTitle">${ike ? "IKEv2" : "Xray"} · <span dir="ltr">${esc(x.username)}</span></h3>${body}
+    return `<div class="delivery">${brand}${body}
       <button class="delivery-send cta" type="button" data-send="${x.id}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m21 3-7 18-4-7-7-4 18-7Z"/><path d="m10 14 11-11"/></svg> ارسال برای مشتری</button>
       <button class="pill ghost" type="button" data-act="close">بستن</button></div>`;
   }
