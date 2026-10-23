@@ -329,6 +329,23 @@ body{background:
 .delivery-unavailable{font-size:.75rem;color:#a9b9cd;text-align:center}
 .delivery-send{background:linear-gradient(#6b97bd,#214969);color:#fff;border:1px solid #81d9ff;border-radius:18px}
 @media(max-width:350px){.delivery-brand b{font-size:1.4rem}.delivery-logo{width:120px}.delivery-platforms{gap:6px}.delivery-symbol .ic{width:78px;height:78px}.delivery-service{padding:16px 8px}}
+
+/* Use the approved artwork itself as a CSS sprite, preserving its sculpted marks. */
+.delivery-brand{gap:8px;padding:5px 0;min-height:92px}
+.delivery-logo{width:160px;height:94px;flex:none;border-radius:0;background-image:url("assets/delivery-art-v2.png");background-size:768px 512px;background-position:-214px -10px;mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent),linear-gradient(transparent,#000 10%,#000 90%,transparent);mask-composite:intersect;-webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent),linear-gradient(transparent,#000 10%,#000 90%,transparent);-webkit-mask-composite:source-in}
+.delivery-brand b{font-size:1.9rem;letter-spacing:3px;background:linear-gradient(#fff 10%,#d8ebf5 38%,#8caec4 65%,#f1f9ff 90%);background-clip:text;-webkit-background-clip:text;color:transparent;text-shadow:0 3px 8px #8fd3ff22}
+.delivery-title{font-size:.72rem;margin-top:-10px}
+.delivery-service{background:radial-gradient(ellipse at 50% 4%,#14528d66,transparent 65%),linear-gradient(145deg,#061b31,#021126);box-shadow:inset 0 1px 1px #8dd8ff66,0 8px 26px #0004;padding:18px 12px;gap:15px}
+.delivery-chip{background:linear-gradient(145deg,#16466b88,#021429);box-shadow:inset 0 1px 1px #a3e5ff88;font-size:1.1rem}
+.delivery-platform{gap:10px}.delivery-platform+.delivery-platform{padding-left:10px}
+.delivery-symbol{width:120px;height:128px;min-height:128px;max-width:100%;flex:none;background-image:url("assets/delivery-art-v2.png");background-size:768px 512px;background-repeat:no-repeat;mask-image:radial-gradient(ellipse at center,#000 52%,transparent 75%);-webkit-mask-image:radial-gradient(ellipse at center,#000 52%,transparent 75%)}
+.delivery-symbol.apple{background-position:-81px -181px}.delivery-symbol.android{background-position:-314px -181px}
+.delivery-platform>b{font-size:1.15rem;text-shadow:0 2px 3px #000}
+.delivery .delivery-platform .cta{background:linear-gradient(180deg,#34d6f5 0%,#07bced 65%,#04a9e4 100%);color:#00243f;border:1px solid #85e8ff;border-radius:13px;box-shadow:inset 0 1px 1px #d0ffffaa,0 5px 18px #00a9ed22;font-size:.77rem;padding:12px 3px}
+.delivery .delivery-platform .cta::after{display:none}
+.delivery .delivery-send{background:linear-gradient(180deg,#47749c,#143653);color:#fff;border:1px solid #a3ddff;border-radius:18px;box-shadow:inset 0 1px 1px #d0edffbb,0 8px 20px #0004;flex-direction:row-reverse;font-size:.98rem}
+.delivery .delivery-send::after{display:none}
+@media(max-width:350px){.delivery-brand{gap:0}.delivery-brand b{font-size:1.45rem;letter-spacing:2px}.delivery-logo{width:150px}.delivery-platforms{gap:4px}.delivery-platform+.delivery-platform{padding-left:4px}.delivery .delivery-platform .cta{font-size:.68rem}.delivery-service{padding:16px 7px}}
 </style>
 </head>
 <body>
@@ -338,6 +355,6 @@ body{background:
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="app.js?v=20261023e"></script>
+<script src="app.js?v=20261023f"></script>
 </body>
 </html>
