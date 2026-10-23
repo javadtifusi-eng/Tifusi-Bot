@@ -35,7 +35,8 @@ def test_connect_offers_the_app_only_for_ikev2(world, monkeypatch):
     assert asyncio.run(miniapp._order_connect({**base, "protocol": "xray"}))["app_url"] is None
     monkeypatch.setitem(miniapp.ns, "db", type("D", (), {"get_panel": staticmethod(lambda pid: None)})())
     order = {**base, "protocol": "ikev2"}
-    assert asyncio.run(miniapp._order_connect(order))["app_url"] == bot.TIFUSI_APP_URL
+    # each customer gets a download with their own subscription inside the APK
+    assert asyncio.run(miniapp._order_connect(order))["app_url"] == bot.tifusi_app_url(order["sub_url"])
 
 
 def test_renew_rounds_the_new_limit_up_to_whole_gigabytes():
@@ -116,7 +117,7 @@ def test_an_old_combined_order_shows_only_what_the_customer_connects_with(world,
 
     x = asyncio.run(miniapp._order_connect(_old_order(monkeypatch, "ikev2")))
     assert x["narrowed"] == "ikev2" and x["l2tp"] is None and x["pptp"] is None
-    assert x["app_url"] == bot.TIFUSI_APP_URL and x["share"] and x["ikev2"]["install"].endswith("/ikev2")
+    assert x["app_url"] == bot.tifusi_app_url(order["sub_url"]) and x["share"] and x["ikev2"]["install"].endswith("/ikev2")
 
     everything = asyncio.run(miniapp._order_connect(order, show_all=True))
     assert everything["narrowed"] is None and all(everything[k] for k in ("ikev2", "l2tp", "pptp"))
