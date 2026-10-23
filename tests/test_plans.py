@@ -38,15 +38,15 @@ def test_connect_offers_the_app_only_for_ikev2(world, monkeypatch):
     assert asyncio.run(miniapp._order_connect(order))["app_url"] == bot.TIFUSI_APP_URL
 
 
-def test_renew_rounds_the_new_limit_up_to_whole_gigabytes():
-    """Usage 0.53 GB + a 40 GB renewal shows as 41 GB on the panel, not 40.53…"""
+def test_renew_adds_exact_traffic_without_rounding_cumulative_usage():
+    """Keep the usage counter while making exactly 40 GiB available."""
     api = bot.TifusiPanelAPI("https://panel.example", "admin", "pw")
     sent = {}
     api.find_user = lambda name: {"id": 7, "used_traffic": 569_000_000, "protocols": ["ikev2"]}
     api._call = lambda path, method, json=None: sent.setdefault("body", json) or {}
     api._with_links = lambda user: user
     api.renew_user("u", 40, 2_000_000_000)
-    assert sent["body"]["data_limit"] == 41 * 1024 ** 3
+    assert sent["body"]["data_limit"] == 569_000_000 + 40 * 1024 ** 3
     api.find_user = lambda name: {"id": 7, "used_traffic": 0, "protocols": ["ikev2"]}
     sent.clear()
     api.renew_user("u", 40, 2_000_000_000)
