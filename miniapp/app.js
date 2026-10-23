@@ -256,13 +256,7 @@
     },
     help: () => {
       const q = (S.hq || "").toLowerCase();
-      const withGuide = S.customers.filter((x) => x.guide && x.username.toLowerCase().includes(q));
       return `<div class="ptitle"><b>آموزش</b><small>وصل شدن قدم‌به‌قدم، برای هر گوشی</small></div>
-      <div class="glass sec" style="display:grid;gap:10px"><b>📖 راهنمای اتصال با عکس گوشی</b>
-        <p class="soon" style="text-align:right;margin:0">برای هر کاربر یه صفحه‌ی آماده با اطلاعات خودش هست: مدل گوشی رو انتخاب می‌کنه و قدم‌به‌قدم وصل می‌شه (سامسونگ، شیائومی، آیفون و…). روی آیفون نصب یک‌لمسی هم داره.</p>
-        ${S.customers.length > 4 ? `<label class="glass search">${ic("search")}<input id="hq" type="search" placeholder="یوزرنیم کاربر…" value="${esc(S.hq || "")}" aria-label="جستجو"></label>` : ""}
-        ${withGuide.slice(0, 6).map((x) => `<div class="lrow"><span class="u">${esc(x.username)}</span><span class="cacts"><button class="pill" type="button" data-guide="${x.id}">باز کردن</button><button class="pill ghost" type="button" data-send="${x.id}">ارسال</button></span></div>`).join("") || '<div class="empty">کاربری با راهنمای IKEv2/L2TP پیدا نشد.</div>'}
-      </div>
       <div class="glass sec" style="display:grid;gap:8px"><b>📱 کدوم نوع اتصال؟</b>
         <div class="lrow"><span class="d">اندروید 11 به بالا و آیفون</span><span class="v">IKEv2</span></div>
         <div class="lrow"><span class="d">آیفون و اندرویدهای قدیمی‌تر</span><span class="v">L2TP</span></div>
@@ -883,7 +877,7 @@
   const TYPE = { ikev2: "IKEv2/IPSec MSCHAPv2", l2tp: "L2TP/IPSec PSK" };
   // آنچه برای مشتری فرستاده می‌شود فقط یک لینک است: نه نام کاربری، نه رمز، نه آموزش.
   // آن صفحه برای IKEv2 سه دکمه دارد (دانلود اپ، جفت‌سازی اندروید، پروفایل آیفون) و برای V2Ray فقط بارکد اشتراک.
-  function shareText(x) { return x.share || x.guide || x.sub || ""; }
+  function shareText(x) { return (x.ikev2 && x.ikev2.install) || (x.l2tp && x.l2tp.install) || x.sub || ""; }
   const crow = (label, v) => `<div class="lrow"><span class="d">${label}</span><span class="cacts"><span class="num" style="font-weight:700;direction:ltr">${esc(v)}</span><button class="pill ghost" type="button" data-copy="${esc(v)}">کپی</button></span></div>`;
   // نصب پروفایل (اپل) / جهت اتصال (اندروید). VLESS: بارکد + کپی لینک ساب. IKEv2/L2TP/PPTP روی اندروید
   // بارکد ندارند: فقط دکمه‌های کپی، بدون نمایش مقدارها. آیفون: QR و نصب یک‌لمسی پروفایل.
@@ -933,7 +927,6 @@
     }
     $("sheet").innerHTML = `<h3 id="sheetTitle" style="display:flex;gap:8px;align-items:center">${title} · <span class="num">${esc(x.username)}</span></h3>
       ${body}
-      ${ipsec && x.guide ? `<button class="pill ghost" type="button" data-openurl="${esc(x.guide)}" style="justify-content:center">${ic("help")} راهنمای تصویری قدم‌به‌قدم</button>` : ""}
       <button class="cta" type="button" data-send="${x.id}">📤 ارسال برای مشتری</button>
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
     loadQrs();
@@ -962,8 +955,22 @@
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
     let x;
     try { x = await getConn(c.id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
-    S.sendText = shareText(x); S.sendLink = x.share || x.guide || x.sub || "";
+    // اندروید IKEv2: لینک دانلود اختصاصی (اشتراک داخل APK است، بدون جفت‌سازی)؛ آیفون و بقیه: صفحه‌ی راهنما
+    S.sendViews = {
+      android: x.app_url ? { link: x.app_url, text: "📲 اپ اختصاصی Tifusi — نصب کن و باز کن؛ اشتراکت خودش بالا میاد و فقط دکمه‌ی اتصال رو بزن:\n" + x.app_url } : null,
+      other: { link: shareText(x), text: shareText(x) },
+    };
+    renderSend(S.sendViews.android ? "android" : "other");
+  }
+  function renderSend(os) {
+    const v = S.sendViews, android = os === "android" && v.android;
+    const view = android ? v.android : v.other;
+    S.sendText = view.text; S.sendLink = view.link;
+    const tabs = v.android ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button class="${android ? "cta" : "pill ghost"}" type="button" data-sendos="android" style="justify-content:center">🤖 اندروید</button>
+        <button class="${android ? "pill ghost" : "cta"}" type="button" data-sendos="other" style="justify-content:center">🍎 آیفون / بقیه</button></div>` : "";
     $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
+      ${tabs}
       <div class="glass sec" dir="auto" style="white-space:pre-wrap;line-height:1.9;font-size:.85rem">${esc(S.sendText)}</div>
       <button class="cta" type="button" data-share="tg">ارسال در تلگرام</button>
       <button class="pill ghost" type="button" data-share="wa" style="justify-content:center">ارسال در واتساپ</button>
@@ -1078,7 +1085,7 @@
         ${m.password ? `<div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.password)}</span><button class="pill ghost" type="button" data-copy="${esc(m.password)}" aria-label="کپی رمز">کپی</button></span></div>` : ""}
         ${m.sub ? `<div style="display:grid;gap:8px;justify-items:center"><img data-qr="sub" data-qid="${m.id}" alt="QR لینک اشتراک" style="width:180px;height:180px;border-radius:14px;background:#fff;padding:8px"><button class="pill" type="button" data-copy="${esc(m.sub)}" style="justify-content:center;width:100%;gap:6px">${ic("link")} کپی لینک ساب</button></div>`
           : `<button class="cta" type="button" data-conn="${m.id}" style="padding:13px">${ic("apple")} نصب پروفایل و اطلاعات اتصال</button>`}
-        <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill ghost" type="button" data-send="${m.id}" style="justify-content:center">${ic("link")} ارسال برای مشتری</button>${m.guide ? `<button class="pill ghost" type="button" data-mguide="${i}" style="justify-content:center">${ic("help")} راهنما</button>` : ""}</div>
+        <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill ghost" type="button" data-send="${m.id}" style="justify-content:center">${ic("link")} ارسال برای مشتری</button></div>
       </div>`).join("")}
       ${failed ? `<p class="soon" style="color:#ff9a9a">بقیه ساخته نشد (${esc(failed)})؛ پولش به کیف پول برگشت.</p>` : ""}
       <p class="soon">همه‌ی اطلاعات توی تب «کاربران» هم هست.</p>
@@ -1216,6 +1223,7 @@
     if (d.cos) { S.cos = d.cos; document.querySelectorAll("[data-cos]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.cos === d.cos))); document.querySelectorAll("[data-cpane]").forEach((x) => { x.hidden = x.dataset.cpane !== d.cos; }); return; }
     if (d.install) { if (!tg("web_app_open_link", { url: d.install, try_browser: "safari" })) window.open(d.install, "_blank"); return; }
     if (d.openurl) { openLink(d.openurl); return; }
+    if (d.sendos) { if (S.sendViews) renderSend(d.sendos); return; }
     if (d.share) { const t = S.sendText; if (d.share === "tg") { const u = `https://t.me/share/url?url=${encodeURIComponent(S.sendLink)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); } else if (d.share === "sms") openLink(`${location.origin}/sms?b=${encodeURIComponent(S.sendLink)}`); else openLink(`https://wa.me/?text=${encodeURIComponent(t)}`); return; }
     if (d.guide) { const c = byId(d.guide); if (c && c.guide) openLink(c.guide); return; }
     if (d.copy) { copy(d.copy); return; }

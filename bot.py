@@ -2429,10 +2429,7 @@ GUIDE_BTN = "📖 راهنمای اتصال"
 def guide_button(order):
     """راهنمای قدم‌به‌قدم پنل (/sub/<secret>/guide) به‌صورت مینی‌اپ تلگرام، برای IKEv2 و L2TP.
     مینی‌اپ فقط آدرس https قبول می‌کند؛ بدون لینک اشتراک دکمه‌ای نمی‌سازیم."""
-    url = public_sub_url(order["sub_url"] or "").rstrip("/")
-    if order["protocol"] not in ("ikev2", "l2tp") or not url.startswith("https://"):
-        return None
-    return InlineKeyboardButton(GUIDE_BTN, web_app=WebAppInfo(url=url + "/guide?full=1"))
+    return None  # صفحه‌ی راهنمای پنل خاموش شده؛ اندروید با لینک اختصاصی اپ، آیفون با نصب پروفایل
 
 
 def android_html(order, links):
