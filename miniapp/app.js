@@ -11,6 +11,11 @@
         window.TelegramWebviewProxy.postEvent(eventType, JSON.stringify(eventData || {}));
         return true;
       }
+      // Telegram Desktop on Windows uses the WebView external.notify bridge.
+      if (window.external && typeof window.external.notify === "function") {
+        window.external.notify(JSON.stringify({ eventType, eventData: eventData || {} }));
+        return true;
+      }
       if (window.parent !== window) {
         window.parent.postMessage(JSON.stringify({ eventType, eventData: eventData || {} }), "*");
         return true;
