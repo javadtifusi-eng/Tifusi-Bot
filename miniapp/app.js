@@ -967,8 +967,8 @@
     const view = android ? v.android : v.other;
     S.sendText = view.text; S.sendLink = view.link;
     const tabs = v.android ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button class="${android ? "cta" : "pill ghost"}" type="button" data-sendos="android" style="justify-content:center">🤖 اندروید</button>
-        <button class="${android ? "pill ghost" : "cta"}" type="button" data-sendos="other" style="justify-content:center">🍎 آیفون / بقیه</button></div>` : "";
+        <button class="${android ? "cta" : "pill ghost"}" type="button" data-sendos="android" style="justify-content:center">${androidIc()} اندروید</button>
+        <button class="${android ? "pill ghost" : "cta"}" type="button" data-sendos="other" style="justify-content:center">${ic("apple")} آیفون / بقیه</button></div>` : "";
     $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
       ${tabs}
       <div class="glass sec" dir="auto" style="white-space:pre-wrap;line-height:1.9;font-size:.85rem">${esc(S.sendText)}</div>
