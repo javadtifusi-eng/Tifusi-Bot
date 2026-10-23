@@ -293,11 +293,8 @@
           <div class="c"><div>${c.limit ? `<b class="num">${gb(Math.max(0, c.limit - c.used))} GB</b><br><small>مونده از ${num(gb(c.limit))} گیگ</small>` : `<b>∞</b><br><small>نامحدود</small>`}</div></div></div>
         <div><h3 style="direction:ltr;text-align:right">${esc(c.username)}</h3><div class="pl">${esc(c.service_name)}</div>${statusPill(c)}</div></div>
         <div class="days"><span>${c.days_left === null ? "بدون انقضا" : `${num(c.days_left)} روز مانده`}</span></div><div class="dbar"><i style="width:${c.days_left === null ? 100 : Math.min(100, (c.days_left / 30) * 100)}%"></i></div>
-        <button class="pill" type="button" data-renew="${c.id}" style="justify-content:center;width:100%">♻️ تمدید</button>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <button class="cta" type="button" data-conn="${c.id}" data-os="ios" style="padding:13px 8px;display:flex;align-items:center;justify-content:center;gap:6px">${ic("apple")} نصب پروفایل</button>
-          <button class="cta" type="button" data-conn="${c.id}" data-os="android" style="padding:13px 8px;display:flex;align-items:center;justify-content:center;gap:6px">${androidIc()} جهت اتصال</button>
-        </div></div>`;
+        <button class="cta" type="button" data-conn="${c.id}" style="justify-content:center;width:100%">${ic("link")} نصب و اتصال</button>
+        <button class="pill" type="button" data-renew="${c.id}" style="justify-content:center;width:100%">${ic("refresh")} تمدید</button></div>`;
     }
   };
 
@@ -989,7 +986,7 @@
     try { x = await getConn(c.id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
     // اندروید IKEv2: لینک دانلود اختصاصی (اشتراک داخل APK است، بدون جفت‌سازی)؛ آیفون و بقیه: صفحه‌ی راهنما
     S.sendViews = {
-      android: x.app_url ? { link: x.app_url, text: "📲 اپ اختصاصی Tifusi — نصب کن و باز کن؛ اشتراکت خودش بالا میاد و فقط دکمه‌ی اتصال رو بزن:\n" + x.app_url } : null,
+      android: x.app_url ? { link: x.app_url, text: x.app_url } : null,
       other: { link: shareText(x), text: shareText(x) },
     };
     renderSend(S.sendViews.android ? "android" : "other");
@@ -1003,12 +1000,11 @@
         <button class="${android ? "pill ghost" : "cta"}" type="button" data-sendos="other" style="justify-content:center">${ic("apple")} iPhone</button></div>` : "";
     $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
       ${tabs}
-      <div class="glass sec" dir="auto" style="white-space:pre-wrap;line-height:1.9;font-size:.85rem">${esc(S.sendText)}</div>
+      <div class="glass sec send-content" dir="ltr" style="overflow-wrap:anywhere;white-space:pre-wrap;line-height:1.9;font-size:.85rem">${esc(S.sendText)}</div>
       <button class="cta" type="button" data-share="tg">ارسال در تلگرام</button>
       <button class="pill ghost" type="button" data-share="wa" style="justify-content:center">ارسال در واتساپ</button>
       <button class="pill ghost" type="button" data-share="sms" style="justify-content:center">ارسال با پیامک</button>
       <button class="pill ghost" type="button" data-copy="${esc(S.sendText)}" style="justify-content:center">${ic("link")} کپی همه</button>
-      <p class="soon">هر کسی این لینک رو داشته باشه می‌تونه همین سرویس رو نصب کنه؛ فقط برای خود مشتری بفرست.</p>
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
   }
   function support() {
