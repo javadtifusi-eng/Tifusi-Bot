@@ -194,7 +194,7 @@
   }
   const V = {
     home: () => `
-      <div class="bar"><span style="display:flex;gap:8px"><button class="iconbtn" type="button" data-act="notifs" aria-label="اعلان‌ها${S.me.unread ? ` (${S.me.unread} تازه)` : ""}">${ic("bell")}${S.me.unread ? '<span class="badge"></span>' : ""}</button><button class="iconbtn" type="button" data-act="support" aria-label="پشتیبانی">${ic("chat")}</button></span><span></span></div>
+      <div class="bar"><span style="display:flex;gap:8px"><button class="iconbtn" type="button" data-act="notifs" aria-label="اعلان‌ها${S.me.unread ? ` (${S.me.unread} تازه)` : ""}">${ic("bell")}${S.me.unread ? '<span class="badge"></span>' : ""}</button></span><span></span></div>
       <div class="herospace" role="img" aria-label="Tifusi"></div>
       <div class="glass wallet"><div class="w"><div class="wicon" aria-hidden="true"></div><div><div class="k">موجودی کیف پول</div><div class="v">${num(n(S.me.balance))}</div></div></div><button class="pill" type="button" data-go="wallet">${ic("refresh")} شارژ کیف پول</button></div>
       <div class="stats">
@@ -1010,7 +1010,7 @@
     const name = p.gb ? `${num(p.gb)} گیگ` : `نامحدود${p.users ? ` ${num(p.users)} کاربره` : ""}`;
     $("sheet").innerHTML = `<h3 id="sheetTitle">خرید ${esc(svc.label)}</h3>
       <div class="sum"><div><span>پلن</span><span>${name} · ${num(p.days)} روزه</span></div><div><span>قیمت هر اکانت</span><span>${toman(p.price)}</span></div>${S.me.free_pass ? '<div><span>پرداخت</span><span>👑 رایگان (Free Pass)</span></div>' : `<div><span>موجودی</span><span>${toman(S.me.balance)}</span></div>`}</div>
-      <label class="field" for="bu">یوزرنیم (یه اسم تصادفی گذاشتیم؛ اگه خواستی عوضش کن)<input id="bu" autocomplete="off" placeholder="ali12" maxlength="20" value="${randName()}"></label>
+      <label class="field" for="bu">${ipsec ? "یوزرنیم (یه اسم انگلیسی دلخواه بنویس)" : "یوزرنیم (یه اسم تصادفی گذاشتیم؛ اگه خواستی عوضش کن)"}<input id="bu" autocomplete="off" placeholder="ali12" maxlength="20" value="${ipsec ? "" : randName()}"></label>
       ${ipsec ? '<label class="field" for="bp">رمز 6 رقمی (خالی بذاری خودش می‌سازه)<input id="bp" inputmode="numeric" maxlength="6" placeholder="123456"></label>' : ""}
       <div class="stepper"><button class="pill ghost" type="button" data-q="-1" aria-label="کمتر">−</button><output id="bq"></output><button class="pill ghost" type="button" data-q="1" aria-label="بیشتر">+</button></div>
       <p class="soon" id="bnote" style="margin:0"></p>
@@ -1032,6 +1032,7 @@
   }
   function buyInputs() {
     const username = ($("bu").value || "").trim(), password = $("bp") ? ($("bp").value || "").trim() : "";
+    if (!username && S.buy.svc.service !== "xray") { toast("یوزرنیم رو بنویس"); $("bu").focus(); return null; }
     if (username && !/^[A-Za-z][A-Za-z0-9_]{2,19}$/.test(username)) { toast("یوزرنیم: با حرف انگلیسی شروع بشه، 3 تا 20 کاراکتر، فقط حرف و عدد و _"); return null; }
     if (password && !/^[0-9۰-۹]{6}$/.test(password)) { toast("رمز باید دقیقاً 6 رقم باشه"); return null; }
     return { username, password };
@@ -1203,7 +1204,7 @@
   // یک ✕ ثابت بالای هر شیت، تا با باز شدن کیبورد هم راه بیرون آمدن باشد
   function addSheetX() {
     const sh = $("sheet");
-    if (!sh.querySelector(":scope > .sheetx")) sh.insertAdjacentHTML("afterbegin", `<button class="sheetx" type="button" data-act="close" aria-label="بستن">✕</button>`);
+    if (!sh.querySelector(":scope > .sheetx")) sh.insertAdjacentHTML("afterbegin", `<button class="sheetx" type="button" data-act="close" aria-label="بستن"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`);
   }
   new MutationObserver(() => { addSheetX(); syncBack(); }).observe($("sheet"), { attributes: true, attributeFilter: ["class"], childList: true });
   const byId = (id) => S.customers.find((c) => c.id === +id);

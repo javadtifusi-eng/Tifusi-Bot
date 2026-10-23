@@ -33,6 +33,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "miniapp"
 # سرویس‌هایی که مینی‌اپ می‌فروشد
 # چهار پلن جدا، به همین ترتیب در فروشگاه: V2Ray، IKEv2 با اپ Tifusi، و L2TP و PPTP با تنظیمات خود گوشی
 SHOP_SERVICES = {"xray": "V2Ray", "ikev2": "IKEv2 (اپ Tifusi)", "l2tp": "L2TP", "pptp": "PPTP"}
+# آنچه فروشگاه مینی‌اپ می‌فروشد، به همین ترتیب؛ اولی پیش‌فرض است. L2TP/PPTP فقط برای سفارش‌های قدیمی اسم دارند.
+SHOP_FOR_SALE = ("ikev2", "xray")
 # همان وضعیت‌هایی که db.get_user_orders نشان می‌دهد
 LIVE_ORDER_STATUSES = ("active", "delreq_pending")
 
@@ -187,7 +189,8 @@ async def api_plans(request):
     uid = request["uid"]
     db = ns["db"]
     shop = []
-    for key, label in SHOP_SERVICES.items():
+    for key in SHOP_FOR_SALE:
+        label = SHOP_SERVICES[key]
         plans = [ns["user_plan"](p["id"], uid) for p in db.get_plans(active_only=True, service=key)]
         plans = [p for p in plans if p]
         if not plans:
@@ -339,7 +342,7 @@ def _parse_buy(body, uid):
     """(service, plan, qty, base, password) یا (None, کد خطا)."""
     service = str(body.get("service") or "")
     plan = ns["user_plan"](_int(body.get("plan_id")), uid)
-    if service not in SHOP_SERVICES or service not in ns["SERVICES"] or not plan or not plan["active"] \
+    if service not in SHOP_FOR_SALE or service not in ns["SERVICES"] or not plan or not plan["active"] \
             or not ns["plan_fits"](plan, service):
         return None, "plan"
     qty = max(1, min(MAX_BULK, _int(body.get("qty"), 1)))
