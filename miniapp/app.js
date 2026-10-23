@@ -895,6 +895,11 @@
     $("sheet").classList.add("open"); $("scrim").classList.add("open");
     let x;
     try { x = await getConn(id, all); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
+    if (x.service === "ikev2" || x.ikev2 || !(x.l2tp || x.pptp)) {
+      $("sheet").innerHTML = deliveryMarkup(x);
+      loadQrs();
+      return;
+    }
     const qall = all ? ' data-qall="1"' : "";
     const cbtn = (label, v, icon) => v ? `<button class="pill" type="button" data-copy="${esc(v)}" style="justify-content:center;gap:6px;padding:12px 8px">${icon ? ic(icon) : ""}${label}</button>` : "";
     const ipsec = x.ikev2 || x.l2tp || x.pptp;
@@ -936,6 +941,28 @@
       <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
     loadQrs();
   }
+  // Service-specific delivery: IKEv2 shares one Android/iPhone card; QR is Xray only.
+  function deliveryMarkup(x) {
+    const ike = x.service === "ikev2" || !!x.ikev2;
+    const action = (label, attr, value, cls = "cta") => value
+      ? `<button class="${cls}" type="button" ${attr}="${esc(value)}">${label}</button>`
+      : `<span class="delivery-unavailable">فعلاً در دسترس نیست</span>`;
+    const brand = `<div class="delivery-brand"><span class="delivery-logo" role="img" aria-label="لوگوی دو اسب تیفوسی"></span><b dir="ltr">TIFUSI</b></div>`;
+    const body = ike ? `<section class="delivery-service"><div class="delivery-chip" dir="ltr">IKEv2 ${ic("shield")}</div>
+      <div class="delivery-platforms">
+        <div class="delivery-platform"><div class="delivery-symbol apple">${ic("apple")}</div><b dir="ltr">iPhone</b>
+          ${action("نصب پروفایل", "data-install", x.ikev2 && x.ikev2.install)}</div>
+        <div class="delivery-platform"><div class="delivery-symbol android">${ic("android")}</div><b dir="ltr">Android</b>
+          ${action("دانلود اپ اختصاصی", "data-openurl", x.app_url)}</div>
+      </div></section>` : `<section class="delivery-service delivery-xray"><div class="delivery-chip" dir="ltr">Xray ${ic("link")}</div>
+        ${x.sub ? `<img class="delivery-qr" data-qr="sub" data-qid="${x.id}" alt="بارکد اشتراک Xray"><b>بارکد اشتراک</b>` : '<p class="delivery-unavailable">لینک اشتراک آماده نیست</p>'}
+        ${action("کپی لینک اشتراک", "data-copy", x.sub, "pill")}
+        <div class="delivery-apps"><a class="pill" href="https://github.com/2dust/v2rayNG/releases/latest" target="_blank" rel="noopener noreferrer">${androidIc()} Android</a><a class="pill" href="https://apps.apple.com/app/streisand/id6450534064" target="_blank" rel="noopener noreferrer">${ic("apple")} iPhone</a></div>
+      </section>`;
+    return `<div class="delivery">${brand}<h3 class="delivery-title" id="sheetTitle">${ike ? "IKEv2" : "Xray"} · <span dir="ltr">${esc(x.username)}</span></h3>${body}
+      <button class="delivery-send cta" type="button" data-send="${x.id}">${ic("link")} ارسال برای مشتری</button>
+      <button class="pill ghost" type="button" data-act="close">بستن</button></div>`;
+  }
   const qrCache = {};
   function loadQrs() {
     document.querySelectorAll("[data-qr]").forEach(async (img) => {
@@ -972,8 +999,8 @@
     const view = android ? v.android : v.other;
     S.sendText = view.text; S.sendLink = view.link;
     const tabs = v.android ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button class="${android ? "cta" : "pill ghost"}" type="button" data-sendos="android" style="justify-content:center">${androidIc()} اندروید</button>
-        <button class="${android ? "pill ghost" : "cta"}" type="button" data-sendos="other" style="justify-content:center">${ic("apple")} آیفون / بقیه</button></div>` : "";
+        <button class="${android ? "cta" : "pill ghost"}" type="button" data-sendos="android" style="justify-content:center">${androidIc()} Android</button>
+        <button class="${android ? "pill ghost" : "cta"}" type="button" data-sendos="other" style="justify-content:center">${ic("apple")} iPhone</button></div>` : "";
     $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
       ${tabs}
       <div class="glass sec" dir="auto" style="white-space:pre-wrap;line-height:1.9;font-size:.85rem">${esc(S.sendText)}</div>
@@ -1085,12 +1112,12 @@
   }
   function showMade(made, failed) {
     S.made = made;
+    if (made.length === 1 && !failed) { openConnect(made[0].id); return; }
     $("sheet").innerHTML = `<h3 id="sheetTitle">✅ ${num(made.length)} اکانت ساخته شد</h3>
       ${made.map((m, i) => `<div class="glass sec" style="display:grid;gap:8px;padding:12px 14px">
         <div class="lrow"><span class="d">${ic("user")} یوزرنیم</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.username)}</span><button class="pill ghost" type="button" data-copy="${esc(m.username)}" aria-label="کپی یوزرنیم">کپی</button></span></div>
         ${m.password ? `<div class="lrow"><span class="d">${ic("shield")} رمز</span><span class="cacts"><span class="num" style="font-weight:700">${esc(m.password)}</span><button class="pill ghost" type="button" data-copy="${esc(m.password)}" aria-label="کپی رمز">کپی</button></span></div>` : ""}
-        ${m.sub ? `<div style="display:grid;gap:8px;justify-items:center"><img data-qr="sub" data-qid="${m.id}" alt="QR لینک اشتراک" style="width:180px;height:180px;border-radius:14px;background:#fff;padding:8px"><button class="pill" type="button" data-copy="${esc(m.sub)}" style="justify-content:center;width:100%;gap:6px">${ic("link")} کپی لینک ساب</button></div>`
-          : `<button class="cta" type="button" data-conn="${m.id}" style="padding:13px">${ic("apple")} نصب پروفایل و اطلاعات اتصال</button>`}
+        <button class="cta" type="button" data-conn="${m.id}" style="padding:13px">${ic("link")} نصب و اطلاعات اتصال</button>
         <div class="sacts" style="grid-template-columns:1fr 1fr"><button class="pill ghost" type="button" data-send="${m.id}" style="justify-content:center">${ic("link")} ارسال برای مشتری</button></div>
       </div>`).join("")}
       ${failed ? `<p class="soon" style="color:#ff9a9a">بقیه ساخته نشد (${esc(failed)})؛ پولش به کیف پول برگشت.</p>` : ""}

@@ -306,6 +306,29 @@ body{background:
 .toast{background:var(--silver1);color:var(--silverInk)}
 .sheet{background:#081333;border-color:var(--line)}
 .ic[viewBox] path[fill="currentColor"]{stroke:none}
+
+/* Tifusi delivery card: shared IKEv2 platforms, adaptive to narrow Telegram sheets. */
+.delivery{display:grid;gap:16px;min-width:0}
+.delivery-brand{display:flex;align-items:center;justify-content:center;gap:4px;direction:ltr}
+.delivery-logo{display:block;width:145px;height:55px;background:url("assets/delivery-horses.jpg") center -11px/170px auto no-repeat;border-radius:8px}
+.delivery-brand b{font-size:1.8rem;letter-spacing:3px;color:#eaf2ff;text-shadow:0 2px 2px #527492}
+.delivery-title{text-align:center;margin:0;font-size:.85rem;color:var(--muted);overflow-wrap:anywhere}
+.delivery-service{border:1px solid #3c99ca;border-radius:24px;padding:20px 12px;background:radial-gradient(ellipse at 50% 0%,#17477588,transparent 65%),#06172d;display:grid;gap:20px;min-width:0}
+.delivery-chip{display:flex;justify-content:center;align-items:center;gap:12px;margin:auto;border:1px solid #65c6ed;border-radius:99px;padding:8px 28px;font-size:1.2rem;font-weight:800;color:#eaf2ff}
+.delivery-platforms{display:grid;grid-template-columns:1fr 1fr;direction:ltr;gap:12px}
+.delivery-platform{display:flex;flex-direction:column;align-items:center;gap:14px;min-width:0;color:#eaf2ff}
+.delivery-platform+.delivery-platform{border-left:1px solid #3884ab44;padding-left:12px}
+.delivery-symbol{display:grid;place-items:center;min-height:100px;width:100%;background:radial-gradient(ellipse at 50% 85%,#20bce944,transparent 60%)}
+.delivery-symbol .ic{width:95px;height:95px;filter:drop-shadow(0 4px 8px #49bdcf55)}
+.delivery-symbol.apple{color:#d9eafa}.delivery-symbol.android{color:#a8e861}
+.delivery-platform>b{font-size:1.2rem}.delivery-platform .cta{font-size:.74rem;padding:12px 5px;width:100%;min-height:48px;white-space:normal;direction:rtl;text-align:center}
+.delivery button,.delivery a{display:flex;align-items:center;justify-content:center;gap:7px;text-decoration:none;min-height:44px}
+.delivery-xray{justify-items:center}.delivery-xray>.pill{width:100%}
+.delivery-qr{width:190px;height:190px;max-width:100%;padding:9px;border-radius:18px;background:white}
+.delivery-apps{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%}
+.delivery-unavailable{font-size:.75rem;color:#a9b9cd;text-align:center}
+.delivery-send{background:linear-gradient(#6b97bd,#214969);color:#fff;border:1px solid #81d9ff;border-radius:18px}
+@media(max-width:350px){.delivery-brand b{font-size:1.4rem}.delivery-logo{width:120px}.delivery-platforms{gap:6px}.delivery-symbol .ic{width:78px;height:78px}.delivery-service{padding:16px 8px}}
 </style>
 </head>
 <body>
@@ -315,6 +338,6 @@ body{background:
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="app.js?v=20261023d"></script>
+<script src="app.js?v=20261023e"></script>
 </body>
 </html>
