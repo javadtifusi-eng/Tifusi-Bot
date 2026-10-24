@@ -244,3 +244,23 @@ def test_buy_committed_account_not_refunded_when_links_fail(world,plan,monkeypat
 @pytest.mark.parametrize('value,expected',[('2030-01-01T00:00:00Z',1893456000),('2030-01-01T03:30:00+03:30',1893456000),('2030-01-01T00:00:00',1893456000),(None,0)])
 def test_panel_expiry_timestamp_formats(value,expected):
     assert bot.panel_expire_ts(value)==expected
+
+
+def test_two_concurrent_renewals_keep_both_paid_packages(world,monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    client=bot.TifusiPanelAPI('https://panel.example','admin','fake')
+    u=panel_user();u.update(expire='2030-01-01T00:00:00Z',protocols=['vless'])
+    def find(name):
+        snapshot=dict(u)
+        time.sleep(.04)  # Real HTTP requests release the GIL too.
+        return snapshot
+    monkeypatch.setattr(client,'find_user',find)
+    def call(path,method='get',**kw):
+        if method=='put':u.update(kw['json']);return dict(u)
+        return {'subscription_url':'https://sub.example/sub/stable'}
+    monkeypatch.setattr(client,'_call',call)
+    def renew():return client.renew_user('alice',30,1893456000,renewal_days=30)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda _:renew(),range(2)))
+    assert u['data_limit']-u['used_traffic']==90*GB
+    assert bot.panel_expire_ts(u['expire'])==1893456000+60*86400
