@@ -1,0 +1,24 @@
+# مینی‌اپ تیفوسی: HTTPS خودکار (Let's Encrypt) جلوی miniapp.py ربات
+app.bomalo.ir {
+	encode gzip
+	reverse_proxy 127.0.0.1:8088
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+}
+
+# Alternate panel entry on a separate server IP; original panel authentication applies.
+https://app.bomalo.ir:8443 {
+    encode gzip
+    reverse_proxy https://docs.tiredandlonely.top {
+        header_up Host docs.tiredandlonely.top
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        Referrer-Policy no-referrer
+        -Server
+    }
+}
