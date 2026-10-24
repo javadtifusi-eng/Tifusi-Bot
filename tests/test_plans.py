@@ -25,7 +25,7 @@ def test_renew_never_takes_a_protocol_away():
         return {"subscription_url": "https://panel.example/sub/x", "app_code": None}
 
     api._call = call
-    api._with_links = lambda user: user
+    api._with_links = lambda user, **kw: user
     api.renew_user("old", 10, 2_000_000_000, protocols=["ikev2"])
     assert sent["body"]["protocols"] == ["ikev2", "l2tp", "pptp"]
 
@@ -45,7 +45,7 @@ def test_renew_rounds_the_new_limit_up_to_whole_gigabytes():
     sent = {}
     api.find_user = lambda name: {"id": 7, "used_traffic": 569_000_000, "protocols": ["ikev2"]}
     api._call = lambda path, method, json=None: sent.setdefault("body", json) or {}
-    api._with_links = lambda user: user
+    api._with_links = lambda user, **kw: user
     api.renew_user("u", 40, 2_000_000_000)
     assert sent["body"]["data_limit"] == 41 * 1024 ** 3
     api.find_user = lambda name: {"id": 7, "used_traffic": 0, "protocols": ["ikev2"]}
@@ -74,7 +74,7 @@ def test_renew_preserves_remaining_traffic(limit, used, extra, expected):
         return {**user, **json}
 
     api._call = call
-    api._with_links = lambda value: value
+    api._with_links = lambda value, **kw: value
     result = api.renew_user("u", extra, 2_000_000_000)
     assert sent["data_limit"] == (expected * gb if expected is not None else None)
     assert "used_traffic" not in sent
