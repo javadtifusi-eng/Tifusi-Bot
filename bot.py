@@ -363,27 +363,29 @@ class TifusiPanelAPI:
     def renew_user(self, username, total_gb, expire_ts, protocols=None, device_limit=0, renewal_days=None):
         """همان کاربر به‌روز می‌شود تا لینک اشتراک و شناسه عوض نشوند؛ حجم جدید با حفظ باقی‌مانده
         اضافه می‌شود، چون پنل مصرف را صفر نمی‌کند. اگر کاربر روی پنل نبود None برمی‌گرداند."""
-        user = self.find_user(username)
-        if not user:
-            return None
-        if renewal_days is not None and "expire" in user:
-            # تاریخ پنل مرجع است؛ تمدید دستی ادمین نباید با تاریخ قدیمی ربات کوتاه شود.
-            expire_ts = max(now(), panel_expire_ts(user["expire"])) + int(renewal_days) * 86400
-        expire, extra = self._limits(total_gb, expire_ts)
-        # گرد به گیگ کامل بالا، تا پنل حجم را ۴۱ نشان دهد نه ۴۰٫۵۳۳۴… (مشتری کمتر از یک گیگ اضافه می‌گیرد)
-        # سهمیهٔ مصرف‌نشده حفظ می‌شود؛ مصرف بالاتر از سقف قبلی از بستهٔ جدید کم نمی‌شود.
-        base = max(int(user.get("data_limit") or 0), int(user.get("used_traffic") or 0))
-        data_limit = -(-(base + extra) // 1024 ** 3) * 1024 ** 3 if extra else None
-        body = {"status": "active", "expire": expire, "data_limit": data_limit}
-        if device_limit is not None:
-            body["hwid_limit"] = int(device_limit) or None
-        if protocols:
-            # فقط اضافه می‌کند: پروتکلی که مشتری از قبل داشت (مثلاً L2TP/PPTP روی سفارش IKEv2 قدیمی)
-            # با تمدید از دستش نمی‌رود.
-            have = [p for p in (user.get("protocols") or []) if p not in protocols]
-            body["protocols"] = list(protocols) + have
-        user = self._call(f"/api/users/{int(user['id'])}", "put", json=body)
-        return self._with_links(user, committed=True)
+        # ربات و مینی‌اپ یک کلاینت مشترک دارند؛ read-modify-write باید یک‌جا قفل شود.
+        with self.lock:
+            user = self.find_user(username)
+            if not user:
+                return None
+            if renewal_days is not None and "expire" in user:
+                # تاریخ پنل مرجع است؛ تمدید دستی ادمین نباید با تاریخ قدیمی ربات کوتاه شود.
+                expire_ts = max(now(), panel_expire_ts(user["expire"])) + int(renewal_days) * 86400
+            expire, extra = self._limits(total_gb, expire_ts)
+            # گرد به گیگ کامل بالا، تا پنل حجم را ۴۱ نشان دهد نه ۴۰٫۵۳۳۴… (مشتری کمتر از یک گیگ اضافه می‌گیرد)
+            # سهمیهٔ مصرف‌نشده حفظ می‌شود؛ مصرف بالاتر از سقف قبلی از بستهٔ جدید کم نمی‌شود.
+            base = max(int(user.get("data_limit") or 0), int(user.get("used_traffic") or 0))
+            data_limit = -(-(base + extra) // 1024 ** 3) * 1024 ** 3 if extra else None
+            body = {"status": "active", "expire": expire, "data_limit": data_limit}
+            if device_limit is not None:
+                body["hwid_limit"] = int(device_limit) or None
+            if protocols:
+                # فقط اضافه می‌کند: پروتکلی که مشتری از قبل داشت (مثلاً L2TP/PPTP روی سفارش IKEv2 قدیمی)
+                # با تمدید از دستش نمی‌رود.
+                have = [p for p in (user.get("protocols") or []) if p not in protocols]
+                body["protocols"] = list(protocols) + have
+            user = self._call(f"/api/users/{int(user['id'])}", "put", json=body)
+            return self._with_links(user, committed=True)
 
     def set_status(self, username, status):
         """روشن/خاموش کردن کاربر روی پنل (active/disabled)؛ False اگر کاربر روی پنل نبود."""
@@ -2952,28 +2954,30 @@ def do_renew(order, plan):
     if not panel:
         raise PanelError("پنل این سرویس حذف شده است")
     client = panel_client(panel)
-    base = max(now(), order["expire_at"])
-    expire_at = base + plan["days"] * 86400
-    service = order["protocol"]
-    protocols = service_access_protocols(panel, service) if service in SERVICES else None
-    device_limit = plan_device_limit(plan)
-    res = client.renew_user(order["username"], plan["volume_gb"], expire_at, protocols=protocols,
-                            device_limit=device_limit, renewal_days=plan["days"])
-    if res is None:
-        # گروه فعلی سرویس روی پنل؛ اگر ادمین آن را برداشته، همان گروهی که سفارش با آن ساخته شده بود
-        grp = db.get_service_map(panel["id"]).get(service)
-        gid = int((grp["inbound_id"] if grp else order["inbound_id"]) or 0)
-        res = client.add_user([gid] if gid else [], order["username"], plan["volume_gb"], expire_at,
-                              protocols=protocols, device_limit=device_limit,
-                              ipsec_password=order["password"] or None)
-    if "expire" in (res.get("user") or {}):
-        expire_at = panel_expire_ts(res["user"]["expire"])
-    db.update_order(order["id"], expire_at=expire_at, volume_gb=plan["volume_gb"], days=plan["days"],
-                    price=plan["price"], plan_id=plan.get("id", order["plan_id"]) or order["plan_id"],
-                    status="active", reminded=0,
-                    sub_url=(order["sub_url"] if res.get("links_pending") else res["subscription_url"]),
-                    app_code=(order["app_code"] if res.get("links_pending") else res["app_code"]))
-    return db.get_order(order["id"]), panel
+    # ثبت تاریخ محلی هم داخل همان قفل باشد تا پاسخِ تمدید قدیمی روی جدید ننویسد.
+    with client.lock:
+        base = max(now(), order["expire_at"])
+        expire_at = base + plan["days"] * 86400
+        service = order["protocol"]
+        protocols = service_access_protocols(panel, service) if service in SERVICES else None
+        device_limit = plan_device_limit(plan)
+        res = client.renew_user(order["username"], plan["volume_gb"], expire_at, protocols=protocols,
+                                device_limit=device_limit, renewal_days=plan["days"])
+        if res is None:
+            # گروه فعلی سرویس روی پنل؛ اگر ادمین آن را برداشته، همان گروهی که سفارش با آن ساخته شده بود
+            grp = db.get_service_map(panel["id"]).get(service)
+            gid = int((grp["inbound_id"] if grp else order["inbound_id"]) or 0)
+            res = client.add_user([gid] if gid else [], order["username"], plan["volume_gb"], expire_at,
+                                  protocols=protocols, device_limit=device_limit,
+                                  ipsec_password=order["password"] or None)
+        if "expire" in (res.get("user") or {}):
+            expire_at = panel_expire_ts(res["user"]["expire"])
+        db.update_order(order["id"], expire_at=expire_at, volume_gb=plan["volume_gb"], days=plan["days"],
+                        price=plan["price"], plan_id=plan.get("id", order["plan_id"]) or order["plan_id"],
+                        status="active", reminded=0,
+                        sub_url=(order["sub_url"] if res.get("links_pending") else res["subscription_url"]),
+                        app_code=(order["app_code"] if res.get("links_pending") else res["app_code"]))
+        return db.get_order(order["id"]), panel
 
 
 # ---------- سرویس‌های من ----------
