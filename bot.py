@@ -315,9 +315,19 @@ class TifusiPanelAPI:
         except PanelError:
             return None
 
-    def _with_links(self, user):
-        links = self._call(f"/api/users/{int(user['id'])}/links") or {}
-        return {"user": user, "subscription_url": links.get("subscription_url", ""),
+    def _with_links(self, user, committed=False):
+        links_pending = False
+        try:
+            links = self._call(f"/api/users/{int(user['id'])}/links") or {}
+        except PanelError:
+            # ساخت/تمدید قبلاً ذخیره شده؛ خرابی دریافت لینک نباید باعث برگشت وجه شود.
+            # مسیر اشتراک رسمی پنل با secret همان حساب قابل بازیابی است.
+            if not committed or not user.get("secret"):
+                raise
+            links = {"subscription_url": self.base + "/sub/" + urllib.parse.quote(user["secret"], safe="")}
+            links_pending = True
+            log.warning("panel user %s saved; connection links temporarily unavailable", user["id"])
+        return {"user": user, "links_pending": links_pending, "subscription_url": links.get("subscription_url", ""),
                 "app_code": links.get("app_code", ""),
                 "share_url": links.get("share_url", ""),
                 "ikev2_configs": links.get("ikev2_configs") or [],
@@ -348,14 +358,17 @@ class TifusiPanelAPI:
             body["protocols"] = list(protocols)
         if ipsec_password:
             body["ipsec_password"] = ipsec_password
-        return self._with_links(self._call("/api/users", "post", json=body))
+        return self._with_links(self._call("/api/users", "post", json=body), committed=True)
 
-    def renew_user(self, username, total_gb, expire_ts, protocols=None, device_limit=0):
+    def renew_user(self, username, total_gb, expire_ts, protocols=None, device_limit=0, renewal_days=None):
         """همان کاربر به‌روز می‌شود تا لینک اشتراک و شناسه عوض نشوند؛ حجم جدید با حفظ باقی‌مانده
         اضافه می‌شود، چون پنل مصرف را صفر نمی‌کند. اگر کاربر روی پنل نبود None برمی‌گرداند."""
         user = self.find_user(username)
         if not user:
             return None
+        if renewal_days is not None and "expire" in user:
+            # تاریخ پنل مرجع است؛ تمدید دستی ادمین نباید با تاریخ قدیمی ربات کوتاه شود.
+            expire_ts = max(now(), panel_expire_ts(user["expire"])) + int(renewal_days) * 86400
         expire, extra = self._limits(total_gb, expire_ts)
         # گرد به گیگ کامل بالا، تا پنل حجم را ۴۱ نشان دهد نه ۴۰٫۵۳۳۴… (مشتری کمتر از یک گیگ اضافه می‌گیرد)
         # سهمیهٔ مصرف‌نشده حفظ می‌شود؛ مصرف بالاتر از سقف قبلی از بستهٔ جدید کم نمی‌شود.
@@ -370,7 +383,7 @@ class TifusiPanelAPI:
             have = [p for p in (user.get("protocols") or []) if p not in protocols]
             body["protocols"] = list(protocols) + have
         user = self._call(f"/api/users/{int(user['id'])}", "put", json=body)
-        return self._with_links(user)
+        return self._with_links(user, committed=True)
 
     def set_status(self, username, status):
         """روشن/خاموش کردن کاربر روی پنل (active/disabled)؛ False اگر کاربر روی پنل نبود."""
@@ -400,6 +413,18 @@ class TifusiPanelAPI:
 
 
 # ══════════════════════ دیتابیس SQLite (database) ══════════════════════
+
+def panel_expire_ts(value):
+    """تاریخ API پنل به ثانیه؛ null یعنی بدون انقضا و تاریخ بدون timezone به UTC خوانده می‌شود."""
+    if value is None or value == "":
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    dt = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return int(dt.timestamp())
+
 
 class DB:
     def __init__(self, path="vpn_bot.db"):
@@ -2932,7 +2957,8 @@ def do_renew(order, plan):
     service = order["protocol"]
     protocols = service_access_protocols(panel, service) if service in SERVICES else None
     device_limit = plan_device_limit(plan)
-    res = client.renew_user(order["username"], plan["volume_gb"], expire_at, protocols=protocols, device_limit=device_limit)
+    res = client.renew_user(order["username"], plan["volume_gb"], expire_at, protocols=protocols,
+                            device_limit=device_limit, renewal_days=plan["days"])
     if res is None:
         # گروه فعلی سرویس روی پنل؛ اگر ادمین آن را برداشته، همان گروهی که سفارش با آن ساخته شده بود
         grp = db.get_service_map(panel["id"]).get(service)
@@ -2940,9 +2966,13 @@ def do_renew(order, plan):
         res = client.add_user([gid] if gid else [], order["username"], plan["volume_gb"], expire_at,
                               protocols=protocols, device_limit=device_limit,
                               ipsec_password=order["password"] or None)
+    if "expire" in (res.get("user") or {}):
+        expire_at = panel_expire_ts(res["user"]["expire"])
     db.update_order(order["id"], expire_at=expire_at, volume_gb=plan["volume_gb"], days=plan["days"],
                     price=plan["price"], plan_id=plan.get("id", order["plan_id"]) or order["plan_id"],
-                    status="active", reminded=0, sub_url=res["subscription_url"], app_code=res["app_code"])
+                    status="active", reminded=0,
+                    sub_url=(order["sub_url"] if res.get("links_pending") else res["subscription_url"]),
+                    app_code=(order["app_code"] if res.get("links_pending") else res["app_code"]))
     return db.get_order(order["id"]), panel
 
 

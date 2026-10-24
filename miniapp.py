@@ -110,15 +110,27 @@ def _guide_url(order):
     return sub + "/guide"
 
 
-def _customer(order, pu):
+def _order_expire(order, pu):
+    """پنل مرجع تاریخ است؛ وقتی پاسخ/فیلد معتبر ندارد از سفارش استفاده کن."""
     expire = int(order["expire_at"] or 0)
+    if pu is not None and "expire" in pu:
+        try:
+            expire = ns["panel_expire_ts"](pu["expire"])
+        except (ValueError, TypeError, OverflowError):
+            pass  # دادهٔ قدیمی/نامعتبر پنل: fallback سفارش، نه خطای کل لیست
+    return expire
+
+
+def _customer(order, pu):
+    expire = _order_expire(order, pu)
     left_days = max(0, -(-(expire - int(time.time())) // 86400)) if expire else None
     used = int((pu or {}).get("used_traffic") or 0)
-    limit = int((pu or {}).get("data_limit") or 0) or int(order["volume_gb"] or 0) * 1073741824
+    limit = (int(pu["data_limit"] or 0) if pu is not None and "data_limit" in pu
+             else int(order["volume_gb"] or 0) * 1073741824)
     pstatus = (pu or {}).get("status") or "unknown"
     if pstatus in ("limited", "expired") or (left_days == 0 and expire):
         state = "bad"
-    elif (left_days is not None and left_days <= 3) or (limit and used / limit > 0.85):
+    elif pstatus == "disabled" or (left_days is not None and left_days <= 3) or (limit and used / limit > 0.85):
         state = "warn"
     else:
         state = "ok"
@@ -244,8 +256,11 @@ async def api_toggle(request):
     if not panel:
         return web.json_response({"error": "panel"}, status=503)
     if turn_on:
-        expire = int(order["expire_at"] or 0)
-        pu = (await asyncio.to_thread(_panel_users, panel)).get(order["username"]) or {}
+        try:
+            pu = (await asyncio.to_thread(_panel_users, panel)).get(order["username"]) or {}
+        except Exception:
+            return web.json_response({"error": "panel"}, status=502)
+        expire = _order_expire(order, pu)
         if (expire and expire < time.time()) or pu.get("status") in ("limited", "expired"):
             return web.json_response({"error": "finished"}, status=409)
     client = ns["panel_client"](panel)
@@ -408,6 +423,9 @@ async def resume_pending_buy(bot, uid):
         return True
     lock = _buy_locks.setdefault(uid, asyncio.Lock())
     async with lock:
+        current = _pending(uid)
+        if current != p:
+            return True  # در زمان انتظار، خرید قبلی تکمیل/لغو/جایگزین شده است.
         _clear_pending(uid)
         made, failed = await _create_accounts(_APP["app"], uid, plan, p["service"], p.get("username") or "",
                                               p.get("password") or "", p["qty"])
@@ -574,7 +592,7 @@ async def api_direct_cancel(request):
 
 # ---------- تمدید داخل مینی‌اپ (کیف پول) ----------
 def _live_order(db, uid, order_id):
-    order = db.get_order(int(order_id or 0))
+    order = db.get_order(_int(order_id))
     if not order or order["user_id"] != uid or order["status"] != "active":
         return None
     return order
@@ -596,15 +614,12 @@ async def api_renew_plans(request):
 async def api_renew(request):
     """مثل دکمه‌ی rnw:w ربات: پلن واقعی و فعال همان سرویس، کسر اتمیک، تمدید، برگشت وجه اگر نشد."""
     uid = request["uid"]
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+    body = await _body(request)
     db = ns["db"]
     order = _live_order(db, uid, body.get("order_id"))
     if not order:
         return _err("not_found", 404)
-    plan = ns["user_plan"](int(body.get("plan_id") or 0), uid)
+    plan = ns["user_plan"](_int(body.get("plan_id")), uid)
     if not plan or not plan["active"] or not ns["plan_fits"](plan, order["protocol"]):
         return _err("plan")
     lock = _buy_locks.setdefault(uid, asyncio.Lock())
