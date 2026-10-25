@@ -287,16 +287,16 @@
           <div class="mt"><span class="dot ${x.on ? x.state : "bad"}"></span><span>${x.on ? custLine(x) : '<span class="offtag">غیرفعال</span>'}</span></div></div><span style="color:var(--muted)">‹</span></button>`).join("") || '<div class="empty">سرویسی پیدا نشد.</div>'}`;
       }
       const rem = c.limit ? Math.max(0, c.limit - c.used) : 0, remPct = c.limit ? Math.min(100, (rem / c.limit) * 100) : 100;
-      const [stT, stC] = !c.on ? ["OFF", "#ff7b7b"] : c.state === "bad" ? ["ENDED", "#ff7b7b"] : c.state === "warn" ? ["LOW", "#f0a43a"] : ["ACTIVE", "#7ff0a5"];
       return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small><button class="iconbtn back" type="button" data-tab="customers" aria-label="برگشت به کاربران">${ic("back")}<span>برگشت</span></button></div>
-      <div class="mcard" role="group" aria-label="کارت سرویس ${esc(c.username)}"><img src="assets/emblem.png" alt=""><div class="mc-brand">TIFUSI</div><div class="mc-chip"></div>
-        <div class="mc-name">${esc(String(c.username).toUpperCase())}</div>
-        <div class="mc-foot"><div><small>PLAN</small><span dir="auto">${esc(c.service_name)}</span></div><div><small>LEFT</small>${c.limit ? `${gb(rem)} GB` : "∞"}</div><div><small>EXPIRES IN</small>${c.days_left === null ? "∞" : `${c.days_left} DAYS`}</div><div style="color:${stC}"><small>STATUS</small>● ${stT}</div></div></div>
-      <div class="mc-under"><div class="mc-lines">
-        <div class="row"><span>حجم مونده</span><b>${c.limit ? `${num(gb(rem))} از ${num(gb(c.limit))} گیگ` : "نامحدود"}</b></div><div class="fat"><i style="width:${remPct}%;background:linear-gradient(90deg,#a07a1f,#ffe08a)"></i></div>
-        <div class="row"><span>روز مونده</span><b>${c.days_left === null ? "بدون انقضا" : `${num(c.days_left)} روز`}</b></div><div class="fat"><i style="width:${c.days_left === null ? 100 : Math.min(100, (c.days_left / 30) * 100)}%;background:linear-gradient(90deg,#ffb259,#ffe0a3)"></i></div></div>
-        <button class="svc-btn conn" type="button" data-conn="${c.id}">اتصال</button>
-        <button class="svc-btn renew" type="button" data-renew="${c.id}">تمدید</button></div>`;
+      <section class="ice-service" role="group" aria-label="کارت سرویس ${esc(c.username)}">
+        <div class="identity"><span class="ice-protocol" dir="ltr">${esc(c.service === "ikev2" ? "IKEv2" : c.service_name || "TIFUSI")}</span><div class="brandmark"><span>TIFUSI</span><img src="assets/emblem.png" alt=""></div></div>
+        <div class="name-row"><div class="account-heading"><div class="eyebrow">اشتراک شما</div><div class="new-name" dir="auto">${esc(c.username)}</div></div>${statusPill(c)}</div>
+        <div class="capacity"><div class="eyebrow">حجم باقی‌مانده</div><div class="big-amount"><strong class="num">${c.limit ? gb(rem) : "∞"}</strong><span>${c.limit ? "گیگابایت" : "نامحدود"}</span></div><div class="usage-note">${c.limit ? `از <bdi>${gb(c.limit)}</bdi> گیگابایت` : "بدون محدودیت حجم"}</div></div>
+        <div class="usage-track" role="progressbar" aria-label="حجم باقی‌مانده" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(remPct)}"><i style="width:${remPct}%"></i></div>
+        <div class="bottom-stats"><div><span>اعتبار باقی‌مانده</span><b><bdi class="num">${c.days_left === null ? "∞" : Math.max(0, c.days_left)}</bdi> <small>${c.days_left === null ? "بدون انقضا" : "روز"}</small></b></div><div><span>حجم مصرف‌شده</span><b><bdi class="num">${gb(c.used)}</bdi> <small>گیگ</small></b></div></div>
+      </section>
+      <div class="ice-actions"><button class="svc-btn conn" type="button" data-conn="${c.id}"><span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M5.6 5.6a9 9 0 1 0 12.8 0"/></svg>اتصال</span>${ic("back")}</button>
+      <button class="svc-btn renew" type="button" data-renew="${c.id}"><span>${ic("refresh")}تمدید سرویس</span>${ic("back")}</button></div>`;
     }
   };
 
@@ -953,7 +953,7 @@
           ${action("نصب پروفایل", "data-install", x.ikev2 && x.ikev2.install)}</div>
         <div class="delivery-platform"><div class="delivery-symbol android" role="img" aria-label="Android"></div><b dir="ltr">Android</b>
           ${action("دانلود اپ اختصاصی", "data-openurl", x.app_url)}</div>
-      </div>${x.sub ? `<button class="cta delivery-qrbtn" type="button" data-qrshow="1" aria-label="QR"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm8-2h2v2h-2zm2 2h2v2h-2zm-2 2h2v2h-2zm4-4h4v2h-2v2h-2zm2 4h2v4h-4v-2h2zm-4 2h2v2h-2z"/></svg></button>
+      </div>${x.sub ? `<button class="cta delivery-qrbtn" type="button" data-qrshow="1" aria-label="نمایش بارکد اشتراک"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm8-2h2v2h-2zm2 2h2v2h-2zm-2 2h2v2h-2zm4-4h4v2h-2v2h-2zm2 4h2v4h-4v-2h2zm-4 2h2v2h-2z"/></svg><span>نمایش بارکد اشتراک</span></button>
       <img class="delivery-qr" data-qr="sub" data-qid="${x.id}" alt="QR کد" hidden>` : ""}</section>` : `<section class="delivery-service delivery-xray"><div class="delivery-chip" dir="ltr">Xray ${ic("link")}</div>
         ${x.sub ? `<img class="delivery-qr" data-qr="sub" data-qid="${x.id}" alt="بارکد اشتراک Xray"><b>بارکد اشتراک</b>` : '<p class="delivery-unavailable">لینک اشتراک آماده نیست</p>'}
         ${action("کپی لینک اشتراک", "data-copy", x.sub, "pill")}
