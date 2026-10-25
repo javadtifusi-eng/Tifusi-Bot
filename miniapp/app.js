@@ -286,15 +286,17 @@
         ${list.map((x) => `<button class="glass cust nmrow" type="button" data-card="${x.id}"><div style="min-width:0;text-align:right"><div class="nm">${esc(x.username)}</div>
           <div class="mt"><span class="dot ${x.on ? x.state : "bad"}"></span><span>${x.on ? custLine(x) : '<span class="offtag">غیرفعال</span>'}</span></div></div><span style="color:var(--muted)">‹</span></button>`).join("") || '<div class="empty">سرویسی پیدا نشد.</div>'}`;
       }
-      const C = 2 * Math.PI * 50, frac = c.limit ? Math.min(c.used / c.limit, 1) : 1;
+      const rem = c.limit ? Math.max(0, c.limit - c.used) : 0, remPct = c.limit ? Math.min(100, (rem / c.limit) * 100) : 100;
+      const [stT, stC] = !c.on ? ["OFF", "#ff7b7b"] : c.state === "bad" ? ["ENDED", "#ff7b7b"] : c.state === "warn" ? ["LOW", "#f0a43a"] : ["ACTIVE", "#7ff0a5"];
       return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small><button class="iconbtn back" type="button" data-tab="customers" aria-label="برگشت به کاربران">${ic("back")}<span>برگشت</span></button></div>
-      <div class="glass svc"><div class="svctop">
-        <div class="ring"><svg viewBox="0 0 118 118"><circle cx="59" cy="59" r="50" fill="none" stroke="var(--track)" stroke-width="9"/><circle cx="59" cy="59" r="50" fill="none" stroke="${frac > 0.85 && c.limit ? "#f0a43a" : "var(--cyan)"}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C * frac} ${C}"/></svg>
-          <div class="c"><div>${c.limit ? `<b class="num">${gb(Math.max(0, c.limit - c.used))} GB</b><br><small>مونده از ${num(gb(c.limit))} گیگ</small>` : `<b>∞</b><br><small>نامحدود</small>`}</div></div></div>
-        <div><h3 style="direction:ltr;text-align:right">${esc(c.username)}</h3><div class="pl">${esc(c.service_name)}</div>${statusPill(c)}</div></div>
-        <div class="days"><span>${c.days_left === null ? "بدون انقضا" : `${num(c.days_left)} روز مانده`}</span></div><div class="dbar"><i style="width:${c.days_left === null ? 100 : Math.min(100, (c.days_left / 30) * 100)}%"></i></div>
-        <button class="cta" type="button" data-conn="${c.id}" style="justify-content:center;width:100%">${ic("link")} نصب و اتصال</button>
-        <button class="pill" type="button" data-renew="${c.id}" style="justify-content:center;width:100%">${ic("refresh")} تمدید</button></div>`;
+      <div class="mcard" role="group" aria-label="کارت سرویس ${esc(c.username)}"><img src="assets/emblem.png" alt=""><div class="mc-brand">TIFUSI</div><div class="mc-chip"></div>
+        <div class="mc-name">${esc(String(c.username).toUpperCase())}</div>
+        <div class="mc-foot"><div><small>PLAN</small><span dir="auto">${esc(c.service_name)}</span></div><div><small>LEFT</small>${c.limit ? `${gb(rem)} GB` : "∞"}</div><div><small>EXPIRES IN</small>${c.days_left === null ? "∞" : `${c.days_left} DAYS`}</div><div style="color:${stC}"><small>STATUS</small>● ${stT}</div></div></div>
+      <div class="mc-under"><div class="mc-lines">
+        <div class="row"><span>حجم مونده</span><b>${c.limit ? `${num(gb(rem))} از ${num(gb(c.limit))} گیگ` : "نامحدود"}</b></div><div class="fat"><i style="width:${remPct}%;background:linear-gradient(90deg,#a07a1f,#ffe08a)"></i></div>
+        <div class="row"><span>روز مونده</span><b>${c.days_left === null ? "بدون انقضا" : `${num(c.days_left)} روز`}</b></div><div class="fat"><i style="width:${c.days_left === null ? 100 : Math.min(100, (c.days_left / 30) * 100)}%;background:linear-gradient(90deg,#ffb259,#ffe0a3)"></i></div></div>
+        <button class="svc-btn conn" type="button" data-conn="${c.id}">اتصال</button>
+        <button class="svc-btn renew" type="button" data-renew="${c.id}">تمدید</button></div>`;
     }
   };
 
@@ -951,7 +953,8 @@
           ${action("نصب پروفایل", "data-install", x.ikev2 && x.ikev2.install)}</div>
         <div class="delivery-platform"><div class="delivery-symbol android" role="img" aria-label="Android"></div><b dir="ltr">Android</b>
           ${action("دانلود اپ اختصاصی", "data-openurl", x.app_url)}</div>
-      </div></section>` : `<section class="delivery-service delivery-xray"><div class="delivery-chip" dir="ltr">Xray ${ic("link")}</div>
+      </div>${x.sub ? `<button class="cta delivery-qrbtn" type="button" data-qrshow="1" aria-label="QR"><svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm8-2h2v2h-2zm2 2h2v2h-2zm-2 2h2v2h-2zm4-4h4v2h-2v2h-2zm2 4h2v4h-4v-2h2zm-4 2h2v2h-2z"/></svg></button>
+      <img class="delivery-qr" data-qr="sub" data-qid="${x.id}" alt="QR کد" hidden>` : ""}</section>` : `<section class="delivery-service delivery-xray"><div class="delivery-chip" dir="ltr">Xray ${ic("link")}</div>
         ${x.sub ? `<img class="delivery-qr" data-qr="sub" data-qid="${x.id}" alt="بارکد اشتراک Xray"><b>بارکد اشتراک</b>` : '<p class="delivery-unavailable">لینک اشتراک آماده نیست</p>'}
         ${action("کپی لینک اشتراک", "data-copy", x.sub, "pill")}
         <div class="delivery-apps"><a class="pill" href="https://github.com/2dust/v2rayNG/releases/latest" target="_blank" rel="noopener noreferrer">${androidIc()} Android</a><a class="pill" href="https://apps.apple.com/app/streisand/id6450534064" target="_blank" rel="noopener noreferrer">${ic("apple")} iPhone</a></div>
@@ -989,23 +992,26 @@
       android: x.app_url ? { link: x.app_url, text: x.app_url } : null,
       other: { link: shareText(x), text: shareText(x) },
     };
-    renderSend(S.sendViews.android ? "android" : "other");
+    renderSend();
   }
+  // مرحله ۱: فقط آیفون/اندروید. مرحله ۲: فقط لوگوی تلگرام و پیامک. لینک نمایش داده نمی‌شود، فقط کپی می‌شود.
+  const TG_LOGO = `<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="24" fill="#2AABEE"/><path fill="#fff" d="M10.9 23.4c7-3 11.6-5 13.9-6 6.6-2.7 8-3.2 8.9-3.2.2 0 .6 0 .9.3.2.2.3.5.3.7v.8c-.4 4.1-2 14.1-2.9 18.7-.4 1.9-1.1 2.6-1.8 2.7-1.6.1-2.8-1-4.3-2.1l-6.1-4.1c-1.8-1.2-.6-1.8.4-2.9.3-.3 4.9-4.5 5-4.8 0-.1 0-.3-.1-.4-.1-.1-.3-.1-.5 0-.2.1-3.6 2.3-10.2 6.8-1 .7-1.8 1-2.6 1-.9 0-2.5-.5-3.8-.9-1.5-.5-2.7-.8-2.6-1.6.1-.4.6-.8 1.6-1.2z"/></svg>`;
+  const SMS_LOGO = `<svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="13" fill="#34C759"/><path fill="#fff" d="M24 11c-8.3 0-15 5.6-15 12.5 0 3.9 2.1 7.4 5.5 9.7-.3 2-1.2 3.9-2.6 5.3 3 .1 5.8-1 7.9-2.8 1.3.3 2.7.4 4.2.4 8.3 0 15-5.6 15-12.5S32.3 11 24 11z"/></svg>`;
   function renderSend(os) {
-    const v = S.sendViews, android = os === "android" && v.android;
-    const view = android ? v.android : v.other;
+    const v = S.sendViews;
+    if (!os) {
+      $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
+      <div class="send-os">
+        <button class="send-os-btn ios" type="button" data-sendos="other">${ic("apple")} iPhone</button>
+        <button class="send-os-btn android" type="button" data-sendos="android">${androidIc()} Android</button></div>`;
+      return;
+    }
+    const view = (os === "android" && v.android) || v.other;
     S.sendText = view.text; S.sendLink = view.link;
-    const tabs = v.android ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button class="${android ? "cta" : "pill ghost"}" type="button" data-sendos="android" style="justify-content:center">${androidIc()} Android</button>
-        <button class="${android ? "pill ghost" : "cta"}" type="button" data-sendos="other" style="justify-content:center">${ic("apple")} iPhone</button></div>` : "";
     $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
-      ${tabs}
-      <div class="glass sec send-content" dir="ltr" style="overflow-wrap:anywhere;white-space:pre-wrap;line-height:1.9;font-size:.85rem">${esc(S.sendText)}</div>
-      <button class="cta" type="button" data-share="tg">ارسال در تلگرام</button>
-      <button class="pill ghost" type="button" data-share="wa" style="justify-content:center">ارسال در واتساپ</button>
-      <button class="pill ghost" type="button" data-share="sms" style="justify-content:center">ارسال با پیامک</button>
-      <button class="pill ghost" type="button" data-copy="${esc(S.sendText)}" style="justify-content:center">${ic("link")} کپی همه</button>
-      <button class="pill ghost" type="button" data-act="close" style="justify-content:center">بستن</button>`;
+      <div class="send-via">
+        <button class="send-logo" type="button" data-share="tg" aria-label="Telegram">${TG_LOGO}</button>
+        <button class="send-logo" type="button" data-share="sms" aria-label="SMS">${SMS_LOGO}</button></div>`;
   }
   function support() {
     const u = S.me && S.me.support;
@@ -1253,8 +1259,9 @@
     if (d.install) { if (!tg("web_app_open_link", { url: d.install, try_browser: "safari" })) window.open(d.install, "_blank"); return; }
     if (d.openurl) { openLink(d.openurl); return; }
     if (d.sendos) { if (S.sendViews) renderSend(d.sendos); return; }
-    if (d.share) { const t = S.sendText; if (d.share === "tg") { const u = `https://t.me/share/url?url=${encodeURIComponent(S.sendLink)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); } else if (d.share === "sms") openLink(`${location.origin}/sms?b=${encodeURIComponent(S.sendLink)}`); else openLink(`https://wa.me/?text=${encodeURIComponent(t)}`); return; }
+    if (d.share) { const t = S.sendText; if (S.sendLink) navigator.clipboard.writeText(S.sendLink).catch(() => {}); if (d.share === "tg") { const u = `https://t.me/share/url?url=${encodeURIComponent(S.sendLink)}`; if (!tg("web_app_open_tg_link", { path_full: u.replace("https://t.me", "") })) openLink(u); } else if (d.share === "sms") openLink(`${location.origin}/sms?b=${encodeURIComponent(S.sendLink)}`); else openLink(`https://wa.me/?text=${encodeURIComponent(t)}`); return; }
     if (d.guide) { const c = byId(d.guide); if (c && c.guide) openLink(c.guide); return; }
+    if (d.qrshow) { const im = b.closest(".delivery-service").querySelector("img[data-qr]"); im.hidden = !im.hidden; return; }
     if (d.copy) { copy(d.copy); return; }
     if (d.nrc) { closeSheet(); S.tab = "admin"; S.asec = "rc"; S.admin = null; render(); scrollTo(0, 0); return; }
     if (d.mguide) { const m = S.made[+d.mguide]; if (m) openLink(m.guide); return; }

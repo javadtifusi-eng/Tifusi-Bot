@@ -351,6 +351,34 @@ body{background:
 
 /* Same home scenery, without its embedded logo, for install and sharing sheets. */
 .sheet:has(.delivery),.sheet:has(.send-content){background:linear-gradient(180deg,rgba(3,14,38,.38),rgba(3,14,38,.78)),url("assets/delivery-background-v1.png") center center/cover no-repeat}
+/* ارسال برای مشتری v2 + دکمه‌های کارت سرویس */
+.send-os,.send-via{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
+.send-os-btn,.svc-btn{appearance:none;border:0;font:inherit;font-weight:800;font-size:1.05rem;color:#fff;border-radius:20px;padding:18px 10px;display:flex;justify-content:center;align-items:center;gap:8px;cursor:pointer;width:100%}
+.send-os-btn .ic,.svc-btn .ic{color:#fff;stroke:#fff}
+.send-os-btn.ios,.svc-btn.conn{background:linear-gradient(180deg,#ffa53d,#f07b0c);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 8px 22px rgba(240,123,12,.38)}
+.send-os-btn.android,.svc-btn.renew{background:linear-gradient(180deg,#4fd77a,#1fa64e);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 8px 22px rgba(31,166,78,.38)}
+.svc-btn{padding:15px 10px;margin-top:4px}
+.send-logo{appearance:none;border:0;background:rgba(255,255,255,.06);border-radius:24px;padding:18px;display:flex;justify-content:center;align-items:center;cursor:pointer;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.send-logo svg{width:72px;height:72px;filter:drop-shadow(0 6px 14px rgba(0,0,0,.35))}
+.send-logo:active,.send-os-btn:active,.svc-btn:active{transform:scale(.97)}
+.delivery-qrbtn{justify-self:center;width:auto;min-width:60%;padding:12px 26px;font-size:.95rem}
+.delivery-service img.delivery-qr{justify-self:center}
+/* کارت سرویس: کارت عضویت مشکی طلایی */
+.mcard{position:relative;aspect-ratio:1.6;border-radius:24px;padding:18px 20px;overflow:hidden;color:#f3e6c4;direction:ltr;background:linear-gradient(135deg,#121212 0%,#2a2a2a 40%,#0d0d0d 100%);box-shadow:inset 0 1px 0 #ffffff22,0 22px 46px #000c,0 0 0 1px #d4af3755}
+.mcard:after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(115deg,#ffffff00 0 14px,#d4af3712 14px 15px)}
+.mcard img{position:absolute;right:16px;top:12px;width:92px;filter:sepia(1) saturate(3) hue-rotate(5deg) brightness(1.05) drop-shadow(0 2px 4px #000)}
+.mc-brand,.mc-name{background:linear-gradient(180deg,#fff1c1,#d4af37 60%,#a07a1f);-webkit-background-clip:text;background-clip:text;color:transparent}
+.mc-brand{position:absolute;left:20px;top:18px;font-weight:900;letter-spacing:4px}
+.mc-chip{position:absolute;left:20px;top:56px;width:46px;height:34px;border-radius:8px;background:linear-gradient(135deg,#f3d27a,#b98a2d);box-shadow:inset 0 0 0 1px #8a6420}
+.mc-name{position:absolute;left:20px;right:20px;bottom:52px;font:900 1.45rem/1.15 monospace;letter-spacing:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mc-foot{position:absolute;left:20px;right:20px;bottom:14px;display:flex;justify-content:space-between;gap:6px;font-size:.72rem;font-weight:700}
+.mc-foot>div{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mc-foot small{display:block;font-size:.58rem;opacity:.65;letter-spacing:1px}
+.mc-under{margin-top:14px;display:grid;gap:12px}
+.mc-lines{background:linear-gradient(180deg,#161616,#0d0d0d);border:1px solid #d4af3740;box-shadow:0 10px 24px #0005;border-radius:18px;padding:12px 14px;display:grid;gap:10px}
+.mc-lines .row{display:flex;justify-content:space-between;font-size:.85rem;color:#b9cbe0}.mc-lines b{color:#fff}
+.mc-lines .fat{height:12px;border-radius:9px;background:#ffffff14;overflow:hidden}.mc-lines .fat i{display:block;height:100%;border-radius:9px}
+@media(max-width:350px){.mcard{padding:14px 14px}.mcard img{width:72px}.mc-name{font-size:1.15rem;bottom:46px}.mc-foot{font-size:.62rem}.mc-brand,.mc-chip,.mc-name,.mc-foot{left:14px}}
 </style>
 </head>
 <body>
@@ -360,6 +388,6 @@ body{background:
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="app.js?v=20261023h"></script>
+<script src="app.js?v=20261025d"></script>
 </body>
 </html>
