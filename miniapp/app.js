@@ -189,7 +189,7 @@
   // نشانگر وضعیت داخل کارت سرویس
   function statusPill(c) {
     const [t, col] = c.limit && c.used >= c.limit ? ["پایان حجم", "#ff7b7b"] : !c.on ? ["غیرفعال", "#ff7b7b"] : c.state === "bad" ? ["تمام‌شده", "#ff7b7b"] : c.state === "warn" ? ["رو به اتمام", "#f0a43a"] : ["فعال", "#3ddc84"];
-    return `<span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 11px;border-radius:99px;font-size:.78rem;font-weight:700;color:${col};background:${col}1f;border:1px solid ${col}55"><i style="width:7px;height:7px;border-radius:50%;background:${col};box-shadow:0 0 8px ${col}"></i>${t}</span>`;
+    return `<span class="service-status" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 11px;border-radius:99px;font-size:.78rem;font-weight:700;color:${col};background:${col}1f;border:1px solid ${col}55"><i style="width:7px;height:7px;border-radius:50%;background:${col};box-shadow:0 0 8px ${col}"></i>${t}</span>`;
   }
 
   function custLine(c) {
