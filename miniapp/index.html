@@ -391,6 +391,10 @@ body{background:
 
 
 .ice-service .new-name{text-align:right}.ice-service .ice-protocol{position:static;inset:auto;transform:none}
+
+/* Approved soft service card, with quota-aware renewal emphasis. */
+.soft-service{padding:20px;background:radial-gradient(ellipse at 50% 45%,#007da02b,transparent 60%),linear-gradient(145deg,#102e4a,#07172b 75%);border:1px solid #64aeebaa;box-shadow:inset 0 1px 0 #9edfff22,0 10px 30px #0005}.soft-service:before{display:none}.soft-service .identity{padding-bottom:12px}.soft-service .brandmark img{width:80px}.soft-service .name-row{margin-top:12px;border:1px solid #4a92d32e;border-radius:17px;padding:14px;background:linear-gradient(110deg,#12375a88,#0c213b88)}.soft-service .new-name{font-size:25px}.soft-service .capacity{margin-top:22px;text-align:center}.soft-service .big-amount{justify-content:center;direction:ltr;gap:7px}.soft-service .big-amount strong{font-size:60px;text-shadow:0 0 22px #00bbf455;color:#e8faff}.soft-service .big-amount span{font:600 20px Arial}.soft-service .usage-note{margin-top:4px;font-size:12px}.soft-service .usage-track{height:8px;border:1px solid #4b88af66;background:#0a203a;margin:20px 0}.soft-service .usage-track i{background:linear-gradient(90deg,#00aeba,#00e7b4);box-shadow:none}.soft-service .bottom-stats{border:0;padding:0;gap:12px}.soft-service .bottom-stats>div{background:linear-gradient(135deg,#00484866,#07314a77);border:1px solid #00bda52d;border-radius:16px;padding:14px;gap:8px}.soft-service .bottom-stats>div+div{padding:14px;border:1px solid #348cd333;background:linear-gradient(135deg,#123a6666,#0b254277)}.soft-service .bottom-stats b{font-size:24px}.quota-hint{text-align:center;margin-top:14px;padding:12px 8px;border:1px solid #3784ae40;background:#0d355077;border-radius:14px;color:#b7d9ef;font-size:12px}.ice-actions.quota-ended .renew{order:-1;background:linear-gradient(120deg,#00bfa4,#009c76);border:1px solid #62eec9;color:#fff;box-shadow:0 6px 24px #00b99625}.ice-actions.quota-ended .renew .ic{color:white}.ice-actions.quota-ended .conn{background:#0a1b30;border-color:#58b8d7;box-shadow:none}
+@media(max-width:350px){.soft-service{padding:15px}.soft-service .name-row{padding:11px;gap:6px}.soft-service .new-name{font-size:21px}.soft-service .big-amount strong{font-size:52px}.soft-service .bottom-stats{gap:8px}.soft-service .bottom-stats>div,.soft-service .bottom-stats>div+div{padding:11px}}
 </style>
 </head>
 <body>
@@ -400,6 +404,6 @@ body{background:
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="app.js?v=20261025e"></script>
+<script src="app.js?v=20261026soft1"></script>
 </body>
 </html>

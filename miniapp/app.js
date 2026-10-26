@@ -188,7 +188,7 @@
 
   // نشانگر وضعیت داخل کارت سرویس
   function statusPill(c) {
-    const [t, col] = !c.on ? ["غیرفعال", "#ff7b7b"] : c.state === "bad" ? ["تمام‌شده", "#ff7b7b"] : c.state === "warn" ? ["رو به اتمام", "#f0a43a"] : ["فعال", "#3ddc84"];
+    const [t, col] = c.limit && c.used >= c.limit ? ["پایان حجم", "#ff7b7b"] : !c.on ? ["غیرفعال", "#ff7b7b"] : c.state === "bad" ? ["تمام‌شده", "#ff7b7b"] : c.state === "warn" ? ["رو به اتمام", "#f0a43a"] : ["فعال", "#3ddc84"];
     return `<span style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 11px;border-radius:99px;font-size:.78rem;font-weight:700;color:${col};background:${col}1f;border:1px solid ${col}55"><i style="width:7px;height:7px;border-radius:50%;background:${col};box-shadow:0 0 8px ${col}"></i>${t}</span>`;
   }
 
@@ -287,15 +287,17 @@
           <div class="mt"><span class="dot ${x.on ? x.state : "bad"}"></span><span>${x.on ? custLine(x) : '<span class="offtag">غیرفعال</span>'}</span></div></div><span style="color:var(--muted)">‹</span></button>`).join("") || '<div class="empty">سرویسی پیدا نشد.</div>'}`;
       }
       const rem = c.limit ? Math.max(0, c.limit - c.used) : 0, remPct = c.limit ? Math.min(100, (rem / c.limit) * 100) : 100;
+      const exhausted = !!c.limit && c.used >= c.limit;
       return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small><button class="iconbtn back" type="button" data-tab="customers" aria-label="برگشت به کاربران">${ic("back")}<span>برگشت</span></button></div>
-      <section class="ice-service" role="group" aria-label="کارت سرویس ${esc(c.username)}">
+      <section class="ice-service soft-service" role="group" aria-label="کارت سرویس ${esc(c.username)}">
         <div class="identity"><span class="ice-protocol" dir="ltr">${esc(c.service === "ikev2" ? "IKEv2" : c.service_name || "TIFUSI")}</span><div class="brandmark"><span>TIFUSI</span><img src="assets/emblem.png" alt=""></div></div>
         <div class="name-row"><div class="account-heading"><div class="eyebrow">اشتراک شما</div><div class="new-name" dir="auto">${esc(c.username)}</div></div>${statusPill(c)}</div>
-        <div class="capacity"><div class="eyebrow">حجم باقی‌مانده</div><div class="big-amount"><strong class="num">${c.limit ? gb(rem) : "∞"}</strong><span>${c.limit ? "گیگابایت" : "نامحدود"}</span></div><div class="usage-note">${c.limit ? `از <bdi>${gb(c.limit)}</bdi> گیگابایت` : "بدون محدودیت حجم"}</div></div>
+        <div class="capacity"><div class="eyebrow">حجم باقی‌مانده</div><div class="big-amount"><strong class="num">${c.limit ? gb(rem) : "∞"}</strong><span>${c.limit ? "GB" : "نامحدود"}</span></div><div class="usage-note">${c.limit ? `از <bdi>${gb(c.limit)}</bdi> GB` : "بدون محدودیت حجم"}</div></div>
         <div class="usage-track" role="progressbar" aria-label="حجم باقی‌مانده" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(remPct)}"><i style="width:${remPct}%"></i></div>
-        <div class="bottom-stats"><div><span>اعتبار باقی‌مانده</span><b><bdi class="num">${c.days_left === null ? "∞" : Math.max(0, c.days_left)}</bdi> <small>${c.days_left === null ? "بدون انقضا" : "روز"}</small></b></div><div><span>حجم مصرف‌شده</span><b><bdi class="num">${gb(c.used)}</bdi> <small>گیگ</small></b></div></div>
+        <div class="bottom-stats"><div><span>اعتبار باقی‌مانده</span><b><bdi class="num">${c.days_left === null ? "∞" : Math.max(0, c.days_left)}</bdi> <small>${c.days_left === null ? "بدون انقضا" : "روز"}</small></b></div><div><span>حجم مصرف‌شده</span><b><bdi class="num">${gb(c.used)}</bdi> <small>GB</small></b></div></div>
+      ${exhausted ? '<div class="quota-hint">برای ادامه اتصال، سرویس را تمدید کن</div>' : ""}
       </section>
-      <div class="ice-actions"><button class="svc-btn conn" type="button" data-conn="${c.id}"><span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M5.6 5.6a9 9 0 1 0 12.8 0"/></svg>اتصال</span>${ic("back")}</button>
+      <div class="ice-actions ${exhausted ? "quota-ended" : ""}"><button class="svc-btn conn" type="button" data-conn="${c.id}"><span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M5.6 5.6a9 9 0 1 0 12.8 0"/></svg>اتصال</span>${ic("back")}</button>
       <button class="svc-btn renew" type="button" data-renew="${c.id}"><span>${ic("refresh")}تمدید سرویس</span>${ic("back")}</button></div>`;
     }
   };
