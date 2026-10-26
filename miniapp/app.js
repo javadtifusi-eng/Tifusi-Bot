@@ -291,12 +291,17 @@
       <section class="ice-service" role="group" aria-label="کارت سرویس ${esc(c.username)}">
         <div class="identity"><span class="ice-protocol" dir="ltr">${esc(c.service === "ikev2" ? "IKEv2" : c.service_name || "TIFUSI")}</span><div class="brandmark"><span>TIFUSI</span><img src="assets/emblem.png" alt=""></div></div>
         <div class="name-row"><div class="account-heading"><div class="eyebrow">اشتراک شما</div><div class="new-name" dir="auto">${esc(c.username)}</div></div>${statusPill(c)}</div>
-        <div class="capacity"><div class="eyebrow">حجم باقی‌مانده</div><div class="big-amount"><strong class="num">${c.limit ? gb(rem) : "∞"}</strong><span>${c.limit ? "گیگابایت" : "نامحدود"}</span></div><div class="usage-note">${c.limit ? `از <bdi>${gb(c.limit)}</bdi> گیگابایت` : "بدون محدودیت حجم"}</div></div>
+        <div class="capacity"><div class="eyebrow">حجم باقی‌مانده</div><div class="big-amount"><strong class="num">${c.limit ? gb(rem) : "∞"}</strong><span>${c.limit ? "GB" : "نامحدود"}</span></div><div class="usage-note">${c.limit ? `از <bdi>${gb(c.limit)}</bdi> GB` : "بدون محدودیت حجم"}</div></div>
         <div class="usage-track" role="progressbar" aria-label="حجم باقی‌مانده" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(remPct)}"><i style="width:${remPct}%"></i></div>
-        <div class="bottom-stats"><div><span>اعتبار باقی‌مانده</span><b><bdi class="num">${c.days_left === null ? "∞" : Math.max(0, c.days_left)}</bdi> <small>${c.days_left === null ? "بدون انقضا" : "روز"}</small></b></div><div><span>حجم مصرف‌شده</span><b><bdi class="num">${gb(c.used)}</bdi> <small>گیگ</small></b></div></div>
+        <div class="bottom-stats"><div><span>اعتبار باقی‌مانده</span><b><bdi class="num">${c.days_left === null ? "∞" : Math.max(0, c.days_left)}</bdi> <small>${c.days_left === null ? "بدون انقضا" : "روز"}</small></b></div><div><span>حجم مصرف‌شده</span><b><bdi class="num">${gb(c.used)}</bdi> <small>GB</small></b></div></div>
       </section>
       <div class="ice-actions"><button class="svc-btn conn" type="button" data-conn="${c.id}"><span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M5.6 5.6a9 9 0 1 0 12.8 0"/></svg>اتصال</span>${ic("back")}</button>
-      <button class="svc-btn renew" type="button" data-renew="${c.id}"><span>${ic("refresh")}تمدید سرویس</span>${ic("back")}</button></div>`;
+      <button class="svc-btn renew" type="button" data-renew="${c.id}"><span>${ic("refresh")}تمدید سرویس</span>${ic("back")}</button></div>
+      <div class="service-platform-actions" aria-label="روش اتصال">
+        <button type="button" data-servicepick="ios" data-order="${c.id}">${ic("apple")}<span>iPhone</span></button>
+        <button type="button" data-servicepick="qr" data-order="${c.id}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h2v2h-2zM19 19h2v2h-2zM19 13h2v2h-2zM13 19h2v2h-2z"/></svg><span>بارکد</span></button>
+        <button type="button" data-servicepick="android" data-order="${c.id}">${androidIc()}<span>Android</span></button>
+      </div>`;
     }
   };
 
@@ -878,6 +883,19 @@
     if (!connCache[key]) connCache[key] = await api("connect?order_id=" + id + (all ? "&all=1" : ""));
     return connCache[key];
   }
+  async function servicePick(id, kind) {
+    let x;
+    try { x = await getConn(id); } catch (e) { toast("اطلاعات اتصال دریافت نشد"); return; }
+    if (kind === "ios" && x.ikev2 && x.ikev2.install) {
+      if (!tg("web_app_open_link", { url: x.ikev2.install, try_browser: "safari" })) window.open(x.ikev2.install, "_blank");
+      return;
+    }
+    if (kind === "android" && x.app_url) { openLink(x.app_url); return; }
+    if (kind !== "qr") { openConnect(id, kind === "ios" ? "ios" : "android"); return; }
+    if (!x.sub) { toast("بارکد این سرویس فعلاً در دسترس نیست"); return; }
+    $("sheet").innerHTML = `<h3 id="sheetTitle">بارکد اشتراک</h3><div class="service-qr"><img data-qr="sub" data-qid="${id}" alt="بارکد اشتراک"><small>برای اتصال در اپ سازگار اسکن کنید</small></div>`;
+    $("sheet").classList.add("open"); $("scrim").classList.add("open"); loadQrs();
+  }
   const TYPE = { ikev2: "IKEv2/IPSec MSCHAPv2", l2tp: "L2TP/IPSec PSK" };
   // آنچه برای مشتری فرستاده می‌شود فقط یک لینک است: نه نام کاربری، نه رمز، نه آموزش.
   // آن صفحه برای IKEv2 سه دکمه دارد (دانلود اپ، جفت‌سازی اندروید، پروفایل آیفون) و برای V2Ray فقط بارکد اشتراک.
@@ -1252,6 +1270,7 @@
     if (d.f) { S.filt = d.f; S.tab = "customers"; render(); return; }
     if (d.kind) { S.kind = d.kind; render(); return; }
     if (d.card) { S.card = +d.card; S.tab = "card"; render(); scrollTo(0, 0); return; }
+    if (d.servicepick) { servicePick(+d.order, d.servicepick); return; }
     if (d.send) { openSend({ id: +d.send }); return; }
     if (d.conn) { openConnect(+d.conn, d.os); return; }
     if (d.connall) { openConnect(+d.connall, d.os || undefined, true); return; }
