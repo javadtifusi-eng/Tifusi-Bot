@@ -89,9 +89,9 @@
   tg("web_app_request_safe_area");
   tg("web_app_request_content_safe_area");
   tg("web_app_check_home_screen");
-  tg("web_app_set_header_color", { color: "#050b1f" });
-  tg("web_app_set_background_color", { color: "#050b1f" });
-  tg("web_app_set_bottom_bar_color", { color: "#050b1f" });
+  tg("web_app_set_header_color", { color: "#200e16" });
+  tg("web_app_set_background_color", { color: "#200e16" });
+  tg("web_app_set_bottom_bar_color", { color: "#200e16" });
 
   const I = {
     bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 21a2 2 0 0 0 4 0"/>',
@@ -200,7 +200,7 @@
   const V = {
     home: () => `
       <div class="bar"><span style="display:flex;gap:8px"><button class="iconbtn" type="button" data-act="notifs" aria-label="اعلان‌ها${S.me.unread ? ` (${S.me.unread} تازه)` : ""}">${ic("bell")}${S.me.unread ? '<span class="badge"></span>' : ""}</button></span><span></span></div>
-      <div class="herospace" role="img" aria-label="Tifusi"></div>
+      <div class="herospace sunset-brand"><img src="assets/status-tifusi-mark.png" alt="لوگوی تیفوسی"><b dir="ltr">TIFUSI</b></div>
       <div class="glass wallet"><div class="w"><div class="wicon" aria-hidden="true"></div><div><div class="k">موجودی کیف پول</div><div class="v">${num(n(S.me.balance))}</div></div></div><button class="pill" type="button" data-go="wallet">${ic("refresh")} شارژ کیف پول</button></div>
       <div class="stats">
         <button class="glass tile" type="button" data-f="all">${ic("users")}<b class="num">${S.customers.length}</b><small>مشتری</small></button>
@@ -862,6 +862,7 @@
   }, 15000);
 
   function render() {
+    document.body.dataset.page = S.tab;
     $("app").innerHTML = V[S.tab]();
     if (S.tab === "admin") loadReceiptImages();
 
