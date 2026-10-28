@@ -32,10 +32,16 @@ html.fs body[data-tab][data-view]{--workspace-top:max(var(--tg-top,0px),calc(env
 .sheet .sheet-body{display:flex;flex-direction:column;padding:12px 17px 20px;overflow:hidden}
 .sheet .sheet-close{position:static;float:none;align-self:flex-end;flex:none;margin:0 0 12px;min-height:38px;height:38px;background:#58352e}
 #sheetContent{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:2px}
-body[data-tab] #app>.top,html.fs body[data-tab] #app>.top{background:#301d24;border-bottom:1px solid #b48464}
-body:not([data-tab=ssh]):not([data-view=home]) #app>.ai-actions:not(.hidden),body:not([data-tab=ssh]):not([data-view=home]) #app>#sub:not(.hidden){background:#301d24;color:#f5d8bf}
+body[data-tab] #app>.top,html.fs body[data-tab] #app>.top{background:#2c181c35;border-bottom:1px solid #daa16b26}
+body:not([data-tab=ssh]):not([data-view=home]) #app>.ai-actions:not(.hidden),body:not([data-tab=ssh]):not([data-view=home]) #app>#sub:not(.hidden){background:transparent;color:#f5d8bf}
 .sub #subModel{color:#e5c4af}.ai-actions .icon{background:#513126;border-color:#bb8b66;color:#fff0dc}
 .sheet .sheet-bg,body[data-tab] >nav.tabs#workspaceDock{backdrop-filter:none;-webkit-backdrop-filter:none}
 .setting-icon{display:inline-flex;width:21px;height:21px;flex:none;align-items:center;justify-content:center;vertical-align:middle;margin-inline-end:8px;color:#ffd19a;pointer-events:none}
 .setting-icon svg,.setting-icon img{width:21px;height:21px;object-fit:contain}.sheet h3 .setting-icon{width:25px;height:25px}
 .sheet .control-row button,.sheet .workspace-options button{line-height:1.8}
+
+/* Glass header surface; contrast belongs to the individual controls. */
+.top #workspaceBack,.top #workspaceSettings{background:#513126;border-color:#bb8b66;color:#fff0dc}
+.top .brand,body[data-tab=ssh] .top .brand{background:#402820e6;border:1px solid #bb8b66;border-radius:12px;padding:3px 8px}
+.top .logo,body[data-tab=ssh] .top .logo{background:#513126;border-color:#bb8b66}
+.top .brand b,body[data-tab=claude] .top .brand b{color:#fff4e7}
