@@ -744,7 +744,7 @@ async def service_status_page(request):
                             headers=STATUS_HEADERS)
     return web.Response(text=(STATIC_DIR / "service-status.html").read_text(),
                         content_type="text/html", headers={**STATUS_HEADERS,
-                        "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"})
+                        "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"})
 
 
 def _seen_timestamp(value):

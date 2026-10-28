@@ -41,6 +41,7 @@ def test_scoped_link_and_no_secrets(service):
         page=await c.get(url)
         assert page.status==200 and page.headers['Cache-Control']=='no-store'
         assert "frame-ancestors 'none'" in page.headers['Content-Security-Policy']
+        assert "font-src 'self'" in page.headers['Content-Security-Policy']
         r=await c.get(url+'/data'); d=await r.json()
         assert r.status==200 and d['used']==1073741824 and d['days_left']==1
         assert d['last_seen']==1793182800
