@@ -13,7 +13,7 @@ setNav=function(){
  $('.home-kicker').textContent=fa?'فضای کار شخصی':'PERSONAL WORKSPACE';
  $('.home-heading h1').textContent=fa?'همه‌چیز، همین‌جاست.':'Everything, together.';
  $('.home-heading p').textContent=fa?'گفتگو، کدنویسی و مدیریت سرورها':'Conversations, code and your servers';
- const notes=fa?['گفتگو و ایده‌پردازی','کدنویسی و اجرا','مدیریت سرورها','مدیریت سرویس‌ها']:['Think and explore','Build and run','Your servers','Service dashboard'];
+ const notes=fa?['کدنویسی و اجرا','گفتگو و ایده‌پردازی','مدیریت سرورها','مدیریت سرویس‌ها']:['Build and run','Think and explore','Your servers','Service dashboard'];
  document.querySelectorAll('.workspace-card small').forEach((el,i)=>el.textContent=notes[i]);
  $('#homePanel b').textContent=fa?'پنل تیفوسی':'Tifusi panel';
  $('.home-bottom>span').lastChild.textContent=fa?'خصوصی · فقط شما':'Private · only you';
