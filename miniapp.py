@@ -727,6 +727,7 @@ def _status_order(request):
     order = ns["db"].get_order(_int(request.match_info.get("order_id")))
     signature = request.match_info.get("signature", "")
     if (not order or order["status"] not in LIVE_ORDER_STATUSES
+            or not re.fullmatch(r"[0-9a-f]{64}", signature)
             or not hmac.compare_digest(signature, _status_signature(order))):
         return None
     return order

@@ -48,6 +48,7 @@ def test_scoped_link_and_no_secrets(service):
         assert set(d)=={'username','service_name','used','limit','expire','days_left','panel_status','last_seen','updated_at'}
         assert (await c.get(url.replace('/7/','/8/')+'/data')).status==404
         assert (await c.get(url[:-1]+('a' if url[-1]!='a' else 'b')+'/data')).status==404
+        assert (await c.get('/service/7/ناقص/data')).status==404
         assert (await c.get('/api/connect?order_id=7')).status==401
         service[0]['sub_url']='https://sub.example/replaced'
         assert (await c.get(url+'/data')).status==404
