@@ -117,6 +117,7 @@
     layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
     dotc: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>',
     apple: '<path fill="currentColor" stroke="none" d="M16.37 12.8c-.02-2.1 1.72-3.12 1.8-3.17-.98-1.43-2.5-1.63-3.04-1.65-1.29-.13-2.52.76-3.18.76-.66 0-1.67-.74-2.75-.72-1.41.02-2.72.82-3.45 2.09-1.47 2.55-.38 6.33 1.06 8.4.7 1.01 1.53 2.15 2.62 2.11 1.05-.04 1.45-.68 2.72-.68 1.27 0 1.62.68 2.73.66 1.13-.02 1.85-1.03 2.54-2.05.8-1.17 1.13-2.31 1.15-2.37-.03-.01-2.2-.85-2.22-3.36zM14.3 6.62c.58-.7.97-1.68.86-2.65-.83.03-1.84.55-2.44 1.25-.53.62-1 1.62-.88 2.57.93.07 1.88-.47 2.46-1.17z"/>',
+    chart: '<path d="M5 20V12M12 20V4M19 20V8"/>',
     crown: '<path d="M3 8l4 4 5-7 5 7 4-4-2 11H5L3 8Z"/>',
     link: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>'
   };
@@ -192,6 +193,10 @@
     return `<span class="service-status" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 11px;border-radius:99px;font-size:.78rem;font-weight:700;color:${col};background:${col}1f;border:1px solid ${col}55"><i style="width:7px;height:7px;border-radius:50%;background:${col};box-shadow:0 0 8px ${col}"></i>${t}</span>`;
   }
 
+  function lastSeen(ts) {
+    if (!ts) return "ثبت نشده";
+    return new Date(ts * 1000).toLocaleString("fa-IR-u-nu-latn", {timeZone:"Asia/Tehran",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+  }
   function custLine(c) {
     const vol = c.limit ? `${num(gb(c.used))} گیگ از ${num(gb(c.limit))} گیگ` : `نامحدود · ${num(gb(c.used))} گیگ`;
     const left = c.days_left === null ? "بدون انقضا" : c.state === "bad" ? "تمام شده" : `${num(c.days_left)} روز مانده`;
@@ -289,13 +294,14 @@
       const rem = c.limit ? Math.max(0, c.limit - c.used) : 0, remPct = c.limit ? Math.min(100, (rem / c.limit) * 100) : 100;
       const exhausted = !!c.limit && c.used >= c.limit;
       return `<div class="ptitle"><b>کارت سرویس</b><small>اطلاعات و مدیریت سرویس</small><button class="iconbtn back" type="button" data-tab="customers" aria-label="برگشت به کاربران">${ic("back")}<span>برگشت</span></button></div>
-      <section class="ice-service soft-service" role="group" aria-label="کارت سرویس ${esc(c.username)}">
-        <div class="identity"><span class="ice-protocol" dir="ltr">${esc(c.service === "ikev2" ? "IKEv2" : c.service_name || "TIFUSI")}</span><div class="brandmark"><span>TIFUSI</span><img src="assets/emblem.png" alt=""></div></div>
-        <div class="name-row"><div class="account-heading"><div class="eyebrow">اشتراک شما</div><div class="new-name" dir="auto">${esc(c.username)}</div></div>${statusPill(c)}</div>
-        <div class="capacity"><div class="eyebrow">حجم باقی‌مانده</div><div class="big-amount"><strong class="num">${c.limit ? gb(rem) : "∞"}</strong><span>${c.limit ? "GB" : "نامحدود"}</span></div><div class="usage-note">${c.limit ? `از <bdi>${gb(c.limit)}</bdi> GB` : "بدون محدودیت حجم"}</div></div>
-        <div class="usage-track" role="progressbar" aria-label="حجم باقی‌مانده" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(remPct)}"><i style="width:${remPct}%"></i></div>
-        <div class="bottom-stats"><div><span>اعتبار باقی‌مانده</span><b><bdi class="num">${c.days_left === null ? "∞" : Math.max(0, c.days_left)}</bdi> <small>${c.days_left === null ? "بدون انقضا" : "روز"}</small></b></div><div><span>حجم مصرف‌شده</span><b><bdi class="num">${gb(c.used)}</bdi> <small>GB</small></b></div></div>
-      ${exhausted ? '<div class="quota-hint">برای ادامه اتصال، سرویس را تمدید کن</div>' : ""}
+      <section class="sunset-service" role="group" aria-label="کارت سرویس ${esc(c.username)}">
+        <div class="sunset-card-brand"><img src="assets/status-tifusi-mark.png" alt="لوگوی تیفوسی"><b dir="ltr">TIFUSI</b><span>${esc(c.service === "ikev2" ? "IKEv2" : c.service_name || "سرویس")}</span></div>
+        <div class="sunset-summary"><div class="sunset-orbit"><svg viewBox="0 0 200 200" aria-hidden="true"><defs><linearGradient id="sunsetRing" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#ff5c19"/><stop offset=".6" stop-color="#ffb300"/><stop offset="1" stop-color="#fff063"/></linearGradient></defs><circle class="ring-track" cx="100" cy="100" r="85"/><circle class="ring-fill" cx="100" cy="100" r="85"/></svg><div class="sunset-day"><svg class="sunset-crown" viewBox="0 0 40 32" aria-hidden="true"><path d="m4 8 8 7L20 3l8 12 8-7-4 20H8Z"/><circle cx="4" cy="7" r="3"/><circle cx="20" cy="3" r="3"/><circle cx="36" cy="7" r="3"/></svg><strong class="num">${c.days_left === null ? "∞" : Math.max(0,c.days_left)}</strong><span>${c.days_left === null ? "بدون انقضا" : "روز"}</span><small>اعتبار باقی‌مانده</small></div></div>
+        <div class="sunset-summary-info">${statusPill(c)}<b class="sunset-username" dir="auto">${esc(c.username)}</b><dl><div><dt>${ic("clock")} تاریخ پایان</dt><dd>${c.expire ? fdate(c.expire) : "بدون انقضا"}</dd></div><div><dt>${ic("clock")} مانده زمان</dt><dd>${c.days_left === null ? "نامحدود" : num(Math.max(0,c.days_left)) + " روز"}</dd></div><div><dt>${ic("link")} آخرین اتصال</dt><dd>${lastSeen(c.last_seen)}</dd></div></dl></div></div>
+        <div class="sunset-metrics"><article class="sunset-volume"><h3><span>${ic("layers")}</span>حجم باقی‌مانده</h3><div class="sunset-value num">${c.limit ? gb(rem) + ' <small>GB</small>' : "نامحدود"}</div><div class="sunset-meter" role="progressbar" aria-label="حجم باقی‌مانده" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(remPct)}"><i style="width:${remPct}%"></i></div><div class="sunset-volume-note"><b class="num">${c.limit ? Math.round(remPct) + "%" : "∞"}</b><span>${c.limit ? '<bdi class="num">' + gb(c.limit) + ' GB</bdi>' : "بدون سقف حجم"}</span></div></article><article class="sunset-used"><h3><span>${ic("chart")}</span>مصرف کل</h3><div class="sunset-value num">${gb(c.used)} <small>GB</small></div><div class="sunset-decoration" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p>مصرف ثبت‌شده تا امروز</p></article></div>
+        <section class="sunset-details"><h3>${ic("shield")} جزئیات اشتراک</h3><div><span>تاریخ پایان</span><b>${c.expire ? fdate(c.expire) : "بدون انقضا"}</b></div><div><span>آخرین اتصال ثبت‌شده</span><b>${lastSeen(c.last_seen)}</b></div><small>آخرین زمان ثبت پنل؛ الزاماً به معنی اتصال همین لحظه نیست.</small></section>
+        ${exhausted ? '<div class="quota-hint">حجم سرویس تمام شده؛ برای ادامه اتصال تمدید کن</div>' : ""}
+        <button class="cta sunset-refresh" type="button" data-cardrefresh="1">${ic("refresh")}به‌روزرسانی وضعیت</button>
       </section>
       <div class="ice-actions ${exhausted ? "quota-ended" : ""}"><button class="svc-btn conn" type="button" data-conn="${c.id}"><span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M5.6 5.6a9 9 0 1 0 12.8 0"/></svg>اتصال</span>${ic("back")}</button>
       <button class="svc-btn renew" type="button" data-renew="${c.id}"><span>${ic("refresh")}تمدید سرویس</span>${ic("back")}</button></div>`;
@@ -1252,6 +1258,14 @@
   document.addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return; const d = b.dataset;
     if (d.tab) { closeSheet(); S.tab = d.tab; render(); scrollTo(0, 0); return; }
+    if (d.cardrefresh) {
+      b.disabled = true;
+      api("customers").then(cu => {
+        if (!Array.isArray(cu.customers)) throw new Error("unavailable");
+        S.customers = cu.customers; S.stats = cu.stats; render(); toast("وضعیت به‌روز شد");
+      }).catch(() => toast("دریافت وضعیت ممکن نشد؛ دوباره امتحان کن")).finally(() => { b.disabled = false; });
+      return;
+    }
     if (d.cardlist) { S.card = null; render(); scrollTo(0, 0); return; }
     if (d.go) { closeSheet(); S.tab = d.go; render(); scrollTo(0, 0); return; }
     if (d.f) { S.filt = d.f; S.tab = "customers"; render(); return; }

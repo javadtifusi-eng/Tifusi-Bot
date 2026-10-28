@@ -141,6 +141,7 @@ def _customer(order, pu):
         "service_name": SHOP_SERVICES.get(order["protocol"]) or ns["service_name"](order["protocol"]),
         "used": used, "limit": limit, "expire": expire or None, "days_left": left_days,
         "panel_status": pstatus, "on": pstatus != "disabled", "state": state,
+        "last_seen": _seen_timestamp((pu or {}).get("last_seen")),
         "guide": _guide_url(order), "delreq": order["status"] == "delreq_pending",
         # لینک اشتراک برای کپی و بارکد در جزئیات کاربر (QR از /api/qr?kind=sub)
         "sub": sub if sub.startswith("https://") else None,
