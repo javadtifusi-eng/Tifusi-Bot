@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="theme-color" content="#200e16">
+<title>Clodex</title>
+<link rel="stylesheet" href="s/xterm.css">
+<link rel="stylesheet" href="s/style.css?v=clodex12">
+<link rel="stylesheet" href="s/theme.css?v=workspace25">
+<script src="s/telegram-web-app.js"></script>
+<script src="s/xterm.js"></script>
+<script src="s/addon-fit.js"></script>
+<link rel="stylesheet" href="s/workspace.css?v=workspace25">
+</head>
+<body data-tab="claude" data-view="home">
+<div id="app">
+  <section id="engineHome" class="engine-home" aria-label="Choose workspace">
+    <div class="home-brand"><img src="s/tifusi-mark.png" alt="لوگوی تیفوسی"><b dir="ltr">TIFUSI</b><span dir="ltr">CLODEX WORKSPACE</span></div>
+    <div class="home-heading"><span class="home-kicker">فضای کار شخصی</span><h1>همه‌چیز، همین‌جاست.</h1><p>گفتگو، کدنویسی و مدیریت سرورها</p></div>
+    <div class="workspace-grid">
+      <button class="workspace-card" data-choose-engine="claude"><span class="workspace-symbol claude-symbol"><img src="s/claude.svg" alt=""></span><b>Claude</b><small>گفتگو و ایده‌پردازی</small><span class="workspace-arrow" aria-hidden="true">↗</span></button>
+      <button class="workspace-card" data-choose-engine="codex"><span class="workspace-symbol codex-symbol"><img src="s/openai.svg?v=white22" alt=""></span><b>Codex</b><small>کدنویسی و اجرا</small><span class="workspace-arrow" aria-hidden="true">↗</span></button>
+      <button class="workspace-card" id="homeSsh" data-open-ssh type="button"><span class="workspace-symbol ssh-symbol"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="4"/><path d="m6 8 4 4-4 4m7 0h5"/></svg></span><b>SSH</b><small>مدیریت سرورها</small><span class="workspace-arrow" aria-hidden="true">↗</span></button>
+      <button class="workspace-card" id="homePanel" type="button"><span class="workspace-symbol panel-symbol"><img src="s/tifusi-mark.png" alt=""></span><b>پنل تیفوسی</b><small>مدیریت سرویس‌ها</small><span class="workspace-arrow" aria-hidden="true">↗</span></button>
+    </div>
+    <div class="home-bottom"><span><i></i>خصوصی · فقط شما</span><button type="button" data-home-sessions>ادامهٔ گفتگوها ←</button></div>
+  </section>
+  <header class="top"><button id="workspaceSettings" type="button" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12.000,3.000 L13.756,3.173 L14.755,5.348 L16.000,6.013 L18.364,5.636 L19.483,7.000 L18.652,9.245 L19.062,10.595 L21.000,12.000 L20.827,13.756 L18.652,14.755 L17.987,16.000 L18.364,18.364 L17.000,19.483 L14.755,18.652 L13.405,19.062 L12.000,21.000 L10.244,20.827 L9.245,18.652 L8.000,17.987 L5.636,18.364 L4.517,17.000 L5.348,14.755 L4.938,13.405 L3.000,12.000 L3.173,10.244 L5.348,9.245 L6.013,8.000 L5.636,5.636 L7.000,4.517 L9.245,5.348 L10.595,4.938 Z"/><circle cx="12" cy="12" r="3"/></svg></button><button id="workspaceBack" type="button" aria-label="Back">‹</button>
+    <div class="brand"><span class="logo"><img id="brandIcon" src="s/claude.svg" alt=""></span><div><b id="brandTitle">Claude</b><small data-i18n="workspace">فضای کار شخصی</small></div></div>
+    <div class="top-actions"><button id="btnLang" class="icon" type="button" aria-label="Language">EN</button><button id="btnHomeScreen" class="home-install" type="button">＋ افزودن به صفحهٔ گوشی</button>
+
+    </div>
+  </header>
+
+  <section class="engine-bar" aria-label="Assistant">
+    <div class="engine-switch" role="group"><button data-engine="claude"><img src="s/claude.svg" alt="">Claude</button><button data-engine="codex"><img src="s/openai.svg?v=white22" alt="">Codex</button></div>
+    <span class="workspace-badge" data-i18n="private">خصوصی · فقط شما</span>
+  </section>
+  <div class="ai-actions">      <button class="icon" id="btnVoice" aria-label="ویس"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12z"/></svg></button>
+      <button class="icon" id="btnUsage" aria-label="مصرف"><svg viewBox="0 0 24 24"><path d="M5 9h3v10H5zm5.5-5h3v15h-3zM16 13h3v6h-3z"/></svg></button>
+      <button class="icon" id="btnModel" aria-label="مدل"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg></button>
+      <button class="icon" id="btnSessions" aria-label="جلسه‌ها"><svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h10v2H4z"/></svg></button><button class="icon" id="btnSettings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12.000,3.000 L13.756,3.173 L14.755,5.348 L16.000,6.013 L18.364,5.636 L19.483,7.000 L18.652,9.245 L19.062,10.595 L21.000,12.000 L20.827,13.756 L18.652,14.755 L17.987,16.000 L18.364,18.364 L17.000,19.483 L14.755,18.652 L13.405,19.062 L12.000,21.000 L10.244,20.827 L9.245,18.652 L8.000,17.987 L5.636,18.364 L4.517,17.000 L5.348,14.755 L4.938,13.405 L3.000,12.000 L3.173,10.244 L5.348,9.245 L6.013,8.000 L5.636,5.636 L7.000,4.517 L9.245,5.348 L10.595,4.938 Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+
+  <div class="sub" id="sub"><span id="subSession">جلسه‌ی جدید</span><span class="dot">•</span><span id="subModel"></span></div>
+
+  <main id="chat" class="chat"></main><button id="jumpLatest" class="jump-latest hidden" type="button" aria-label="آخرین پیام"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button>
+
+  <section id="ssh" class="ssh hidden">
+    <div class="ssh-heading"><div><h1>سرورهای من</h1><p>یک سرور انتخاب کن و شروع کن</p></div><span class="ssh-badge">SSH</span><button id="btnPanel" class="ssh-badge" type="button" hidden>🌐 باز کردن پنل</button></div>
+    <div class="srv-bar" id="srvBar" aria-label="انتخاب سرور"></div>
+    <div class="term-wrap"><div class="term-top"><span class="term-state" id="termState">آمادهٔ اتصال</span><span class="term-name" id="termName">TERMINAL</span><div class="term-tools"><button id="termKeys" class="term-keyboard term-plus" aria-label="نمایش کلیدهای کمکی" aria-expanded="false" aria-controls="keys">+</button><button id="termKeyboard" class="term-keyboard" aria-label="باز و بسته کردن صفحه‌کلید">⌨</button></div><span class="term-lights" aria-hidden="true"><i></i><i></i><i></i></span></div><div id="term"></div><div id="termMsg" class="term-msg"><span class="terminal-symbol" aria-hidden="true">›_</span><b>ترمینال آماده‌ست</b><span>برای اتصال، یکی از سرورهای بالا را انتخاب کن</span></div></div>
+    <div class="keys" id="keys" hidden>
+      <div class="number-keys" aria-label="عددهای ترمینال"><button data-s="1">1</button><button data-s="2">2</button><button data-s="3">3</button><button data-s="4">4</button><button data-s="5">5</button><button data-s="6">6</button><button data-s="7">7</button><button data-s="8">8</button><button data-s="9">9</button><button data-s="0">0</button><button data-k="backspace" aria-label="پاک کردن">⌫</button><button data-k="enter">Enter</button></div>
+      <button data-k="esc">Esc</button><button data-k="tab">Tab</button><button data-k="ctrl" id="kCtrl">Ctrl</button>
+      <button data-k="up">↑</button><button data-k="down">↓</button><button data-k="left">←</button><button data-k="right">→</button>
+      <button data-s="|">|</button><button data-s="/">/</button><button data-s="-">-</button><button data-s="~">~</button>
+      <button data-s="&#x03;">^C</button><button data-s="&#x04;">^D</button><button data-k="paste">چسباندن</button>
+    </div>
+  </section>
+
+  <div id="busy" class="busy hidden" role="status" aria-live="polite"><img id="thinkingLogo" src="s/claude.svg" alt=""><span id="busyText">در حال کار…</span><button id="btnStop">توقف</button></div>
+
+  <footer class="composer"><div id="sttStatus" class="stt-status hidden" role="status" aria-live="polite"><span class="pulse"></span><span id="sttStatusText"></span></div>
+    <div id="preview" class="preview hidden"><img id="previewImg" alt="" hidden><div id="albumPreview"></div><button id="previewX" aria-label="حذف">×</button></div>
+    <div class="row" id="row">
+      <div id="recBar" class="recbar hidden"><span class="recdot"></span><span id="recTime">0:00</span><div id="recViz"></div><span id="recHint" class="rechint hidden">صدایی شنیده نمی‌شود</span><button id="recCancel">لغو</button></div>
+      <button class="icon round" id="btnAttach" aria-label="عکس"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 7v10a4 4 0 0 0 8 0V6a3 3 0 0 0-6 0v10a1 1 0 0 0 2 0V7"/></svg></button>
+      <textarea id="input" rows="1" placeholder="پیامت را بنویس…"></textarea>
+      <button class="icon round mic" id="btnMic" aria-label="ضبط ویس"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12z"/></svg></button>
+      <button class="icon round send hidden" id="btnSend" aria-label="ارسال"><svg viewBox="0 0 24 24"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg></button>
+    </div>
+    <input type="file" id="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+  </footer>
+
+  <nav id="workspaceDock" class="tabs" aria-label="Workspace navigation" role="tablist"><button type="button" data-dock="home" data-view="home" role="tab"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg></span><span class="dock-label">خانه</span></button><button type="button" data-dock="claude" data-view="claude" role="tab"><span class="nav-icon"><img src="s/claude.svg" alt=""></span><span class="dock-label">Claude</span></button><button type="button" data-dock="codex" data-view="codex" role="tab"><span class="nav-icon"><img src="s/openai.svg?v=white22" alt=""></span><span class="dock-label">Codex</span></button><button type="button" data-dock="ssh" data-view="ssh" role="tab"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m5 6 6 6-6 6m8 0h6"/></svg></span><span class="dock-label">SSH</span></button><button type="button" data-dock="settings" data-view="settings" role="tab"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg></span><span class="dock-label">تنظیمات</span></button></nav>
+</div>
+
+<div id="sheet" class="sheet hidden"><div class="sheet-bg"></div><div class="sheet-body"><div class="grab"></div><button id="sheetClose" class="sheet-close" type="button" aria-label="Back">بازگشت</button><div id="sheetContent"></div></div></div>
+<div id="toast" class="toast hidden"></div>
+<div id="lock" class="lock hidden"><div><b>دسترسی مجاز نیست</b><p>این برنامه فقط از داخل تلگرام و برای مالک کار می‌کند.</p></div></div>
+<script src="s/app.js?v=workspace25"></script>
+<script src="s/enhance.js?v=workspace25"></script>
+<script src="s/workspace.js?v=workspace25"></script>
+</body>
+</html>
