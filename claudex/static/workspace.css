@@ -1,7 +1,7 @@
 /* Sunset workspace, consistent safe areas and a permanent primary navigation. */
 :root,body[data-tab][data-view],body[data-tab=claude]:not([data-view=home]),body[data-tab=ssh]{--bg:#180f17;--bg2:#41211c;--panel:#2b1a20;--card:#39222a;--line:#e1ab7640;--text:#fff1e7;--dim:#ceada3;--acc:#ffc27f;--acc2:#ffddb2;--accbg:#ab542b33;--user:#66321f;--nav-h:86px;--workspace-top:max(var(--tg-top,0px),env(safe-area-inset-top,0px));--workspace-bottom:max(var(--tg-bottom,0px),env(safe-area-inset-bottom,0px));color-scheme:dark}
 html.fs{--workspace-top:max(var(--tg-top,0px),calc(env(safe-area-inset-top,0px) + 48px))}
-html,body{background:#180f17;overflow:hidden;height:100%;margin:0}body:before{content:'';position:fixed;inset:0;max-width:760px;margin:auto;background:linear-gradient(180deg,#1a0e1712,#180f17a1 57%,#180f17f5),url('workspace-sunset.png') center top/cover;pointer-events:none}body:not([data-view=home]):before{background:linear-gradient(180deg,#180f178c,#180f17f2 45%),url('workspace-sunset.png') center top/cover}
+html,body{background:#180f17;overflow:hidden;height:100%;margin:0}body:before{content:'';position:fixed;inset:0;max-width:760px;margin:auto;background:linear-gradient(180deg,#1a0e1712,#180f17a1 57%,#180f17f5),url('workspace-sunset.webp') center top/cover;pointer-events:none}body:not([data-view=home]):before{background:linear-gradient(180deg,#180f178c,#180f17f2 45%),url('workspace-sunset.webp') center top/cover}
 body[data-tab] #app,body[data-tab=ssh] #app,body[data-view=home] #app{position:fixed;left:0;right:0;top:var(--ssh-top,0px);height:var(--ssh-height,100dvh);max-width:760px;padding:calc(var(--workspace-top) + 8px) 0 calc(var(--nav-h) + var(--workspace-bottom));background:transparent;min-height:0;overflow:hidden;isolation:isolate}
 body[data-view=home] #engineHome{display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;align-content:normal;gap:20px;padding:10px 20px 22px;direction:inherit;overflow:auto;overscroll-behavior:contain;min-height:0;flex:1}
 .home-brand{display:flex;flex-direction:column;align-items:center;gap:5px;padding:0 0 4px;flex:none}.home-brand>img{width:132px;height:76px;object-fit:contain;filter:drop-shadow(0 4px 10px #15040aaa)}.home-brand>b{font:700 21px/1.2 Arial;letter-spacing:6px;margin-left:6px;color:#fff4e3;text-shadow:0 2px 12px #170610}.home-brand>span{font:9px/1.5 Arial;letter-spacing:3px;color:#eec8ac;margin-top:5px}
@@ -27,3 +27,15 @@ body[data-view=home] #app>.top,body[data-view=home] #app>.ai-actions,body[data-v
 @media(prefers-reduced-motion:reduce){#engineHome .workspace-card,body[data-tab] .busy #thinkingLogo,body[data-tab] .busy #busyText{animation:none!important;transition:none}.busy #thinkingLogo{opacity:.7}}
 html.fs body[data-tab][data-view]{--workspace-top:max(var(--tg-top,0px),calc(env(safe-area-inset-top,0px) + 48px))}
 #engineHome .home-bottom>button{display:inline-flex;flex-direction:row;align-items:center;justify-content:flex-end;min-height:36px;min-width:0;height:auto;gap:0;padding:7px 0;border:0;border-radius:0;box-shadow:none;background:none;font:10px/1.6 Vazirmatn,sans-serif;white-space:nowrap;color:#ffe0af}
+
+/* Keep close navigation in its own row, including when long settings scroll. */
+.sheet .sheet-body{display:flex;flex-direction:column;padding:12px 17px 20px;overflow:hidden}
+.sheet .sheet-close{position:static;float:none;align-self:flex-end;flex:none;margin:0 0 12px;min-height:38px;height:38px;background:#58352e}
+#sheetContent{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:2px}
+body[data-tab] #app>.top,html.fs body[data-tab] #app>.top{background:#301d24;border-bottom:1px solid #b48464}
+body:not([data-tab=ssh]):not([data-view=home]) #app>.ai-actions:not(.hidden),body:not([data-tab=ssh]):not([data-view=home]) #app>#sub:not(.hidden){background:#301d24;color:#f5d8bf}
+.sub #subModel{color:#e5c4af}.ai-actions .icon{background:#513126;border-color:#bb8b66;color:#fff0dc}
+.sheet .sheet-bg,body[data-tab] >nav.tabs#workspaceDock{backdrop-filter:none;-webkit-backdrop-filter:none}
+.setting-icon{display:inline-flex;width:21px;height:21px;flex:none;align-items:center;justify-content:center;vertical-align:middle;margin-inline-end:8px;color:#ffd19a;pointer-events:none}
+.setting-icon svg,.setting-icon img{width:21px;height:21px;object-fit:contain}.sheet h3 .setting-icon{width:25px;height:25px}
+.sheet .control-row button,.sheet .workspace-options button{line-height:1.8}

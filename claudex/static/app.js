@@ -171,7 +171,10 @@ async function refresh(tab, withHistory) {
 
 function startPoll(tab) {
   if (S.poll[tab]) return;
+  let polling = false;
   S.poll[tab] = setInterval(async () => {
+    if (polling) return;
+    polling = true;
     try {
       const d = await getJSON("/" + tab + "/state");
       S.data[tab] = d;
@@ -185,7 +188,7 @@ function startPoll(tab) {
         }
       }
       if (S.tab === tab) render();
-    } catch (e) { /* دوباره امتحان می‌شود */ }
+    } catch (e) { /* دوباره امتحان می‌شود */ } finally { polling = false; }
   }, 600);
 }
 
