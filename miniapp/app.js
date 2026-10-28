@@ -991,6 +991,7 @@
     try { x = await getConn(c.id); } catch (e) { closeSheet(); toast("الان نشد اطلاعات رو بگیرم"); return; }
     // اندروید IKEv2: لینک دانلود اختصاصی (اشتراک داخل APK است، بدون جفت‌سازی)؛ آیفون و بقیه: صفحه‌ی راهنما
     S.sendViews = {
+      status: x.status_url,
       android: x.app_url ? { link: x.app_url, text: x.app_url } : null,
       other: { link: shareText(x), text: shareText(x) },
     };
@@ -1003,8 +1004,9 @@
     const v = S.sendViews;
     if (!os) {
       $("sheet").innerHTML = `<h3 id="sheetTitle">ارسال برای مشتری</h3>
-      <div class="send-os">
+      <div class="send-os send-os-status">
         <button class="send-os-btn ios" type="button" data-sendos="other">${ic("apple")} iPhone</button>
+        <button class="send-status-btn" type="button" data-copy="${esc(v.status || "")}" aria-label="کپی لینک وضعیت سرویس" title="کپی لینک وضعیت سرویس">${ic("link")}<span>وضعیت سرویس</span><small>کپی لینک</small></button>
         <button class="send-os-btn android" type="button" data-sendos="android">${androidIc()} Android</button></div>`;
       return;
     }

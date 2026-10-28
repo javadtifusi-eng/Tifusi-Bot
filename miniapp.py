@@ -16,6 +16,7 @@ import logging
 import re
 import secrets
 import time
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from pathlib import Path
 from urllib.parse import parse_qsl
@@ -705,7 +706,79 @@ async def api_connect(request):
     order = _own_order(ns["db"], request["uid"], request.query.get("order_id"))
     if not order:
         return _err("not_found", 404)
-    return web.json_response(await _order_connect(order, show_all=request.query.get("all") == "1"))
+    info = await _order_connect(order, show_all=request.query.get("all") == "1")
+    info["status_url"] = _status_url(order)
+    return web.json_response(info)
+
+
+# Read-only bearer links, scoped to the current order and subscription identity.
+def _status_signature(order):
+    identity = json.dumps([order["id"], order["user_id"], order["panel_id"],
+                           order["username"], order["sub_url"]], separators=(",", ":"))
+    return hmac.new(ns["BOT_TOKEN"].encode(), ("service-status:v1:" + identity).encode(),
+                    hashlib.sha256).hexdigest()
+
+
+def _status_url(order):
+    return MINIAPP_URL.rstrip("/") + f"/service/{order['id']}/{_status_signature(order)}"
+
+
+def _status_order(request):
+    order = ns["db"].get_order(_int(request.match_info.get("order_id")))
+    signature = request.match_info.get("signature", "")
+    if (not order or order["status"] not in LIVE_ORDER_STATUSES
+            or not hmac.compare_digest(signature, _status_signature(order))):
+        return None
+    return order
+
+
+STATUS_HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                  "X-Robots-Tag": "noindex, nofollow, noarchive",
+                  "X-Content-Type-Options": "nosniff"}
+
+
+async def service_status_page(request):
+    if not _status_order(request):
+        return web.Response(text="این لینک معتبر نیست یا سرویس حذف شده است.", status=404,
+                            headers=STATUS_HEADERS)
+    return web.Response(text=(STATIC_DIR / "service-status.html").read_text(),
+                        content_type="text/html", headers={**STATUS_HEADERS,
+                        "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"})
+
+
+def _seen_timestamp(value):
+    if not value:
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            return int(value) if value > 0 else None
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return int((dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp())
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+async def service_status_data(request):
+    order = _status_order(request)
+    if not order:
+        return web.json_response({"error": "not_found"}, status=404, headers=STATUS_HEADERS)
+    panel = ns["db"].get_panel(order["panel_id"])
+    if not panel:
+        return web.json_response({"error": "unavailable"}, status=503, headers=STATUS_HEADERS)
+    try:
+        users = await asyncio.wait_for(asyncio.to_thread(_panel_users, panel), timeout=15)
+        pu = users.get(order["username"])
+        if pu is None:
+            return web.json_response({"error": "not_found"}, status=404, headers=STATUS_HEADERS)
+        customer = _customer(order, pu)
+        # Explicit allowlist: never serialize credentials, subscription or panel URLs.
+        data = {key: customer[key] for key in ("username", "service_name", "used", "limit",
+                "expire", "days_left", "panel_status")}
+        data["last_seen"] = _seen_timestamp(pu.get("last_seen"))
+        data["updated_at"] = int(_panel_cache.get(panel["id"], (time.time(),))[0])
+        return web.json_response(data, headers=STATUS_HEADERS)
+    except Exception:
+        return web.json_response({"error": "unavailable"}, status=503, headers=STATUS_HEADERS)
 
 
 async def api_qr(request):
@@ -1680,6 +1753,8 @@ async def start(application, bot_globals):
     app = web.Application(middlewares=[auth_mw], client_max_size=8 * 1024 * 1024)
     app.router.add_get("/", index)
     app.router.add_get("/sms", sms_page)
+    app.router.add_get("/service/{order_id}/{signature}", service_status_page)
+    app.router.add_get("/service/{order_id}/{signature}/data", service_status_data)
     app.router.add_get("/app.js", app_js)
     app.router.add_get("/app/{secret}/tifusi.apk", user_apk)
     app.router.add_get("/api/me", api_me)
