@@ -95,3 +95,9 @@ def test_only_order_owner_receives_link(service,monkeypatch):
         r['uid']=101
         assert (await miniapp.api_connect(r)).status==404
     asyncio.run(go())
+
+
+def test_customer_list_carries_last_seen(service):
+    assert miniapp._customer(service[0],service[1])["last_seen"]==1793182800
+    service[1]["last_seen"]=None
+    assert miniapp._customer(service[0],service[1])["last_seen"] is None
