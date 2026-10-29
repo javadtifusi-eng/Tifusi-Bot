@@ -34,3 +34,5 @@ Voice endpoint polling is 250 ms; end-of-speech silence is 500 ms (previously 45
 Visual references re-opened: official ChatGPT download page and https://help.openai.com/en/articles/8809935-deleting-and-archiving-chats-in-chatgpt. Native app pixel parity is not claimed. Google Fonts Noto Sans Arabic is a fallback, not a claim about OpenAI's proprietary typeface.
 
 Speech recording requests 24 kbit/s audio, falling back to the previous recorder options when unsupported. This reduces upload bandwidth on browsers that honor the requested rate; real-device bitrate and latency still need measurement. Silence is now 500 ms (150 ms shorter than the previous 650 ms). Polling remains 250 ms. The voice test also checks the low-bitrate request and unsupported-option fallback.
+
+The composer now contains model and speed/reasoning controls below the text field, wired to the existing models and set:effort controls. Labels follow the saved backend state after selection. Drafts remain intact. Speed is reasoning effort, not an audio playback rate or a guaranteed response time.

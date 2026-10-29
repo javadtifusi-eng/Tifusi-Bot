@@ -52,3 +52,16 @@ body.cx-mobile .sheet .sheet-close{min-width:44px;font:400 14px/1.5 var(--cx-fon
 .cx-delete-actions{display:flex;gap:12px;padding:10px 0}.cx-delete-actions button{flex:1;font:500 15px/1.6 var(--cx-font);border-radius:22px;background:var(--cx-surface);padding:12px}.cx-delete-actions .cx-danger{background:#a92835;color:#fff}.cx-setting[data-cx=delete-selected]{color:#ee6674}
 body.cx-mobile #cxLive,body.cx-mobile #cxLive button{font-family:var(--cx-font)}
 @media(max-width:359px){body.cx-mobile #cxHeader{gap:6px;padding-inline:10px}body.cx-mobile .cx-setting{font-size:14px}.cx-setting small{max-width:32%}body.cx-mobile .empty h2{font-size:23px}}
+
+/* Model and reasoning controls belong inside the message composer. */
+#cxComposerControls{display:none}
+body.cx-mobile .composer #row{display:flex;flex-wrap:wrap;align-items:center;gap:3px;border-radius:26px}
+body.cx-mobile .composer #input{order:0;flex:1 0 100%;width:100%;box-sizing:border-box;margin:0;padding:8px 10px}
+body.cx-mobile .composer #btnAttach{order:1}
+body.cx-mobile .composer #cxComposerControls{order:2;display:flex;flex:1;min-width:0;gap:2px;align-items:center}
+body.cx-mobile #cxComposerControls button{display:block;min-width:0;max-width:100%;min-height:40px;padding:7px 5px;border:0;border-radius:18px;background:transparent;color:var(--cx-text);font:500 13px/1.5 var(--cx-font);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.cx-mobile #cxComposerModel{flex:1}body.cx-mobile #cxComposerSpeed{flex:0 1 auto}
+body.cx-mobile #cxComposerControls button:active{background:var(--cx-line)}
+body.cx-mobile .composer #btnMic{order:3}body.cx-mobile .composer #btnSend,body.cx-mobile .composer #cxVoice{order:4}
+body.cx-mobile .composer #recBar{order:-1;flex-basis:100%}
+body.cx-mobile .composer:has(#recBar:not(.hidden)) #cxComposerControls{display:none}

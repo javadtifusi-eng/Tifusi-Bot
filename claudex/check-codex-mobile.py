@@ -7,8 +7,11 @@ root=Path(os.environ.get('CLODEX_STATIC',str(Path(__file__).parent/'static')));o
 state=lambda engine:dict(current='session-'+engine,model='opus' if engine=='claude' else 'gpt-6',models=[{'id':'opus','label':'Opus'},{'id':'gpt-6','label':'GPT-6'}],sessions=[{'id':'session-'+engine,'title':'گفتگوی آزمایشی'}],voice=True,job=None,history=[{'role':'user','text':'سلام، ظاهر جدید آماده است؟'},{'role':'assistant','text':'بله، طرح تازه آماده است.\n\n```sh\nprintf hello\n```'}])
 base_state=state
 removed=set()
+selected_model='gpt-6'
+selected_effort='medium'
 def state(engine):
  d=base_state(engine)
+ if engine=='codex':d.update(model=selected_model,preferences={'effort':selected_effort})
  if engine=='codex':d['sessions'].append({'id':'second','title':'دوم'})
  d['sessions']=[x for x in d['sessions'] if x['id'] not in removed]
  if d['current'] in removed:d.update(current=None,history=[])
@@ -17,10 +20,12 @@ with sync_playwright() as p:
  browser=p.chromium.launch(headless=True,args=['--no-sandbox'])
  for width,inset in [(320,66),(390,66),(390,0),(440,66),(1280,66)]:
   removed.clear()
+  selected_model='gpt-6';selected_effort='medium'
   context=browser.new_context(viewport={'width':width,'height':844},permissions=['clipboard-read','clipboard-write'])
   page=context.new_page();errors=[];requests=[];events=[]
   page.on('pageerror',lambda e:errors.append(str(e)))
   def handle(route):
+   global selected_model,selected_effort
    path=urlparse(route.request.url).path;engine='codex' if '/codex/' in path else 'claude'
    if path=='/claudex/s/telegram-web-app.js':
     sdk="window.tgEvents={};window.Telegram={WebApp:{version:'9.6',initData:'test',viewportHeight:844,isFullscreen:true,safeAreaInset:{top:TOP,bottom:0},contentSafeAreaInset:{top:CONTENT,bottom:0},ready(){},expand(){},requestFullscreen(){},isVersionAtLeast(){return true},setHeaderColor(){},setBackgroundColor(){},setBottomBarColor(){},disableVerticalSwipes(){},onEvent(n,f){(window.tgEvents[n]??=[]).push(f)},BackButton:{hide(){},show(){},onClick(){}},checkHomeScreenStatus(){}}};".replace('TOP',str(20 if inset else 0)).replace('CONTENT',str(46 if inset else 0))
@@ -28,7 +33,13 @@ with sync_playwright() as p:
    if path.startswith('/claudex/api/'):
     requests.append((route.request.method,path))
     if path.endswith('/state'):data=state(engine)
-    elif path.endswith('/controls'):data={'state':state(engine),'text':'تنظیمات دستیار','text_fa':'تنظیمات دستیار','rows':[[{'action':'models','text':'Model'}]]}
+    elif path.endswith('/controls'):
+     action=route.request.post_data_json['action']
+     if action.startswith('model:'):selected_model=action.split(':',1)[1]
+     if action.startswith('thinking:'):selected_effort=action.split(':',1)[1]
+     rows=[[{'action':'model:gpt-6-sol','text':'GPT-6 Sol'}]] if action=='models' else [[{'action':'thinking:low','text':'Fast'}]] if action=='set:effort' else []
+     rows.append([{'action':'models','text':'Model'}])
+     data={'state':state(engine),'text':'تنظیمات دستیار','text_fa':'تنظیمات دستیار','rows':rows}
     elif path.endswith('/usage'):data={'items':[{'title':'هفتگی','used':35,'left':'سه روز','at':'20:00'}],'ago':1}
     elif path.endswith('/ssh/servers'):data={'servers':[{'id':'local','name':'سرور محلی','host':'local','local':True},{'id':'panel','name':'پنل','host':'example.test','link':'https://panel.example/'}]}
     elif path.endswith('/send'):data={'job':{'id':'job-preview','status':'running','progress':'در حال بررسی','elapsed':2}}
@@ -87,6 +98,13 @@ with sync_playwright() as p:
   assert page.locator('body').get_attribute('data-cx-theme')=='light'
   page.locator('#sheetClose').click();page.wait_for_timeout(300);page.screenshot(path=str(out/f'light-{width}-{inset}.png'))
   assert page.locator('#input').input_value()=='پیش‌نویس کدکس'
+  assert page.locator('#row #cxComposerModel').is_visible() and page.locator('#row #cxComposerSpeed').is_visible()
+  page.locator('#cxComposerModel').click();page.wait_for_selector('[data-control="model:gpt-6-sol"]');page.locator('[data-control="model:gpt-6-sol"]').click();page.wait_for_function("document.querySelector('#cxComposerModel').textContent.includes('gpt-6-sol')")
+  page.locator('#sheetClose').click()
+  page.locator('#cxComposerSpeed').click();page.wait_for_selector('[data-control="thinking:low"]');page.locator('[data-control="thinking:low"]').click();page.wait_for_function("document.querySelector('#cxComposerSpeed').textContent.includes('سریع')")
+  page.locator('#sheetClose').click();assert page.locator('#input').input_value()=='پیش‌نویس کدکس'
+  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+  page.screenshot(path=str(out/f'composer-{width}-{inset}.png'))
   page.locator('#cxHeader [data-cx=models]').click();page.wait_for_selector('[data-control=models]')
   page.locator('#sheetClose').click()
   page.locator('#cxHeader [data-cx=more]').click();page.locator('#sheetContent [data-cx=settings]').click()

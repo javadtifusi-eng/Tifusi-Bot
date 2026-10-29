@@ -25,7 +25,7 @@
   if(on){$('#input').placeholder=label('هر چیزی بپرس','Ask anything');try{const bg=document.body.dataset.cxTheme==='dark'?'#212121':'#ffffff';tg?.setHeaderColor(bg);tg?.setBackgroundColor(bg);}catch{}}
  };
  const oldRender=render;
- render=function(){oldRender();if(!active())return;const empty=$('#chat .empty');if(empty)empty.innerHTML='<h2>'+label('از کجا شروع کنیم؟','What can I help with?')+'</h2><div class="cx-suggestions"><button data-cx="suggest" data-prompt="برای امروز یک برنامهٔ عملی و کوتاه پیشنهاد بده">'+label('برنامه‌ریزی روز','Make a plan')+'</button><button data-cx="suggest" data-prompt="کمکم کن ایده‌ام را به یک پروژهٔ قابل اجرا تبدیل کنم">'+label('پرورش یک ایده','Brainstorm')+'</button><button data-cx="suggest" data-prompt="برای بررسی و اصلاح کدم کمک می‌خواهم">'+label('کمک با کد','Help me code')+'</button></div>';};
+ render=function(){oldRender();if(!active())return;syncComposerControls();const empty=$('#chat .empty');if(empty)empty.innerHTML='<h2>'+label('از کجا شروع کنیم؟','What can I help with?')+'</h2><div class="cx-suggestions"><button data-cx="suggest" data-prompt="برای امروز یک برنامهٔ عملی و کوتاه پیشنهاد بده">'+label('برنامه‌ریزی روز','Make a plan')+'</button><button data-cx="suggest" data-prompt="کمکم کن ایده‌ام را به یک پروژهٔ قابل اجرا تبدیل کنم">'+label('پرورش یک ایده','Brainstorm')+'</button><button data-cx="suggest" data-prompt="برای بررسی و اصلاح کدم کمک می‌خواهم">'+label('کمک با کد','Help me code')+'</button></div>';};
  const oldBubble=bubble;
  bubble=function(m,i){const el=oldBubble(m,i);if(S.tab==='codex'&&m.role!=='user'){const transcript=el.querySelector(':scope > .hid');if(transcript){transcript.classList.remove('hidden');el.querySelector(':scope > .voice')?.remove();el.querySelector(':scope > .show')?.remove();}const bar=document.createElement('div');bar.className='cx-response-actions';bar.innerHTML=button('copy:'+i,'copy',label('کپی پاسخ','Copy response'))+button('read:'+i,'speaker',label('خواندن پاسخ','Read aloud'))+button('share:'+i,'share',label('اشتراک پاسخ','Share response'));el.append(bar);}return el;};
  function closeDrawer(){drawer.hidden=true;$('#app').inert=false;header.querySelector('[data-cx=sidebar]').focus({preventScroll:true});}
@@ -94,7 +94,16 @@
  });
  drawer.addEventListener('keydown',e=>{if(e.key==='Escape'){e.stopPropagation();closeDrawer();}if(e.key==='Tab'){const items=[...drawer.querySelectorAll('aside button,aside input')].filter(x=>x.getClientRects().length);const first=items[0],last=items.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
  const wave=document.createElement('button');wave.id='cxVoice';wave.type='button';wave.className='icon round';wave.dataset.cx='voice-screen';wave.setAttribute('aria-label','گفتگوی صوتی');wave.innerHTML=icon('wave');$('#row').append(wave);
+ const quick=document.createElement('div');quick.id='cxComposerControls';quick.innerHTML='<button type="button" data-cx="models" id="cxComposerModel"></button><button type="button" data-cx="control:set:effort" id="cxComposerSpeed"></button>';$('#row').append(quick);
+ function syncComposerControls(){
+  const d=S.data.codex||{},p=d.preferences||{};
+  const model=(p.models||d.models||[]).find(m=>m.id===d.model)?.label||d.model||label('پیش‌فرض','Default');
+  const effort=p.effort||'default',names={low:['سریع','Fast'],medium:['متعادل','Balanced'],high:['دقیق','High'],xhigh:['دقیق‌تر','Extra high'],max:['حداکثر','Max'],ultra:['عمیق‌ترین','Ultra']};
+  const speed=names[effort]?label(...names[effort]):label('سرعت','Speed');
+  $('#cxComposerModel').textContent=model+' ⌄';$('#cxComposerModel').setAttribute('aria-label',label('انتخاب مدل؛ فعلی: ','Choose model; current: ')+model);
+  $('#cxComposerSpeed').textContent=speed+' ⌄';$('#cxComposerSpeed').setAttribute('aria-label',label('سرعت و میزان فکرکردن؛ فعلی: ','Speed and reasoning; current: ')+speed);
+ }
  const originalAttach=$('#btnAttach').innerHTML,originalSend=$('#btnSend').innerHTML;
- const navWithTheme=setNav;setNav=function(){navWithTheme();$('#btnAttach').innerHTML=active()?icon('plus'):originalAttach;$('#btnSend').innerHTML=active()?icon('arrow'):originalSend;if(!active()){$('#app').inert=false;}};
+ const navWithTheme=setNav;setNav=function(){navWithTheme();syncComposerControls();$('#btnAttach').innerHTML=active()?icon('plus'):originalAttach;$('#btnSend').innerHTML=active()?icon('arrow'):originalSend;if(!active()){$('#app').inert=false;}};
  render.key=null;render();setNav();
 })();
