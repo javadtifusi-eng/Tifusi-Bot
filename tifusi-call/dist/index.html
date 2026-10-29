@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f6f4ef"><meta name="description" content="هم‌صدا؛ یک لینک برای تماس صوتی و تصویری دونفره، بدون ثبت‌نام.">
+<title>هم‌صدا — یک لینک، یک گفت‌وگو</title>
+<link rel="icon" href="./icon.svg" type="image/svg+xml"><link rel="manifest" href="./manifest.webmanifest"><link rel="stylesheet" href="./style.css?v=1">
+</head>
+<body>
+<div class="app">
+<header class="top"><a class="brand" href="./" aria-label="هم‌صدا، خانه"><span class="brand-symbol">✳</span><span>هم‌صدا<small>از تیفوسی</small></span></a><span class="top-tag"><i></i> فقط تو و دوستت</span></header>
+<main>
+<section id="home" class="home">
+<div class="intro"><span class="eyebrow">برای حرف‌هایی که تایپ نمی‌شن</span><h1>فاصله رو<br><em>کم کنیم.</em></h1><p>یک لینک بفرست؛ با صدا یا تصویر،<br>کنار هم باشید. بدون نصب و ثبت‌نام.</p><div class="faces" aria-hidden="true"><div class="face face-one"><span>الو؟</span><i></i></div><div class="connection"><b></b><b></b><b></b><b></b><b></b></div><div class="face face-two"><span>جانم!</span><i></i></div><span class="orbit orbit-one"></span><span class="orbit orbit-two"></span></div><div class="intro-footer"><span class="line"></span> گفت‌وگوی واقعی، بدون شلوغی.</div></div>
+<div class="start-card"><div class="card-top"><span class="step-number">۰۱</span><span id="cardKicker">اولین سلام با تو</span><span class="tiny-star">✳</span></div><h2 id="welcomeTitle">یه گفت‌وگو شروع کن</h2><p id="welcomeText">اتاقت رو بساز و لینک رو برای دوستت بفرست.</p><form id="startForm"><label for="name">چی صدات کنیم؟ <span>اختیاری</span></label><input id="name" name="name" maxlength="40" autocomplete="given-name" placeholder="اسم کوچک تو" value=""><fieldset id="modeField"><legend>چطور حرف بزنیم؟</legend><div class="mode-switch"><label><input type="radio" name="mode" value="video" checked><span><svg><use href="#i-video"/></svg>صوتی و تصویری</span></label><label><input type="radio" name="mode" value="audio"><span><svg><use href="#i-phone"/></svg>فقط صوتی</span></label></div></fieldset><p id="permissionNote" class="permission-note">قبل از ورود، اجازهٔ میکروفن و دوربین رو می‌گیریم.</p><button class="primary" id="startButton" type="submit"><span id="startLabel">ساخت اتاق تماس</span><svg><use href="#i-arrow"/></svg></button></form><div class="privacy"><svg><use href="#i-lock"/></svg><span>بدون ضبط صدا و تصویر • لینک با اعتبار یک ساعت</span></div><p id="formError" class="form-error" role="alert" hidden></p></div>
+</section>
+<section id="call" class="call" hidden aria-label="تماس دونفره">
+<div class="call-heading"><div><span class="eyebrow">اتاق دونفرهٔ شما</span><h2 id="roomTitle">منتظر دوستت هستیم</h2></div><span id="callClock" class="clock">۰۰:۰۰</span></div>
+<div class="call-grid"><div class="stage" id="stage"><video id="remoteVideo" autoplay playsinline></video><div class="stage-shade"></div><div id="remotePlaceholder" class="remote-placeholder"><span class="avatar" id="remoteAvatar">✳</span><h3 id="remoteName">جای دوستت خالیه</h3><p id="remoteHint">لینک رو براش بفرست تا بهت ملحق بشه.</p><div class="waiting-dots"><i></i><i></i><i></i></div></div><span id="connectionStatus" class="connection-status" role="status"><i></i><span>منتظر نفر دوم</span></span><div class="local-tile"><video id="localVideo" autoplay playsinline muted></video><span id="localAvatar" class="local-avatar">تو</span><span class="local-name">شما</span></div><button id="playButton" class="play-button" hidden>برای شنیدن صدا لمس کن</button><div class="call-controls"><button id="micButton" class="control" aria-label="خاموش‌کردن میکروفن" aria-pressed="false"><svg><use href="#i-mic"/></svg><span>میکروفن</span></button><button id="cameraButton" class="control" aria-label="خاموش‌کردن دوربین" aria-pressed="false"><svg><use href="#i-video"/></svg><span>دوربین</span></button><button id="flipButton" class="control" aria-label="تعویض دوربین"><svg><use href="#i-flip"/></svg><span>چرخش</span></button><button id="endButton" class="control end" aria-label="پایان تماس"><svg><use href="#i-end"/></svg><span>پایان</span></button></div></div>
+<aside class="invite-card" id="inviteCard"><span class="step-number">۰۲</span><h3>یه نفر رو دعوت کن</h3><p>این لینک رو برای کسی بفرست که می‌خوای باهاش حرف بزنی.</p><div class="invite-url" id="inviteDisplay" dir="ltr">لینک دعوت آماده است</div><button id="copyButton" class="secondary"><svg><use href="#i-copy"/></svg><span>کپی لینک دعوت</span></button><button id="shareButton" class="text-button"><svg><use href="#i-share"/></svg>فرستادن دعوت</button><div class="invite-note"><svg><use href="#i-lock"/></svg><p>هر کسی این لینک رو داشته باشه می‌تونه نفر دوم باشه. فقط برای دوستت بفرست.</p></div></aside></div>
+<div id="callNotice" class="call-notice" role="status"></div><button id="retryButton" class="secondary retry" hidden>تلاش دوباره برای اتصال</button>
+</section>
+<section id="ended" class="ended" hidden><div class="end-mark">✳</div><span class="eyebrow">تا گفت‌وگوی بعدی</span><h1>فعلاً، رفیق.</h1><p id="endText">تماس تموم شد و میکروفن و دوربینت خاموش شدن.</p><button class="primary" id="againButton">یک تماس تازه<svg><use href="#i-arrow"/></svg></button></section>
+</main>
+<footer class="footer"><span>هم‌صدا <b>✳</b> نزدیک‌تر از همیشه</span><button id="helpButton" class="help-button">راهنمای تماس</button></footer>
+</div>
+<div id="toast" class="toast" role="status" hidden></div>
+<dialog id="helpDialog"><button id="closeHelp" class="close-help" aria-label="بستن">×</button><h2>یک لینک، یک گفت‌وگو</h2><p>اتاق بساز، لینک دعوت رو برای یک نفر بفرست و همین صفحه رو باز نگه دار. هر دو نفر باید اجازهٔ میکروفن رو بدن؛ برای تماس تصویری دوربین هم لازمه.</p><p>روی آیفون بهتره لینک رو در Safari و روی اندروید در Chrome باز کنید. خاموش‌شدن صفحه یا رفتن به برنامه‌ای دیگه ممکنه تماس رو متوقف کنه. در قطع کوتاه اینترنت، برنامه برای برگشت اتصال تلاش می‌کنه.</p><p>لینک یک ساعت اعتبار داره. پایان تماس، اتاق رو برای هر دو نفر می‌بنده. هیچ صدا یا تصویری ضبط نمی‌شه.</p><p>اگر دوربین اجازه نگرفت، «فقط صوتی» رو انتخاب کن. تماس روی همهٔ شبکه‌ها تضمین‌شده نیست.</p></dialog>
+<svg class="sprite" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="5" width="12" height="14" rx="3"/><path d="m15 9 6-3v12l-6-3"/></symbol>
+<symbol id="i-phone" viewBox="0 0 24 24"><path d="M7 3H4a1 1 0 0 0-1 1c0 9.4 7.6 17 17 17a1 1 0 0 0 1-1v-3l-5-2-2 2a15 15 0 0 1-7-7l2-2z"/></symbol>
+<symbol id="i-end" viewBox="0 0 24 24"><path d="M3 16v-5c5-5 13-5 18 0v5l-5-1v-4a10 10 0 0 0-8 0v4z"/></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></symbol>
+<symbol id="i-flip" viewBox="0 0 24 24"><path d="M4 9a8 8 0 0 1 14-3l2 2M20 3v5h-5M20 15a8 8 0 0 1-14 3l-2-2M4 21v-5h5"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M20 12H4m6-6-6 6 6 6"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M15 8V3H3v13h5"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V6a4 4 0 0 1 8 0v4M12 14v3"/></symbol>
+<symbol id="i-share" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 13v8h16v-8"/></symbol>
+</defs></svg>
+<script src="./app.js?v=1" defer></script>
+</body></html>

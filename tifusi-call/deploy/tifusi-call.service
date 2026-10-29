@@ -1,0 +1,34 @@
+[Unit]
+Description=Tifusi Hamseda two-person calls and TURN relay
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=turnserver
+Group=turnserver
+WorkingDirectory=/opt/tifusi-call
+ExecStart=/usr/bin/python3 /opt/tifusi-call/server.py
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=CALL_PORT=8092
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=300M
+TasksMax=64
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

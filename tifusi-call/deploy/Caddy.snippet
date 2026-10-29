@@ -1,0 +1,4 @@
+	@tifusi_call path /call /call/*
+	handle @tifusi_call {
+		reverse_proxy 127.0.0.1:8092
+	}
