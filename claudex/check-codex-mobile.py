@@ -44,9 +44,7 @@ with sync_playwright() as p:
   assert page.locator('#workspaceDock').is_hidden()
   assert page.locator('#cxHeader').bounding_box()['y']>=minimum
   assert page.locator('#cxHeader').is_visible()
-  page.locator('#cxVoice').click();page.wait_for_selector('[data-cx=record]')
-  page.screenshot(path=str(out/f'voice-{width}-{inset}.png'))
-  page.locator('#sheetClose').click()
+  assert page.locator('#cxVoice').is_visible()  # Voice loop has a dedicated media test.
   page.locator('#input').fill('پیش‌نویس کدکس')
   page.wait_for_timeout(300);page.screenshot(path=str(out/f'chat-{width}-{inset}.png'))
   page.locator('[data-cx="copy:1"]').click();assert 'printf hello' in page.evaluate('navigator.clipboard.readText()')

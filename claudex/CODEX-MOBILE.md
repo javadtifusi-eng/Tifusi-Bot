@@ -14,3 +14,12 @@ Official visual references inspected 2026-10-29:
 Run `python3 claudex/check-codex-mobile.py` with Playwright and Chromium available. All requests are intercepted; no real CLI commands, messages, account changes or SSH connections are made. Set `CLODEX_STATIC` to test a staged copy of the latest production frontend. Screenshots go to a temporary directory.
 
 Deployment: add codex-mobile.css and codex-mobile.js, then insert their two tags in the CURRENT production index (after existing styles and scripts). Do not overwrite the index from an older checkout: production has newer independent Claude routing. The only production existing-file change is these two added tags; existing cache versions and Claude files are preserved. Roll back by restoring the saved production index; the added unreferenced assets can remain.
+
+
+## Hands-free voice
+
+`codex-live.js/css` intercept the wave control before the old voice sheet. Speech detection ends a turn after one second of silence, posts audio to the existing authenticated STT endpoint, sends the transcript to the current Codex conversation, awaits that task's audio and plays it with a gesture-unlocked AudioContext. Listening restarts after playback. This is turn-based hands-free voice, not OpenAI's native realtime service; model/tool time remains part of latency. The microphone is off during playback; tapping the orb interrupts audio. No backend changes or service restart are needed.
+
+End, page hiding and permission errors release microphone tracks and playback; stale permission/decode results are discarded. An already accepted Codex task continues to completion in chat when a call ends, with its later automatic audio suppressed. Existing drafts/attachments and running jobs must be resolved before opening the call. Max recorded turn is 25 seconds, reply wait limit five minutes, and failures expose Retry rather than silently looping.
+
+Run `python3 claudex/check-codex-live.py` for two automatic media turns, cleanup, denied/late microphone permission and STT error handling. Media and HTTP are mocked; real-device permission/playback still needs confirmation. Backend STT and TTS were separately checked with a benign synthetic Persian sample.
