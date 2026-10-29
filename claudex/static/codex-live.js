@@ -30,7 +30,7 @@
    r.onerror=()=>failure(new Error('ضبط صدا متوقف شد؛ دوباره تلاش کن.'));
    r.onstop=()=>{if(recorder!==r)return;const type=r.mimeType;recorder=null;releaseMic();if(!current(e))return;const blob=new Blob(parts,{type});if(!spoke||blob.size<500){listen(e);return;}submit(blob,e).catch(failure);};
    r.start(200);state('listening','گوش می‌دم…');
-   timer=setInterval(()=>{if(!current(e)||r.state!=='recording')return;analyser.getFloatTimeDomainData(samples);let sum=0;for(const n of samples)sum+=n*n;const level=Math.sqrt(sum/samples.length);el.style.setProperty('--voice-level',Math.min(level*5,.22));if(level>.018){voiced+=50;silent=0;if(voiced>=200)spoke=true;}else{silent+=50;if(!spoke)voiced=Math.max(0,voiced-50);}if((spoke&&silent>=1000)||performance.now()-started>25000)r.stop();},50);
+   timer=setInterval(()=>{if(!current(e)||r.state!=='recording')return;analyser.getFloatTimeDomainData(samples);let sum=0;for(const n of samples)sum+=n*n;const level=Math.sqrt(sum/samples.length);el.style.setProperty('--voice-level',Math.min(level*5,.22));if(level>.018){voiced+=50;silent=0;if(voiced>=200)spoke=true;}else{silent+=50;if(!spoke)voiced=Math.max(0,voiced-50);}if((spoke&&silent>=650)||performance.now()-started>25000)r.stop();},50);
   }catch(err){if(current(e))failure(err);}
  }
  async function submit(blob,e){
@@ -41,7 +41,7 @@
   const sent=await request('/codex/send',{json:{text,spoken:true}});if(!current(e))return;ownJob=sent.job?.id;if(!ownJob)throw new Error('پیام ارسال نشد.');
   let job=sent.job;const deadline=Date.now()+300000;
   while(current(e)){
-   await wait(450,controller.signal);const d=await request('/codex/state');if(!current(e))return;S.data.codex=d;job=d.job;
+   await wait(250,controller.signal);const d=await request('/codex/state');if(!current(e))return;S.data.codex=d;job=d.job;
    if(!job||job.id!==ownJob)throw new Error('گفتگو تغییر کرده؛ مکالمه را دوباره شروع کن.');
    if(job.status==='error')throw new Error('پاسخ کدکس کامل نشد؛ متن گفتگو را بررسی کن.');
    if(job.status!=='running'&&!job.audio_pending)break;

@@ -4,10 +4,19 @@ import mimetypes,json
 from playwright.sync_api import sync_playwright
 import os,tempfile
 root=Path(os.environ.get('CLODEX_STATIC',str(Path(__file__).parent/'static')));out=Path(tempfile.mkdtemp(prefix='codex-mobile-preview-'))
-state=lambda engine:dict(current='session-'+engine,model='opus' if engine=='claude' else 'gpt-6',models=[{'id':'opus','label':'Opus'},{'id':'gpt-6','label':'GPT-6'}],sessions=[{'id':'session-'+engine,'title':'گفتگوی آزمایشی'}],voice=False,job=None,history=[{'role':'user','text':'سلام، ظاهر جدید آماده است؟'},{'role':'assistant','text':'بله، طرح تازه آماده است.\n\n```sh\nprintf hello\n```'}])
+state=lambda engine:dict(current='session-'+engine,model='opus' if engine=='claude' else 'gpt-6',models=[{'id':'opus','label':'Opus'},{'id':'gpt-6','label':'GPT-6'}],sessions=[{'id':'session-'+engine,'title':'گفتگوی آزمایشی'}],voice=True,job=None,history=[{'role':'user','text':'سلام، ظاهر جدید آماده است؟'},{'role':'assistant','text':'بله، طرح تازه آماده است.\n\n```sh\nprintf hello\n```'}])
+base_state=state
+removed=set()
+def state(engine):
+ d=base_state(engine)
+ if engine=='codex':d['sessions'].append({'id':'second','title':'دوم'})
+ d['sessions']=[x for x in d['sessions'] if x['id'] not in removed]
+ if d['current'] in removed:d.update(current=None,history=[])
+ return d
 with sync_playwright() as p:
  browser=p.chromium.launch(headless=True,args=['--no-sandbox'])
  for width,inset in [(320,66),(390,66),(390,0),(440,66),(1280,66)]:
+  removed.clear()
   context=browser.new_context(viewport={'width':width,'height':844},permissions=['clipboard-read','clipboard-write'])
   page=context.new_page();errors=[];requests=[];events=[]
   page.on('pageerror',lambda e:errors.append(str(e)))
@@ -24,7 +33,13 @@ with sync_playwright() as p:
     elif path.endswith('/ssh/servers'):data={'servers':[{'id':'local','name':'سرور محلی','host':'local','local':True},{'id':'panel','name':'پنل','host':'example.test','link':'https://panel.example/'}]}
     elif path.endswith('/send'):data={'job':{'id':'job-preview','status':'running','progress':'در حال بررسی','elapsed':2}}
     elif path.endswith('/upload'):data={'image':'1234567890abcdef.jpg'}
-    elif path.endswith('/session'):data=state(engine)
+    elif path.endswith('/session'):
+     b=route.request.post_data_json
+     if b.get('action')=='delete':
+      if not b.get('confirmation'):return route.fulfill(json={'confirmation':'test-confirmation'})
+      assert b['confirmation']=='test-confirmation'
+      removed.add(b['sid'])
+     data=state(engine)
     elif path.endswith('/voice'):data={'voice':True}
     else:data={}
     return route.fulfill(json=data)
@@ -44,6 +59,8 @@ with sync_playwright() as p:
   assert page.locator('#workspaceDock').is_hidden()
   assert page.locator('#cxHeader').bounding_box()['y']>=minimum
   assert page.locator('#cxHeader').is_visible()
+  assert page.locator('#chat .msg.bot .hid').is_visible()
+  assert page.locator('#chat .msg.bot .show').count()==0
   assert page.locator('#cxVoice').is_visible()  # Voice loop has a dedicated media test.
   page.locator('#input').fill('پیش‌نویس کدکس')
   page.wait_for_timeout(300);page.screenshot(path=str(out/f'chat-{width}-{inset}.png'))
@@ -53,6 +70,17 @@ with sync_playwright() as p:
   page.locator('#cxSearch').fill('بدون نتیجه');assert page.locator('.cx-session').count()==0
   page.locator('#cxSearch').fill('')
   page.wait_for_timeout(300);page.screenshot(path=str(out/f'sidebar-{width}-{inset}.png'))
+  assert page.locator('.cx-session-more').count()==2
+  page.locator('[data-cx="session-menu:second"]').click();page.locator('[data-cx=delete-selected]').click()
+  page.wait_for_timeout(100);page.screenshot(path=str(out/f'delete-{width}-{inset}.png'))
+  assert 'second' not in removed
+  page.locator('[data-cx=confirm-delete]').click();page.wait_for_selector('#cxDrawer:not([hidden])')
+  assert 'second' in removed
+  assert page.locator('.cx-session').count()==1
+  assert page.evaluate('S.data.codex.current')=='session-codex'
+  assert page.locator('#input').input_value()=='پیش‌نویس کدکس'
+  page.locator('.cx-session').dispatch_event('contextmenu');page.locator('[data-cx=delete-selected]').click();page.locator('[data-cx=cancel-delete]').click();page.wait_for_selector('#cxDrawer:not([hidden])')
+  assert 'session-codex' not in removed
   page.locator('.cx-profile').click();page.wait_for_selector('[data-cx=appearance]')
   page.wait_for_timeout(300);page.screenshot(path=str(out/f'settings-{width}-{inset}.png'))
   page.locator('[data-cx=appearance]').click();page.locator('[data-cx="theme:light"]').click()
@@ -82,7 +110,13 @@ with sync_playwright() as p:
   assert any(path.endswith('/upload') for method,path in requests)
   page.locator('#input').fill('پیام آزمایشی در محیط ایزوله');page.locator('#btnSend').click();page.wait_for_timeout(100)
   assert any(path.endswith('/codex/send') for method,path in requests)
-  page.locator('#cxHeader [data-cx=more]').click();page.locator('#sheetContent [data-cx=home]').click()
+  page.evaluate('S.data.codex.job=null')
+  page.locator('#cxHeader [data-cx=sidebar]').click();page.wait_for_selector('#cxDrawer:not([hidden])')
+  page.locator('[data-cx="session-menu:session-codex"]').click();page.locator('[data-cx=delete-selected]').click();page.locator('[data-cx=confirm-delete]').click();page.wait_for_selector('#cxDrawer:not([hidden])')
+  assert 'session-codex' in removed
+  assert page.evaluate('S.data.codex.current') is None
+  assert page.evaluate('S.msgs.codex.length')==0
+  page.locator('#cxDrawer [data-cx=home]').click()
   assert not page.locator('body').evaluate('(e)=>e.classList.contains("cx-mobile")')
   assert page.locator('#workspaceDock').is_visible()
   assert page.locator('#engineHome').is_visible()

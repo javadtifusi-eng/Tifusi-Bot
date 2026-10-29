@@ -27,9 +27,9 @@
  const oldRender=render;
  render=function(){oldRender();if(!active())return;const empty=$('#chat .empty');if(empty)empty.innerHTML='<h2>'+label('از کجا شروع کنیم؟','What can I help with?')+'</h2><div class="cx-suggestions"><button data-cx="suggest" data-prompt="برای امروز یک برنامهٔ عملی و کوتاه پیشنهاد بده">'+label('برنامه‌ریزی روز','Make a plan')+'</button><button data-cx="suggest" data-prompt="کمکم کن ایده‌ام را به یک پروژهٔ قابل اجرا تبدیل کنم">'+label('پرورش یک ایده','Brainstorm')+'</button><button data-cx="suggest" data-prompt="برای بررسی و اصلاح کدم کمک می‌خواهم">'+label('کمک با کد','Help me code')+'</button></div>';};
  const oldBubble=bubble;
- bubble=function(m,i){const el=oldBubble(m,i);if(S.tab==='codex'&&m.role!=='user'){const bar=document.createElement('div');bar.className='cx-response-actions';bar.innerHTML=button('copy:'+i,'copy',label('کپی پاسخ','Copy response'))+button('read:'+i,'speaker',label('خواندن پاسخ','Read aloud'))+button('share:'+i,'share',label('اشتراک پاسخ','Share response'));el.append(bar);}return el;};
+ bubble=function(m,i){const el=oldBubble(m,i);if(S.tab==='codex'&&m.role!=='user'){const transcript=el.querySelector(':scope > .hid');if(transcript){transcript.classList.remove('hidden');el.querySelector(':scope > .voice')?.remove();el.querySelector(':scope > .show')?.remove();}const bar=document.createElement('div');bar.className='cx-response-actions';bar.innerHTML=button('copy:'+i,'copy',label('کپی پاسخ','Copy response'))+button('read:'+i,'speaker',label('خواندن پاسخ','Read aloud'))+button('share:'+i,'share',label('اشتراک پاسخ','Share response'));el.append(bar);}return el;};
  function closeDrawer(){drawer.hidden=true;$('#app').inert=false;header.querySelector('[data-cx=sidebar]').focus({preventScroll:true});}
- function drawSessions(){const q=$('#cxSearch').value.trim().toLocaleLowerCase();const list=(S.data.codex?.sessions||[]).filter(s=>(s.title||s.id).toLocaleLowerCase().includes(q));$('#cxSessions').innerHTML=list.map(s=>'<button class="cx-session '+(s.id===S.data.codex?.current?'selected':'')+'" data-cx-session="'+esc(s.id)+'">'+esc(s.title||label('گفتگوی بدون عنوان','Untitled chat'))+'</button>').join('')||'<p class="cx-muted">'+label('گفتگویی پیدا نشد','No chats found')+'</p>';}
+ function drawSessions(){const q=$('#cxSearch').value.trim().toLocaleLowerCase();const list=(S.data.codex?.sessions||[]).filter(s=>(s.title||s.id).toLocaleLowerCase().includes(q));$('#cxSessions').innerHTML=list.map(s=>'<div class="cx-session-row '+(s.id===S.data.codex?.current?'selected':'')+'"><button class="cx-session" data-cx-session="'+esc(s.id)+'">'+esc(s.title||label('گفتگوی بدون عنوان','Untitled chat'))+'</button><button class="cx-session-more" data-cx="session-menu:'+esc(s.id)+'" aria-label="'+label('گزینه‌های گفتگو','Chat options')+'">'+icon('more')+'</button></div>').join('')||'<p class="cx-muted">'+label('گفتگویی پیدا نشد','No chats found')+'</p>';}
  async function sidebar(){drawer.hidden=false;$('#app').inert=true;drawSessions();$('#cxSearch').focus({preventScroll:true});try{await refresh('codex',false);if(!drawer.hidden)drawSessions();}catch{toast(tr('failed'));}}
  $('#cxSearch').oninput=drawSessions;
  const oldClose=closeSheet;closeSheet=function(){oldClose();delete $('#sheet').dataset.cxPage;};
@@ -41,6 +41,20 @@
  function accents(){page(label('رنگ تأکیدی','Accent color'),'<div class="cx-group">'+Object.keys(colors).map((k,i)=>row('accent:'+k,label(['پیش‌فرض','آبی','سبز','زرد','صورتی','نارنجی','بنفش'][i],k),accent===k?'✓':'')).join('')+'</div>');}
  function more(){page(label('گزینه‌های گفتگو','Chat options'),'<div class="cx-group">'+row('new',label('گفتگوی جدید','New chat'),'','new')+row('models',label('انتخاب مدل','Choose model'))+row('settings',label('تنظیمات','Settings'))+row('export',label('دریافت متن گفتگو','Export conversation'),'','share')+row('delete',label('حذف این گفتگو','Delete conversation'))+row('home',label('خانهٔ تیفوسی','Tifusi home'),'','home')+'</div>','menu');}
  function exportChat(){const text=(S.msgs.codex||[]).map(m=>(m.role==='user'?label('شما','You'):'Codex')+'\n'+m.text).join('\n\n');const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='codex-conversation.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
+ let deleteTarget=null,holdTimer=null,held=false,holdStart=null;
+ function sessionMenu(sid){
+  const item=S.data.codex?.sessions.find(x=>x.id===sid);if(!item)return;
+  deleteTarget=sid;closeDrawer();page(label('گزینه‌های گفتگو','Chat options'),'<p class="cx-selected-title">'+esc(item.title||label('گفتگوی بدون عنوان','Untitled chat'))+'</p><div class="cx-group">'+row('delete-selected',label('حذف گفتگو','Delete chat'),'','close')+'</div>','menu');
+ }
+ function confirmDelete(){const item=S.data.codex?.sessions.find(x=>x.id===deleteTarget);if(!item)return;
+  page(label('این گفتگو حذف شود؟','Delete this chat?'),'<p class="cx-delete-description">'+esc(item.title||label('گفتگوی بدون عنوان','Untitled chat'))+'</p><div class="cx-delete-actions"><button data-cx="cancel-delete">'+label('انصراف','Cancel')+'</button><button class="cx-danger" data-cx="confirm-delete">'+label('حذف گفتگو','Delete chat')+'</button></div>','confirm');
+ }
+ const cancelHold=()=>{clearTimeout(holdTimer);holdTimer=null;};
+ drawer.addEventListener('pointerdown',e=>{const b=e.target.closest('[data-cx-session]');if(!b)return;held=false;holdStart={x:e.clientX,y:e.clientY};holdTimer=setTimeout(()=>{held=true;sessionMenu(b.dataset.cxSession);},500);});
+ drawer.addEventListener('pointermove',e=>{if(holdStart&&Math.hypot(e.clientX-holdStart.x,e.clientY-holdStart.y)>10)cancelHold();});
+ for(const event of ['pointerup','pointercancel','scroll'])drawer.addEventListener(event,cancelHold,true);
+ drawer.addEventListener('contextmenu',e=>{const b=e.target.closest('[data-cx-session]');if(b){e.preventDefault();cancelHold();held=true;sessionMenu(b.dataset.cxSession);}});
+ document.addEventListener('click',e=>{if(held&&e.target.closest('[data-cx-session]')){held=false;e.preventDefault();e.stopImmediatePropagation();}},true);
  let actionBusy=false;
  document.addEventListener('click',async e=>{
   const session=e.target.closest('[data-cx-session]');const b=e.target.closest('[data-cx]');if(!active()||(!b&&!session))return;
@@ -48,11 +62,19 @@
   const action=b?.dataset.cx||'';
   try{
    if(session){actionBusy=true;await sessionAction({action:'open',sid:session.dataset.cxSession});closeDrawer();closeSheet();return;}
+   if(action.startsWith('session-menu:'))return sessionMenu(action.slice(13));
+   if(action==='delete-selected')return confirmDelete();
+   if(action==='cancel-delete'){closeSheet();return await sidebar();}
+   if(action==='confirm-delete'){
+    const sid=deleteTarget;if(!sid)return;
+    const job=S.data.codex?.job;if(job?.status==='running'&&(job.sid===sid||S.data.codex.current===sid))return toast(label('این گفتگو هنوز مشغول کار است؛ بعد از پایانش حذف کن.','Wait for this chat to finish before deleting it.'));
+    actionBusy=true;await sessionAction({action:'delete',sid});deleteTarget=null;closeSheet();await sidebar();return;
+   }
    if(action==='close')return closeDrawer();
    if(action==='sidebar')return await sidebar();
    if(!drawer.hidden)closeDrawer();
    if(action==='home'){closeSheet();showAssistantHome();return;}
-   if(action==='new'){actionBusy=true;await sessionAction({action:'new'});closeSheet();render();return;}
+   if(action==='new'){actionBusy=true;await sessionAction({action:'new'});drafts.codex='';$('#input').value='';autosize();closeSheet();render();return;}
    if(action==='settings')return settings();if(action==='more')return more();if(action==='appearance')return appearance();if(action==='accent')return accents();
    if(action.startsWith('theme:')){mode=action.split(':')[1];localStorage.setItem('cx-appearance',mode);theme();setNav();return appearance();}
    if(action.startsWith('accent:')){accent=action.split(':')[1];localStorage.setItem('cx-accent',accent);theme();return accents();}
@@ -62,7 +84,7 @@
    if(action==='voice'){await $('#btnVoice').onclick();return settings();}
    if(action==='language'){uiLanguage=fa()?'en':'fa';applyLanguage();return settings();}
    if(action==='usage')return $('#btnUsage').click();if(action==='manage')return $('#btnSessions').click();if(action==='export')return exportChat();
-   if(action==='delete'){if(S.data.codex?.current&&confirm(tr('deleteSession'))){actionBusy=true;await sessionAction({action:'delete',sid:S.data.codex.current});closeSheet();render();}return;}
+   if(action==='delete'){deleteTarget=S.data.codex?.current;if(deleteTarget)return confirmDelete();return;}
    if(action==='suggest'){$('#input').value=b.dataset.prompt;autosize();$('#input').focus();return;}
    const [kind,n]=action.split(':');const m=S.msgs.codex?.[Number(n)];if(!m)return;
    if(kind==='copy'){await navigator.clipboard.writeText(m.text);toast(tr('copy'));}

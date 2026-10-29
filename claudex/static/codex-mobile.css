@@ -25,3 +25,30 @@ body.cx-mobile #cxHeader>button:first-child,body.cx-mobile #cxHeader .cx-title,b
 /* Symmetric voice mark centered inside the round control. */
 body.cx-mobile .composer #cxVoice{padding:0;place-items:center;line-height:1;flex:0 0 40px}
 body.cx-mobile .composer #cxVoice svg{display:block;margin:0;transform:none;flex:none}
+
+/* Native Latin typography with locally served Arabic faces and real weights. */
+@font-face{font-family:"Codex Arabic";font-style:normal;font-weight:400;font-display:swap;src:url("codex-arabic-400.woff2") format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+200C-200F,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:"Codex Arabic";font-style:normal;font-weight:500;font-display:swap;src:url("codex-arabic-500.woff2") format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+200C-200F,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:"Codex Arabic";font-style:normal;font-weight:600;font-display:swap;src:url("codex-arabic-600.woff2") format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+200C-200F,U+FB50-FDFF,U+FE70-FEFF}
+
+body.cx-mobile{--cx-font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Codex Arabic",sans-serif;--cx-ui-font:"Codex Arabic",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-family:var(--cx-font);font-size:16px;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-synthesis:none}
+body.cx-mobile button,body.cx-mobile input,body.cx-mobile textarea{font-family:var(--cx-font);letter-spacing:normal}
+body.cx-mobile[data-tab] .msg{font-family:var(--cx-font);font-size:16px;line-height:1.85;font-weight:400}
+body.cx-mobile[data-tab] .msg.user{padding:11px 17px;border-radius:24px;max-width:88%}
+body.cx-mobile .msg .t{white-space:pre-wrap;word-break:normal;overflow-wrap:anywhere}
+body.cx-mobile .msg pre,body.cx-mobile .msg code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:14px;line-height:1.6}
+body.cx-mobile .msg .meta{font-size:12px}.cx-response-actions{margin-top:12px;gap:8px}.cx-response-actions button{width:36px;height:36px}
+body.cx-mobile #cxHeader{padding:6px 14px 14px;gap:10px}body.cx-mobile #cxHeader .cx-title b{font-size:19px;font-weight:600;letter-spacing:-.3px}body.cx-mobile #cxHeader .cx-title span{font-size:12px;color:var(--cx-muted)}body.cx-mobile #cxHeader .cx-title{gap:3px}
+body.cx-mobile .composer .row{border-radius:30px;min-height:60px;padding:6px 7px;border-color:var(--cx-line)}body.cx-mobile .composer textarea{font:400 16px/1.65 var(--cx-font);padding:8px 4px}
+body.cx-mobile .cx-suggestions button{font:400 14px/1.6 var(--cx-font);padding:10px 15px}body.cx-mobile .empty h2{font:500 26px/1.7 var(--cx-font)}
+body.cx-mobile .cx-search input{font:400 15px/1.6 var(--cx-font)}.cx-search{padding:11px 14px}
+body.cx-mobile .cx-nav-row,body.cx-mobile .cx-session{font:400 15px/1.6 var(--cx-font)}body.cx-mobile .cx-section{font:500 13px/1.7 var(--cx-font);margin:22px 12px 9px}
+.cx-session-row{display:flex;align-items:center;border-radius:12px;min-height:50px}.cx-session-row.selected{background:var(--cx-surface)}.cx-session-row .cx-session{flex:1;width:0;min-width:0;max-width:100%;padding:13px 12px;background:none;border-radius:0}
+.cx-session-more{display:grid;place-items:center;flex:none;min-width:44px;height:44px;border:0;background:transparent;color:var(--cx-muted);border-radius:12px}.cx-session-more svg{width:21px;height:21px}.cx-session-row:hover{background:var(--cx-surface)}
+body.cx-mobile .cx-setting{font:400 15px/1.6 var(--cx-font);padding:15px 14px;min-height:57px;gap:12px}body.cx-mobile .cx-setting small{font:400 13px/1.5 var(--cx-font)}body.cx-mobile .sheet .control-row button,body.cx-mobile .sheet .workspace-options button{font:400 15px/1.7 var(--cx-font)}body.cx-mobile .sheet h3{font:600 19px/1.6 var(--cx-font)}
+body.cx-mobile .cx-profile{font:400 15px/1.6 var(--cx-font)}body.cx-mobile .cx-profile small{font-size:12px}.cx-settings-profile b{font-weight:500}
+body.cx-mobile .sheet .sheet-close{min-width:44px;font:400 14px/1.5 var(--cx-font)}body.cx-mobile .sheet .control-description{font-size:14px}
+.cx-selected-title,.cx-delete-description{font:400 16px/1.8 var(--cx-font);overflow-wrap:anywhere;padding:4px 10px 16px;text-align:center}
+.cx-delete-actions{display:flex;gap:12px;padding:10px 0}.cx-delete-actions button{flex:1;font:500 15px/1.6 var(--cx-font);border-radius:22px;background:var(--cx-surface);padding:12px}.cx-delete-actions .cx-danger{background:#a92835;color:#fff}.cx-setting[data-cx=delete-selected]{color:#ee6674}
+body.cx-mobile #cxLive,body.cx-mobile #cxLive button{font-family:var(--cx-font)}
+@media(max-width:359px){body.cx-mobile #cxHeader{gap:6px;padding-inline:10px}body.cx-mobile .cx-setting{font-size:14px}.cx-setting small{max-width:32%}body.cx-mobile .empty h2{font-size:23px}}

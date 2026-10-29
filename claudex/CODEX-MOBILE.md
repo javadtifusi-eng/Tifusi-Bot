@@ -18,8 +18,17 @@ Deployment: add codex-mobile.css and codex-mobile.js, then insert their two tags
 
 ## Hands-free voice
 
-`codex-live.js/css` intercept the wave control before the old voice sheet. Speech detection ends a turn after one second of silence, posts audio to the existing authenticated STT endpoint, sends the transcript to the current Codex conversation, awaits that task's audio and plays it with a gesture-unlocked AudioContext. Listening restarts after playback. This is turn-based hands-free voice, not OpenAI's native realtime service; model/tool time remains part of latency. The microphone is off during playback; tapping the orb interrupts audio. No backend changes or service restart are needed.
+`codex-live.js/css` intercept the wave control before the old voice sheet. Speech detection ends a turn after 650 ms of silence, posts audio to the existing authenticated STT endpoint, sends the transcript to the current Codex conversation, awaits that task's audio and plays it with a gesture-unlocked AudioContext. Listening restarts after playback. This is turn-based hands-free voice, not OpenAI's native realtime service; model/tool time remains part of latency. The microphone is off during playback; tapping the orb interrupts audio. No backend changes or service restart are needed.
 
 End, page hiding and permission errors release microphone tracks and playback; stale permission/decode results are discarded. An already accepted Codex task continues to completion in chat when a call ends, with its later automatic audio suppressed. Existing drafts/attachments and running jobs must be resolved before opening the call. Max recorded turn is 25 seconds, reply wait limit five minutes, and failures expose Retry rather than silently looping.
 
 Run `python3 claudex/check-codex-live.py` for two automatic media turns, cleanup, denied/late microphone permission and STT error handling. Media and HTTP are mocked; real-device permission/playback still needs confirmation. Backend STT and TTS were separately checked with a benign synthetic Persian sample.
+
+
+## Typography and session actions
+
+Native platform Latin typography with locally hosted Noto Sans Arabic 400/500/600 fallback (OFL license alongside fonts); larger, consistent labels and readable response text even with automatic voice replies enabled. Chat list rows expose a three-dot menu and a press-and-hold/context-menu action. Deleting opens a named confirmation screen and calls the existing two-step session API only after confirmation. Cancel keeps the session; deleting a different session keeps the current conversation and draft. A running session cannot be deleted from this menu. Codex source session files are retained by the existing backend.
+
+Voice endpoint polling is 250 ms; end-of-speech silence is 650 ms (previously 450 ms / 1000 ms). This removes 350 ms of mandatory silence plus some polling delay; it does not shorten model or TTS processing time.
+
+Visual references re-opened: official ChatGPT download page and https://help.openai.com/en/articles/8809935-deleting-and-archiving-chats-in-chatgpt. Native app pixel parity is not claimed. Google Fonts Noto Sans Arabic is a fallback, not a claim about OpenAI's proprietary typeface.
