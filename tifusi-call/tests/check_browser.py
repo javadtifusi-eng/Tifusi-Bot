@@ -35,7 +35,9 @@ with sync_playwright() as p:
  # Re-establish signaling and media without creating another room.
  host.evaluate('C.ws.close()');guest.wait_for_function("C.pc===null",timeout=7000)
  for page in [host,guest]:page.wait_for_function("C.pc?.connectionState==='connected'",timeout=25000)
- for page in [host,guest]:assert stats(page)['relay']
+ for page in [host,guest]:
+  page.wait_for_function("async()=>[...await C.pc.getStats()].some(([id,s])=>s.type==='candidate-pair'&&s.nominated&&s.state==='succeeded')",timeout=10000)
+  assert stats(page)['relay']
  host.locator('#endButton').click();guest.wait_for_selector('#ended:not([hidden])');assert host.evaluate('C.stream===null && C.pc===null');assert guest.evaluate('C.stream===null && C.pc===null')
  # Audio only does not request/keep a video track.
  a=tab();a.goto(BASE);a.locator('.mode-switch label').nth(1).click();a.locator('#startButton').click();a.wait_for_selector('#call:not([hidden])');assert a.evaluate('C.stream.getVideoTracks().length===0');b=tab();b.goto(a.evaluate('inviteURL()'));b.locator('.mode-switch label').nth(1).click();b.locator('#startButton').click()
