@@ -25,12 +25,16 @@
    if(!current(e)||muted||capture!==micEpoch){mic.getTracks().forEach(t=>t.stop());return;}
    stream=mic;mediaNode=ctx.createMediaStreamSource(mic);analyser=ctx.createAnalyser();analyser.fftSize=1024;mediaNode.connect(analyser);
    const mime=['audio/mp4','audio/webm;codecs=opus','audio/webm'].find(t=>MediaRecorder.isTypeSupported(t));
-   const r=new MediaRecorder(mic,mime?{mimeType:mime}:{});recorder=r;const parts=[];let bytes=0,voiced=0,silent=0,spoke=false;const started=performance.now();const samples=new Float32Array(analyser.fftSize);
+   // Speech needs much less bandwidth than the browser's default music bitrate.
+   const options=mime?{mimeType:mime}:{};let r;
+   try{r=new MediaRecorder(mic,{...options,audioBitsPerSecond:24000});}
+   catch{r=new MediaRecorder(mic,options);}
+   recorder=r;const parts=[];let bytes=0,voiced=0,silent=0,spoke=false;const started=performance.now();const samples=new Float32Array(analyser.fftSize);
    r.ondataavailable=ev=>{if(ev.data.size){parts.push(ev.data);bytes+=ev.data.size;if(bytes>8*1024*1024&&r.state==='recording')r.stop();}};
    r.onerror=()=>failure(new Error('ضبط صدا متوقف شد؛ دوباره تلاش کن.'));
    r.onstop=()=>{if(recorder!==r)return;const type=r.mimeType;recorder=null;releaseMic();if(!current(e))return;const blob=new Blob(parts,{type});if(!spoke||blob.size<500){listen(e);return;}submit(blob,e).catch(failure);};
    r.start(200);state('listening','گوش می‌دم…');
-   timer=setInterval(()=>{if(!current(e)||r.state!=='recording')return;analyser.getFloatTimeDomainData(samples);let sum=0;for(const n of samples)sum+=n*n;const level=Math.sqrt(sum/samples.length);el.style.setProperty('--voice-level',Math.min(level*5,.22));if(level>.018){voiced+=50;silent=0;if(voiced>=200)spoke=true;}else{silent+=50;if(!spoke)voiced=Math.max(0,voiced-50);}if((spoke&&silent>=650)||performance.now()-started>25000)r.stop();},50);
+   timer=setInterval(()=>{if(!current(e)||r.state!=='recording')return;analyser.getFloatTimeDomainData(samples);let sum=0;for(const n of samples)sum+=n*n;const level=Math.sqrt(sum/samples.length);el.style.setProperty('--voice-level',Math.min(level*5,.22));if(level>.018){voiced+=50;silent=0;if(voiced>=200)spoke=true;}else{silent+=50;if(!spoke)voiced=Math.max(0,voiced-50);}if((spoke&&silent>=500)||performance.now()-started>25000)r.stop();},50);
   }catch(err){if(current(e))failure(err);}
  }
  async function submit(blob,e){

@@ -40,19 +40,21 @@ with sync_playwright() as p:
    return route.fulfill(status=404)
   page.route('**/*',handle)
   page.add_init_script(r"""
-window.mediaCalls=0;window.stops=0;window.played=0;window.denyMic=false;window.delayMic=0;
+window.rejectBitrate=false;window.bitrateAttempts=0;window.bitrateFallbacks=0;window.mediaCalls=0;window.stops=0;window.played=0;window.denyMic=false;window.delayMic=0;
 Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:async()=>{mediaCalls++;if(denyMic)throw new DOMException('denied','NotAllowedError');if(delayMic)await new Promise(r=>setTimeout(r,delayMic));return{getTracks:()=>[{stop(){stops++;}}]};}}});
 window.AudioContext=class{constructor(){this.state='running';this.destination={};}resume(){return Promise.resolve()}close(){return Promise.resolve()}createMediaStreamSource(){return{connect(){},disconnect(){}}}createAnalyser(){let n=0;return{fftSize:1024,getFloatTimeDomainData(a){a.fill(n++<6?.1:0)}}}decodeAudioData(){return Promise.resolve({duration:.1})}createBufferSource(){return{connect(){},start(){played++;setTimeout(()=>this.onended?.(),100)},stop(){}}}};
-window.MediaRecorder=class{static isTypeSupported(){return true}constructor(s,o){this.mimeType=o?.mimeType||'audio/mp4';this.state='inactive'}start(){this.state='recording'}stop(){this.state='inactive';this.ondataavailable?.({data:new Blob([new Uint8Array(1000)])});setTimeout(()=>this.onstop?.(),0)}};
+window.MediaRecorder=class{static isTypeSupported(){return true}constructor(s,o){if(o?.audioBitsPerSecond){if(o.audioBitsPerSecond!==24000)throw Error('bad bitrate');bitrateAttempts++;if(rejectBitrate)throw Error('unsupported bitrate')}else{bitrateFallbacks++}this.mimeType=o?.mimeType||'audio/mp4';this.state='inactive'}start(){this.state='recording'}stop(){this.state='inactive';this.ondataavailable?.({data:new Blob([new Uint8Array(1000)])});setTimeout(()=>this.onstop?.(),0)}};
 """)
   page.goto('https://preview.test/claudex/');page.locator('[data-choose-engine=codex]').click();page.wait_for_selector('body.cx-mobile')
   page.locator('#cxVoice').click();page.wait_for_selector('#cxLive[data-phase=listening]')
   page.screenshot(path=str(out/'live-listening.png'))
   page.wait_for_function('window.played>=2',timeout=15000)
   assert sendcount>=2
+  assert page.evaluate('bitrateAttempts>=2 && bitrateFallbacks===0')
   page.locator('#cxlEnd').click();assert page.locator('#cxLive').is_hidden()
   before=page.evaluate('mediaCalls');page.wait_for_timeout(700);assert page.evaluate('mediaCalls')==before
   assert not page.locator('#app').evaluate('(e)=>e.inert')
+  page.evaluate('window.rejectBitrate=true');page.locator('#cxVoice').click();page.wait_for_selector('#cxLive[data-phase=listening]');assert page.evaluate('bitrateFallbacks>0');page.locator('#cxlEnd').click();page.evaluate('window.rejectBitrate=false')
   page.evaluate('window.denyMic=true');page.locator('#cxVoice').click();page.wait_for_selector('#cxLive[data-phase=error]');assert 'اجازه' in page.locator('#cxlStatus').inner_text();page.locator('#cxlEnd').click()
   page.evaluate('window.denyMic=false;window.delayMic=600');page.locator('#cxVoice').click();page.wait_for_timeout(100);page.locator('#cxlEnd').click();before=page.evaluate('stops');page.wait_for_timeout(800);assert page.evaluate('stops')>before
   page.evaluate('window.delayMic=0');failstt=True;page.locator('#cxVoice').click();page.wait_for_selector('#cxLive[data-phase=error]',timeout=7000);page.locator('#cxlEnd').click();failstt=False
