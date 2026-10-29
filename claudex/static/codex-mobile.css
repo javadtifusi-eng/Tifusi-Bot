@@ -21,3 +21,7 @@ body.cx-mobile .sheet .sheet-body{animation:none}
 #cxVoice{display:none}body.cx-mobile .composer #cxVoice{display:grid;background:var(--cx-text);color:var(--cx-bg);border-radius:50%}body.cx-mobile #cxVoice svg{fill:none;stroke:currentColor;width:23px;height:23px}body.cx-mobile .composer:has(#btnSend:not(.hidden)) #cxVoice,body.cx-mobile .composer:has(#recBar:not(.hidden)) #cxVoice{display:none}
 body.cx-mobile #cxHeader>button:first-child,body.cx-mobile #cxHeader .cx-title,body.cx-mobile .cx-header-end{background:var(--cx-bg);box-shadow:0 3px 15px #0000000d;border:1px solid var(--cx-line);border-radius:26px}body.cx-mobile #cxHeader .cx-title{padding:7px 13px}body.cx-mobile #cxHeader .cx-header-end{gap:0}
 .cx-voice-intro{text-align:center;padding:20px 10px}.cx-orb{width:150px;height:150px;border-radius:50%;margin:10px auto 28px;background:radial-gradient(circle at 35% 25%,#fff 3%,#dbf5ff 24%,#78cafa 47%,#387de4 70%,#214b9b 100%);box-shadow:inset -15px -10px 25px #2468a838}
+
+/* Symmetric voice mark centered inside the round control. */
+body.cx-mobile .composer #cxVoice{padding:0;place-items:center;line-height:1;flex:0 0 40px}
+body.cx-mobile .composer #cxVoice svg{display:block;margin:0;transform:none;flex:none}
