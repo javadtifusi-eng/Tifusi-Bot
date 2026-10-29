@@ -4,7 +4,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#f6f4ef"><meta name="description" content="هم‌صدا؛ یک لینک برای تماس صوتی و تصویری دونفره، بدون ثبت‌نام.">
 <title>هم‌صدا — یک لینک، یک گفت‌وگو</title>
-<link rel="icon" href="./icon.svg" type="image/svg+xml"><link rel="manifest" href="./manifest.webmanifest"><link rel="stylesheet" href="./style.css?v=1">
+<link rel="icon" href="./icon.svg" type="image/svg+xml"><link rel="manifest" href="./manifest.webmanifest"><link rel="stylesheet" href="./style.css?v=2">
 </head>
 <body>
 <div class="app">
@@ -18,6 +18,7 @@
 <div class="call-heading"><div><span class="eyebrow">اتاق دونفرهٔ شما</span><h2 id="roomTitle">منتظر دوستت هستیم</h2></div><span id="callClock" class="clock">۰۰:۰۰</span></div>
 <div class="call-grid"><div class="stage" id="stage"><video id="remoteVideo" autoplay playsinline></video><div class="stage-shade"></div><div id="remotePlaceholder" class="remote-placeholder"><span class="avatar" id="remoteAvatar">✳</span><h3 id="remoteName">جای دوستت خالیه</h3><p id="remoteHint">لینک رو براش بفرست تا بهت ملحق بشه.</p><div class="waiting-dots"><i></i><i></i><i></i></div></div><span id="connectionStatus" class="connection-status" role="status"><i></i><span>منتظر نفر دوم</span></span><div class="local-tile"><video id="localVideo" autoplay playsinline muted></video><span id="localAvatar" class="local-avatar">تو</span><span class="local-name">شما</span></div><button id="playButton" class="play-button" hidden>برای شنیدن صدا لمس کن</button><div class="call-controls"><button id="micButton" class="control" aria-label="خاموش‌کردن میکروفن" aria-pressed="false"><svg><use href="#i-mic"/></svg><span>میکروفن</span></button><button id="cameraButton" class="control" aria-label="خاموش‌کردن دوربین" aria-pressed="false"><svg><use href="#i-video"/></svg><span>دوربین</span></button><button id="flipButton" class="control" aria-label="تعویض دوربین"><svg><use href="#i-flip"/></svg><span>چرخش</span></button><button id="endButton" class="control end" aria-label="پایان تماس"><svg><use href="#i-end"/></svg><span>پایان</span></button></div></div>
 <aside class="invite-card" id="inviteCard"><span class="step-number">۰۲</span><h3>یه نفر رو دعوت کن</h3><p>این لینک رو برای کسی بفرست که می‌خوای باهاش حرف بزنی.</p><div class="invite-url" id="inviteDisplay" dir="ltr">لینک دعوت آماده است</div><button id="copyButton" class="secondary"><svg><use href="#i-copy"/></svg><span>کپی لینک دعوت</span></button><button id="shareButton" class="text-button"><svg><use href="#i-share"/></svg>فرستادن دعوت</button><div class="invite-note"><svg><use href="#i-lock"/></svg><p>هر کسی این لینک رو داشته باشه می‌تونه نفر دوم باشه. فقط برای دوستت بفرست.</p></div></aside></div>
+<details class="network-details"><summary>کیفیت اتصال و حالت کم‌مصرف</summary><p id="networkInfo">در حال اندازه‌گیری…</p><button id="qualityButton" class="text-button" aria-pressed="false">کیفیت خودکار؛ فعال‌کردن ارسال کم‌مصرف</button></details>
 <div id="callNotice" class="call-notice" role="status"></div><button id="retryButton" class="secondary retry" hidden>تلاش دوباره برای اتصال</button>
 </section>
 <section id="ended" class="ended" hidden><div class="end-mark">✳</div><span class="eyebrow">تا گفت‌وگوی بعدی</span><h1>فعلاً، رفیق.</h1><p id="endText">تماس تموم شد و میکروفن و دوربینت خاموش شدن.</p><button class="primary" id="againButton">یک تماس تازه<svg><use href="#i-arrow"/></svg></button></section>
@@ -37,5 +38,5 @@
 <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V6a4 4 0 0 1 8 0v4M12 14v3"/></symbol>
 <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 13v8h16v-8"/></symbol>
 </defs></svg>
-<script src="./app.js?v=1" defer></script>
+<script src="./app.js?v=2" defer></script>
 </body></html>

@@ -28,3 +28,11 @@ To roll back a fresh installation, stop/disable only `tifusi-call`, remove its n
 Synthetic devices and same-host browser contexts do not replace physical Safari/iOS/Android or two actual consumer-network tests. Camera/microphone permission prompts, browser autoplay, mobile camera switching and background suspension still require real-device checks. Permission errors are shown explicitly; playback has a tap-to-play fallback. No background-call guarantee is made. A page leaving releases its devices; a brief disconnected peer can rejoin while the room remains valid.
 
 The static font is Noto Sans Arabic under OFL; see `dist/OFL.txt`.
+
+## Low-latency media profile (2026-10-29)
+
+Capture starts at 480×360/15 fps, with mono audio. Sender parameters cap video at 180 kbit/s and speech at 24 kbit/s, with audio priority high. When supported, receivers request a 40 ms jitter-buffer target; browsers retain final control of actual buffering. Older implementations fall back without failing the call. Camera replacement and reconnect reapply sender limits.
+
+Connection stats sample every two seconds. High RTT/loss/playout buffering or low estimated outgoing capacity switches the video sender to 70 kbit/s, 10 fps and a lower resolution. Four healthy samples allow automatic recovery. The expandable connection panel shows measured RTT, audio jitter buffer and the known route (unknown remote TURN transport is labeled simply relay); users can also select the low-bandwidth sending profile. This panel reports network/receiver metrics, not measured mouth-to-ear latency. Both participants must reopen the updated app for both senders to use the profile. No backend restart is required.
+
+API references: https://developer.mozilla.org/en-US/docs/Web/API/RTCRtpSender/setParameters and https://developer.mozilla.org/en-US/docs/Web/API/RTCRtpReceiver/jitterBufferTarget . Synthetic-device local relay tests cannot establish latency improvement on the owner's mobile network.

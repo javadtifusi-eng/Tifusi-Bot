@@ -18,6 +18,14 @@ with sync_playwright() as p:
   return page.evaluate("""async()=>{let result={video:0,audio:0,relay:false};const stats=await C.pc.getStats();stats.forEach(s=>{if(s.type==='inbound-rtp'&&s.kind==='video')result.video+=s.framesDecoded||0;if(s.type==='inbound-rtp'&&s.kind==='audio')result.audio+=s.bytesReceived||0;if(s.type==='candidate-pair'&&s.nominated&&s.state==='succeeded')result.relay=stats.get(s.localCandidateId)?.candidateType==='relay';});return result;}""")
  for page in [host,guest]:
   s=stats(page);assert s['video']>0 and s['audio']>0 and s['relay'],s
+ for page in [host,guest]:
+  assert page.evaluate("C.senders.video.getParameters().encodings[0].maxBitrate===180000")
+  assert page.evaluate("C.senders.audio.getParameters().encodings[0].maxBitrate===24000")
+  assert page.evaluate("C.senders.video.getParameters().encodings[0].maxFramerate===15")
+  assert page.evaluate("C.pc.getReceivers().every(r=>!('jitterBufferTarget' in r)||r.jitterBufferTarget===40)")
+ host.locator('.network-details summary').click();host.locator('#qualityButton').click();host.wait_for_function("C.senders.video.getParameters().encodings[0].maxBitrate===70000")
+ assert host.evaluate("C.senders.video.getParameters().encodings[0].maxFramerate===10")
+ host.locator('#qualityButton').click();host.wait_for_function("C.senders.video.getParameters().encodings[0].maxBitrate===180000")
  host.screenshot(path=str(OUT/'connected390.png'),full_page=True)
  host.locator('#micButton').click();assert host.evaluate('!C.stream.getAudioTracks()[0].enabled');guest.wait_for_function('!C.peerMic')
  host.locator('#cameraButton').click();guest.wait_for_function('!C.peerCamera');assert host.evaluate('C.stream.getVideoTracks().length===0')
