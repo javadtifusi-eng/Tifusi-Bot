@@ -1,0 +1,119 @@
+--- a/claudex/static/app.js
++++ b/claudex/static/app.js
+@@ -439,6 +439,7 @@
+     SSH.term = new Terminal({ fontSize: innerWidth < 500 ? 14 : 15, lineHeight: 1.25, cursorBlink: true, fontFamily: "ui-monospace,Menlo,Consolas,monospace", theme: { background: "#06080c", foreground: "#e6e9f2", cursor: "#60dbab" }, scrollback: 5000, allowProposedApi: true });
+     SSH.fit = new FitAddon.FitAddon(); SSH.term.loadAddon(SSH.fit);
+     SSH.term.open($("#term"));
++    if (window.setupSshReader) window.setupSshReader(SSH.term);
+     const input = SSH.term.textarea;
+     input.setAttribute("inputmode", "text");
+     input.setAttribute("autocorrect", "off");
+--- a/claudex/static/index.html
++++ b/claudex/static/index.html
+@@ -17,7 +17,7 @@
+ <link rel="stylesheet" href="s/codex-live.css?v=live1">
+ <style>/* No home screen, so no sunset: the hub boots on home before ?go switches it, and never paints it. */html.nohome #engineHome{display:none!important}html.nohome body:before{background:#180f17!important}</style>
+ <style>/* Home tab hidden: four dock columns. */#workspaceDock{grid-template-columns:repeat(4,minmax(0,1fr))!important}</style>
+-<link rel="stylesheet" href="s/ssh-neutral.css?v=2">
++<link rel="stylesheet" href="s/ssh-neutral.css?v=3">
+ </head>
+ <body data-tab="claude" data-view="home">
+ <div id="app">
+@@ -85,7 +85,8 @@
+ <div id="sheet" class="sheet hidden"><div class="sheet-bg"></div><div class="sheet-body"><div class="grab"></div><button id="sheetClose" class="sheet-close" type="button" aria-label="Back">بازگشت</button><div id="sheetContent"></div></div></div>
+ <div id="toast" class="toast hidden"></div>
+ <div id="lock" class="lock hidden"><div><b>دسترسی مجاز نیست</b><p>این برنامه فقط از داخل تلگرام و برای مالک کار می‌کند.</p></div></div>
+-<script src="s/app.js?v=workspace41"></script>
++<script src="s/ssh-reader.js?v=1"></script>
++<script src="s/app.js?v=workspace42"></script>
+ <script src="s/enhance.js?v=workspace38"></script>
+ <script src="s/workspace.js?v=workspace36"></script>
+ <script src="s/claude-entry.js?v=c2"></script>
+--- a/claudex/static/ssh-neutral.css
++++ b/claudex/static/ssh-neutral.css
+@@ -19,3 +19,21 @@
+ body[data-tab=ssh]>nav.tabs#workspaceDock{background:#1f1e1c;border-color:#3d3c38;box-shadow:none}
+ body[data-tab=ssh] #workspaceDock button{color:#a9a69e}
+ body[data-tab=ssh] #workspaceDock button.on{color:#f5f4ef;background:#2b2a27;border-color:#3d3c38;box-shadow:none}
++
++/* Persian text uses the browser's shaping; the underlying terminal stays LTR. */
++body[data-tab=ssh] .ssh-terminal-stage{position:relative;flex:1;min-height:0;display:flex;overflow:hidden;background:#191918}
++body[data-tab=ssh] .ssh-terminal-stage #term{flex:1;width:100%;min-width:0}
++body[data-tab=ssh] .ssh-reader{position:absolute;inset:0;overflow:auto;padding:18px 16px 42px;background:#191918;color:#e8e6df;overscroll-behavior:contain;user-select:text;-webkit-user-select:text;scrollbar-width:thin;scrollbar-color:#55534d transparent}
++body[data-tab=ssh] .ssh-reader[hidden]{display:none}
++body[data-tab=ssh] .persian-reading #term{opacity:0;pointer-events:none}
++body[data-tab=ssh] .ssh-reader-line{white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext;font:13px/1.85 ui-monospace,Menlo,Consolas,monospace;text-align:start;min-height:1.85em}
++body[data-tab=ssh] .ssh-reader-line.has-persian{font-family:Vazirmatn,system-ui,sans-serif;font-size:15px;line-height:1.95}
++body[data-tab=ssh] .term-reader-toggle{border:1px solid #45443f;border-radius:9px;padding:3px 9px;background:#353430;color:#d4d1c8;font:12px/1.8 Vazirmatn,system-ui,sans-serif;min-height:30px;cursor:pointer}
++body[data-tab=ssh] .term-reader-toggle.on{background:#d9775724;border-color:#d9775770;color:#f0ad93}
++body[data-tab=ssh] .term-top{gap:5px;padding-inline:9px}
++body[data-tab=ssh] .term-name{min-width:0;max-width:27%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++body[data-tab=ssh] .term-state{font-size:11px;white-space:nowrap}
++@media(max-width:360px){body[data-tab=ssh] .term-lights{display:none}body[data-tab=ssh] .ssh-reader{padding-inline:12px}}
++body[data-tab=ssh] .keys button{background:#30302d;border-color:#45443f;color:#dedbd2;box-shadow:none}
++body[data-tab=ssh] .keys button.on{background:#d9775729;border-color:#d97757;color:#f0ad93}
++body[data-tab=ssh] .keys button:active{background:#45443f}
+--- /dev/null
++++ b/claudex/static/ssh-reader.js
+@@ -0,0 +1,61 @@
++/* Readable Persian view of the terminal buffer; never transforms PTY input. */
++window.setupSshReader = function (term) {
++  const host = document.querySelector('#term');
++  const wrap = host.closest('.term-wrap');
++  const tools = wrap.querySelector('.term-tools');
++  const button = document.createElement('button');
++  button.type = 'button'; button.className = 'term-reader-toggle';
++  button.textContent = 'فارسی'; button.title = 'نمایش خوانای فارسی';
++  button.setAttribute('aria-controls', 'sshReader');
++  const reader = document.createElement('div');
++  reader.id = 'sshReader'; reader.className = 'ssh-reader';
++  reader.setAttribute('aria-label', 'خروجی خوانای ترمینال');
++  const stage = document.createElement('div'); stage.className = 'ssh-terminal-stage';
++  host.before(stage); stage.append(host, reader); tools.prepend(button);
++  let enabled = true, frame = 0, last = '';
++  try { enabled = localStorage.getItem('ssh-persian-reader') !== 'off'; } catch (_) {}
++  function render() {
++    frame = 0;
++    const active = enabled && term.buffer.active.type !== 'alternate';
++    stage.classList.toggle('persian-reading', active);
++    reader.hidden = !active;
++    button.setAttribute('aria-pressed', String(enabled));
++    button.classList.toggle('on', enabled);
++    if (!active) return;
++    const buf = term.buffer.active;
++    let lines = [];
++    const start = Math.max(0, buf.length - 800);
++    for (let i = start; i < buf.length; i++) {
++      const line = buf.getLine(i);
++      if (!line) continue;
++      const text = line.translateToString(!buf.getLine(i + 1)?.isWrapped);
++      if (line.isWrapped && lines.length) lines[lines.length - 1] += text;
++      else lines.push(text);
++    }
++    while (lines.length && !lines[lines.length - 1]) lines.pop();
++    const signature = lines.join('\n');
++    if (signature === last) return;
++    const atBottom = reader.scrollHeight - reader.scrollTop - reader.clientHeight < 55;
++    const scrollTop = reader.scrollTop;
++    const fragment = document.createDocumentFragment();
++    for (const text of lines) {
++      const row = document.createElement('div'); row.className = 'ssh-reader-line';
++      row.dir = 'auto'; row.textContent = text || '\u00a0';
++      if (/[\u0600-\u06ff\u0750-\u077f]/u.test(text)) row.classList.add('has-persian');
++      fragment.append(row);
++    }
++    reader.replaceChildren(fragment); last = signature;
++    reader.scrollTop = atBottom ? reader.scrollHeight : scrollTop;
++  }
++  function schedule() { if (!frame) frame = requestAnimationFrame(render); }
++  button.addEventListener('pointerdown', e => e.preventDefault());
++  button.addEventListener('click', () => {
++    enabled = !enabled;
++    try { localStorage.setItem('ssh-persian-reader', enabled ? 'on' : 'off'); } catch (_) {}
++    render();
++  });
++  term.onWriteParsed(schedule); term.onResize(schedule);
++  term.buffer.onBufferChange(schedule);
++  new ResizeObserver(schedule).observe(stage);
++  render();
++};
