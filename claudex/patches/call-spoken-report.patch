@@ -1,0 +1,11 @@
+--- a/tgcall/talk_call.py
++++ b/tgcall/talk_call.py
+@@ -182,6 +182,8 @@
+     WORKDIR.mkdir(mode=0o700, exist_ok=True)
+     greet = BASE / "talk-greet.wav"
+     greeting = "سلام جواد جان، کارت تموم شد. منم پشمالو، می‌شنوم داداش." if CALL_CONTEXT else "سلام داداش! منم، کلاد. بگو چی می‌خوای، من گوش می‌دم."
++    if CALL_CONTEXT.get("spoken_report"):
++        greeting += " " + str(CALL_CONTEXT["spoken_report"])[:400]
+     await tts_wav(greeting, greet)
+ 
+     calls = PyTgCalls(client)
