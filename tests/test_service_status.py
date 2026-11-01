@@ -6,7 +6,8 @@ from types import SimpleNamespace
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 import pytest
-import miniapp
+import pytest  # noqa: E402
+miniapp = pytest.importorskip("miniapp")  # private add-on; skipped in the public repo
 
 
 @pytest.fixture

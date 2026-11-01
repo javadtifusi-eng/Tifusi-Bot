@@ -5,7 +5,8 @@ import asyncio
 import pytest
 
 import bot
-import miniapp
+import pytest  # noqa: E402
+miniapp = pytest.importorskip("miniapp")  # private add-on; skipped in the public repo
 
 
 def test_four_separate_plans_in_the_shop_in_order():

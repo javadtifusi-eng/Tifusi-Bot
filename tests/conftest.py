@@ -19,7 +19,10 @@ _cwd = os.getcwd()
 os.chdir(tempfile.mkdtemp(prefix="tifusi-bot-tests-"))
 try:
     import bot  # noqa: E402  creates vpn_bot.db right here
-    import miniapp  # noqa: E402
+    try:
+        import miniapp  # noqa: E402  (private add-on; not part of this repo)
+    except ImportError:
+        miniapp = None
 finally:
     os.chdir(_cwd)
 
@@ -98,12 +101,14 @@ def world(monkeypatch):
     monkeypatch.setattr(bot, "pick_panel", lambda service, prefer=None: panel)
     monkeypatch.setattr(bot, "panel_client", lambda p: Client())
     monkeypatch.setattr(bot, "ADMIN_ID", 1)
-    miniapp.ns.update(vars(bot))
     app = FakeApp()
-    miniapp._APP["app"] = app
+    if miniapp:
+        miniapp.ns.update(vars(bot))
+        miniapp._APP["app"] = app
     w.app = app
     yield w
-    miniapp._APP.pop("app", None)
+    if miniapp:
+        miniapp._APP.pop("app", None)
 
 
 @pytest.fixture

@@ -1,2 +1,8 @@
 .pytest_cache/
 miniapp/apk/
+# private, never publish
+miniapp/
+miniapp.py
+claudex/
+tifusi-call/
+__pycache__/

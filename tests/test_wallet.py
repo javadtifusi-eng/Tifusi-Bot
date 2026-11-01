@@ -5,7 +5,8 @@ couldn't be paid is kept for after the next charge."""
 import asyncio
 
 import bot
-import miniapp
+import pytest  # noqa: E402
+miniapp = pytest.importorskip("miniapp")  # private add-on; skipped in the public repo
 from tests.conftest import customer
 
 
