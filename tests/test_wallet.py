@@ -37,9 +37,18 @@ def test_discount_applies_and_is_clamped(world, plan):
     assert bot.user_plan(999_999, uid) is None
 
 
-def test_free_pass_ids():
-    assert bot.has_free_pass(105455518) and bot.has_free_pass(8178830447) and bot.has_free_pass(8579077076)
-    assert not bot.has_free_pass(10545518), "the typo'd id is not a free pass"
+def test_free_pass_ids(monkeypatch):
+    assert bot.FREE_PASS_IDS == set(), "nobody gets a free pass unless the installer names them"
+    monkeypatch.setattr(bot, "FREE_PASS_IDS", {111, 222})
+    assert bot.has_free_pass(111) and bot.has_free_pass(222) and not bot.has_free_pass(333)
+
+
+def test_without_a_miniapp_no_link_leaves_for_another_server(monkeypatch):
+    assert bot.MINIAPP_URL == "", "no mini app address is built in"
+    assert not bot.is_miniapp_user(1)
+    assert bot.tifusi_app_url("https://sub.example.com/sub/abc123") == bot.TIFUSI_APP_URL
+    monkeypatch.setattr(bot, "MINIAPP_URL", "https://app.example.com/")
+    assert bot.tifusi_app_url("https://sub.example.com/sub/abc123") == "https://app.example.com/app/abc123/tifusi.apk"
 
 
 def Query():

@@ -218,7 +218,7 @@ install_bot() {
 
     # Admin ID
     while true; do
-        ask "Admin numeric ID from @userinfobot (e.g. 105455518):"
+        ask "Admin numeric ID from @userinfobot (e.g. 123456789):"
         read -r ADMINID < /dev/tty
         if [[ "$ADMINID" =~ ^[0-9]+$ ]]; then
             break

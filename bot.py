@@ -43,7 +43,8 @@ BOT_VERSION = "4.2"
 BOT_VERSION_DATE = "2026-09-17"
 # ادمین‌هایی که در مینی‌اپ بدون موجودی و بدون کسر از کیف پول اکانت می‌سازند و تمدید می‌کنند (Free Pass).
 # سفارششان با قیمت صفر ثبت می‌شود تا در آمار فروش حساب نشود.
-FREE_PASS_IDS = {105455518, 8178830447, 8579077076}
+# پیش‌فرض خالی است؛ آیدی‌های عددی خودتان را با کاما در متغیر محیطی TIFUSI_FREE_PASS_IDS بگذارید.
+FREE_PASS_IDS = {int(x) for x in re.findall(r"\d+", os.environ.get("TIFUSI_FREE_PASS_IDS", ""))}
 DEFAULT_PANEL_MAX_USERS = 200   # سقف پیش‌فرض کاربر هر پنل — وقتی پنل به این عدد برسد، خریدهای جدید می‌روند پنل بعدی (تمدیدها همیشه روی همان پنل انجام می‌شوند)
 # ════════════════════════════════════════════════════════════════════════════════════
 
@@ -1422,11 +1423,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu_kb(u.id))
 
 
-MINIAPP_URL = "https://app.bomalo.ir/"
+# آدرس مینی‌اپ خودتان (متغیر محیطی TIFUSI_MINIAPP_URL). خالی = مینی‌اپ ندارید: ربات همان منوی
+# معمولی را نشان می‌دهد و هیچ لینکی (و هیچ رمز اشتراکی) به سرور دیگری نمی‌رود.
+MINIAPP_URL = os.environ.get("TIFUSI_MINIAPP_URL", "").strip()
+if MINIAPP_URL:
+    MINIAPP_URL = MINIAPP_URL.rstrip("/") + "/"
 
 
 def is_miniapp_user(uid):
     """فقط مینی‌اپ: یا برای همه روشن است (تنظیم miniapp_all = 1) یا این کاربر در لیست تست است."""
+    if not MINIAPP_URL:
+        return False
     return db.setting("miniapp_all", "0") == "1" or uid in miniapp_only_ids()
 
 
@@ -2289,7 +2296,7 @@ def tifusi_app_url(sub_url):
     لینکی که شکل /sub/<secret> ندارد، همان لینک عمومی گیت‌هاب را می‌گیرد."""
     parts = urllib.parse.urlsplit(public_sub_url(sub_url or ""))
     segs = parts.path.strip("/").split("/")
-    if parts.scheme in ("http", "https") and len(segs) == 2 and segs[0] == "sub" and segs[1]:
+    if MINIAPP_URL and parts.scheme in ("http", "https") and len(segs) == 2 and segs[0] == "sub" and segs[1]:
         return f"{MINIAPP_URL}app/{segs[1]}/tifusi.apk"
     return TIFUSI_APP_URL
 
