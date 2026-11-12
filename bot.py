@@ -185,6 +185,18 @@ class PanelError(Exception):
     pass
 
 
+def panel_expire_ts(value):
+    """تاریخ API پنل به ثانیه؛ null یعنی بدون انقضا و تاریخ بدون timezone به UTC خوانده می‌شود."""
+    if value is None or value == "":
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    dt = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return int(dt.timestamp())
+
+
 class TifusiPanelAPI:
     """کلاینت API پنل Tifusi Panel. هر کاربر یک لینک اشتراک می‌گیرد و رمز IKEv2/L2TP او را خود پنل مدیریت می‌کند.
 
@@ -349,7 +361,34 @@ class TifusiPanelAPI:
             body["protocols"] = list(protocols)
         if ipsec_password:
             body["ipsec_password"] = ipsec_password
-        return self._with_links(self._call("/api/users", "post", json=body))
+        started = time.time()
+        try:
+            user = self._call("/api/users", "post", json=body)
+        except PanelError as e:
+            # پنل جواب «نه» داد (status دارد): واقعاً ساخته نشده. ولی قطع شدن وسط راه (بدون status) معلوم
+            # نمی‌کند ساخته شد یا نه؛ اگر ساخته شده و ما خطا بدهیم، پول برمی‌گردد و اکانت مجانی می‌ماند.
+            if getattr(e, "status", None) is not None:
+                raise
+            user = self._created_just_now(username, started)
+            if user is None:
+                raise
+            log.warning("panel user %s was created although the reply was lost", username)
+        return self._with_links(user)
+
+    def _created_just_now(self, username, started):
+        """کاربری با همین نام و یادداشت ربات که بعد از شروع همین درخواست ساخته شده؛ وگرنه None.
+        کاربر قدیمی هم‌نام (مال کس دیگر) هرگز برداشته نمی‌شود."""
+        try:
+            user = self.find_user(username)
+        except PanelError:
+            return None
+        if not user or user.get("note") != "Tifusi Bot":
+            return None
+        try:
+            created = panel_expire_ts(user["created_at"])
+        except (KeyError, ValueError, TypeError, OverflowError):
+            return None
+        return user if created >= int(started) - 5 else None
 
     def renew_user(self, username, total_gb, expire_ts, protocols=None, device_limit=0):
         """همان کاربر به‌روز می‌شود تا لینک اشتراک و شناسه عوض نشوند؛ حجم جدید با حفظ باقی‌مانده
@@ -370,7 +409,21 @@ class TifusiPanelAPI:
             # با تمدید از دستش نمی‌رود.
             have = [p for p in (user.get("protocols") or []) if p not in protocols]
             body["protocols"] = list(protocols) + have
-        user = self._call(f"/api/users/{int(user['id'])}", "put", json=body)
+        try:
+            user = self._call(f"/api/users/{int(user['id'])}", "put", json=body)
+        except PanelError as e:
+            # مثل add_user: اگر جواب گم شد ولی تاریخ انقضای پنل همانی است که فرستادیم، تمدید انجام شده.
+            if getattr(e, "status", None) is not None:
+                raise
+            try:
+                again = self.find_user(username)
+                done = again is not None and abs(panel_expire_ts(again.get("expire")) - int(expire_ts)) <= 60
+            except (PanelError, ValueError, TypeError, OverflowError):
+                done = False
+            if not done:
+                raise
+            log.warning("panel user %s was renewed although the reply was lost", username)
+            user = again
         return self._with_links(user)
 
     def set_status(self, username, status):
@@ -525,6 +578,24 @@ class DB:
                 created_at INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_direct_orders_user ON direct_orders(user_id, id);
+            CREATE TABLE IF NOT EXISTS wallet_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                amount INTEGER,
+                reason TEXT DEFAULT '',
+                balance_after INTEGER,
+                created_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_wallet_log_user ON wallet_log(user_id, id);
+            CREATE TABLE IF NOT EXISTS pending_ops (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                kind TEXT,
+                amount INTEGER,
+                detail TEXT DEFAULT '',
+                reported INTEGER DEFAULT 0,
+                created_at INTEGER
+            );
             """)
             self.conn.commit()
         # مهاجرت: ستون عنوان پلن
@@ -688,15 +759,46 @@ class DB:
         except Exception:
             return "none", {}
 
-    def add_balance(self, uid, amount):
-        self.x("UPDATE users SET balance = balance + ? WHERE id=?", (int(amount), uid))
+    def _wallet_log(self, uid, amount, reason):
+        """دفتر کیف پول: هر کم و زیاد شدن موجودی یک خط، در همان تراکنش خود تغییر (قفل دست فراخواننده است)،
+        تا بعداً معلوم باشد هر تومان کی و برای چه جابه‌جا شد."""
+        self.conn.execute(
+            "INSERT INTO wallet_log (user_id,amount,reason,balance_after,created_at) "
+            "VALUES (?,?,?,(SELECT balance FROM users WHERE id=?),?)",
+            (uid, int(amount), str(reason or "")[:200], uid, int(time.time())))
 
-    def try_spend(self, uid, amount):
+    def add_balance(self, uid, amount, reason=""):
+        with self.lock:
+            self.conn.execute("UPDATE users SET balance = balance + ? WHERE id=?", (int(amount), uid))
+            self._wallet_log(uid, int(amount), reason)
+            self.conn.commit()
+
+    def try_spend(self, uid, amount, reason=""):
         """کسر اتمیک از کیف پول: فقط اگر موجودی کافی باشد کم می‌کند و True برمی‌گرداند.
         جلوی خرید دوباره با یک موجودی را می‌گیرد، حتی اگر کاربر دو بار پشت‌سرهم دکمه را بزند."""
         with self.lock:
             cur = self.conn.execute("UPDATE users SET balance = balance - ? WHERE id=? AND balance >= ?",
                                     (int(amount), uid, int(amount)))
+            if cur.rowcount == 1:
+                self._wallet_log(uid, -int(amount), reason)
+            self.conn.commit()
+            return cur.rowcount == 1
+
+    # ---------- کارهای پولی نیمه‌تمام ----------
+    def begin_op(self, uid, kind, amount, detail=""):
+        """قبل از ساخت/تمدید روی پنل، بعد از کسر پول: اگر ربات همین وسط خاموش شود این ردیف می‌ماند و
+        موقع روشن شدن به ادمین گزارش می‌شود (report_open_ops)، به‌جای اینکه پول بی‌ردپا کم شده باشد."""
+        return self.x("INSERT INTO pending_ops (user_id,kind,amount,detail,created_at) VALUES (?,?,?,?,?)",
+                      (uid, kind, int(amount), str(detail)[:300], int(time.time())))
+
+    def end_op(self, op_id):
+        if op_id:
+            self.x("DELETE FROM pending_ops WHERE id=?", (op_id,))
+
+    def claim_direct(self, did, from_status, to_status):
+        """مثل claim_order برای سفارش مستقیم: دو رسید همزمان برای یک سفارش = یک برنده."""
+        with self.lock:
+            cur = self.conn.execute("UPDATE direct_orders SET status=? WHERE id=? AND status=?", (to_status, did, from_status))
             self.conn.commit()
             return cur.rowcount == 1
 
@@ -1186,14 +1288,6 @@ async def notify_admin(bot, text, reply_markup=None):
         except Exception as e:
             log.warning("notify_admin failed for %s: %s", aid, e)
 
-
-async def notify_admins_photo(bot, photo_id, caption, reply_markup=None):
-    """ارسال عکس رسید به همه ادمین‌ها تا هرکدام بتوانند تایید/رد کنند."""
-    for aid in {ADMIN_ID, *get_admins()}:
-        try:
-            await bot.send_photo(aid, photo_id, caption=caption, reply_markup=reply_markup)
-        except Exception as e:
-            log.warning("notify_admins_photo failed for %s: %s", aid, e)
 
 
 # ---------- گزارش لحظه‌ای در گروه گزارش (تنظیمات ← 👥 آیدی گروه) ----------
@@ -2301,14 +2395,68 @@ def tifusi_app_url(sub_url):
     return TIFUSI_APP_URL
 
 
+def ipsec_host_key(cfg):
+    """شناسه‌ی ثابت یک سرور در لیست پنل: همان host=<id> که پنل در لینک نصب می‌گذارد؛ پنل قدیمی که
+    آن را ندارد با آدرس سرور شناخته می‌شود."""
+    for field in ("install_url", "mobileconfig_url"):
+        host = urllib.parse.parse_qs(urllib.parse.urlsplit(cfg.get(field) or "").query).get("host")
+        if host and host[0]:
+            return str(host[0])
+    return str(cfg.get("server") or "")
+
+
+def ikev2_default_setting(panel_id):
+    return f"ikev2_default:{int(panel_id or 0)}"
+
+
+def ipsec_cfgs(order, links, kind=None):
+    """سرورهای IKEv2/L2TP این سرویس همان‌طور که پنل الان می‌دهد. برای IKEv2 سروری که ادمین پیش‌فرض
+    کرده (تنظیم ikev2_default:<panel>) اول می‌آید؛ اگر آن سرور دیگر روی پنل نبود، ترتیب خود پنل می‌ماند.
+    پس با اضافه/حذف نود در پنل، ربات و مینی‌اپ بدون تغییر دیگری همان را نشان می‌دهند."""
+    kind = kind or order["protocol"]
+    cfgs = list((links or {}).get(f"{kind}_configs") or [])
+    if kind == "ikev2" and len(cfgs) > 1:
+        default = (db.setting(ikev2_default_setting(order["panel_id"]), "") or "").strip()
+        if default:
+            cfgs.sort(key=lambda c: ipsec_host_key(c) != default)  # sort پایدار است
+    return cfgs
+
+
+def ipsec_cfg_name(cfg):
+    return str(cfg.get("remark") or cfg.get("server") or "").strip()
+
+
+def apple_profile_urls(order, links):
+    """[(نام سرور، لینک نصب)] برای همه‌ی سرورهای این سرویس، پیش‌فرض اول."""
+    if order["protocol"] not in IPSEC_SERVICES:
+        return []
+    out = []
+    for cfg in ipsec_cfgs(order, links):
+        url = public_sub_url(cfg.get("install_url") or cfg.get("mobileconfig_url"))
+        if url:
+            out.append((ipsec_cfg_name(cfg), url))
+    return out
+
+
+def apple_profile_buttons(order, links):
+    """ردیف‌های دکمه‌ی نصب پروفایل آیفون: یک سرور = یک دکمه مثل قبل؛ چند سرور = برای هر کدام یک دکمه
+    با اسم سرور، پیش‌فرض اول، تا اگر یکی در شهر مشتری کار نکرد دیگری را نصب کند."""
+    urls = apple_profile_urls(order, links)
+    # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
+    if len(urls) == 1:
+        return [[InlineKeyboardButton("\uf8ff نصب پروفایل آیفون و مک", url=urls[0][1])]]
+    return [[InlineKeyboardButton(f"\uf8ff آیفون · {name[:28]}" + (" (پیشنهادی)" if i == 0 else ""), url=url)]
+            for i, (name, url) in enumerate(urls)]
+
+
 def apple_profile_url(order, links):
     """لینک نصب یک‌لمسی پروفایل آیفون برای همین سرویس (IKEv2 یا L2TP)؛ None اگر پنل نداد.
     install_url صفحه‌ای است که مشتری را از مرورگر تلگرام به Safari می‌برد (آیفون پروفایل را فقط
     در Safari نصب می‌کند)؛ پنل قدیمی‌تر فقط mobileconfig_url را می‌دهد."""
     if order["protocol"] not in IPSEC_SERVICES:
         return None
-    cfgs = (links or {}).get(f"{order['protocol']}_configs") or []
-    return public_sub_url(cfgs[0].get("install_url") or cfgs[0].get("mobileconfig_url")) if cfgs else None
+    urls = apple_profile_urls(order, links)
+    return urls[0][1] if urls else None
 
 
 # نوع اتصال همان‌طور که در منوی VPN خود گوشی نوشته شده، تا مشتری همان را انتخاب کند
@@ -2322,7 +2470,7 @@ def ipsec_manual_lines(links, order, code=lambda v: f"<code>{html.escape(v)}</co
     proto = order["protocol"]
     if proto not in MANUAL_TYPE:
         return []
-    cfgs = (links or {}).get(f"{proto}_configs") or []
+    cfgs = ipsec_cfgs(order, links, proto)
     if cfgs:
         lines = [f"🧩 نوع: {code(MANUAL_TYPE[proto])}",
                  f"👤 نام کاربری: {code(cfgs[0]['username'])}",
@@ -2379,7 +2527,7 @@ def guide_markup(oid, kinds, current=None):
 
 def guide_cfg(order, links, kind):
     """The panel's login for one method; the order's own login when the panel did not answer."""
-    cfgs = (links or {}).get(f"{kind}_configs") or []
+    cfgs = ipsec_cfgs(order, links, kind)
     return cfgs[0] if cfgs else {"server": "-", "username": order["username"], "password": order["password"] or "-"}
 
 
@@ -2431,12 +2579,6 @@ def guide_html(order, links, kind):
 # ---------- دکمه‌ی «اتصال در اندروید»: سرور، نام کاربری، رمز و نوع، همه در یک پیام ----------
 ANDROID_BTN = "🤖 اتصال در اندروید"
 GUIDE_BTN = "📖 راهنمای اتصال"
-
-
-def guide_button(order):
-    """راهنمای قدم‌به‌قدم پنل (/sub/<secret>/guide) به‌صورت مینی‌اپ تلگرام، برای IKEv2 و L2TP.
-    مینی‌اپ فقط آدرس https قبول می‌کند؛ بدون لینک اشتراک دکمه‌ای نمی‌سازیم."""
-    return None  # صفحه‌ی راهنمای پنل خاموش شده؛ اندروید با لینک اختصاصی اپ، آیفون با نصب پروفایل
 
 
 def android_html(order, links):
@@ -2845,9 +2987,12 @@ def delivery_details_html(order, panel, links):
     if manual:
         parts.append("🔧 <b>اطلاعات اتصال</b> (برای اندروید و ویندوز):\n" + "\n".join(manual))
         parts.append("📖 آموزش وارد کردن: منوی «آموزش اتصال» ربات")
-    apple_url = apple_profile_url(order, links)
-    if apple_url:
-        parts.append(f"🍎 نصب پروفایل آیفون:\n{esc(apple_url)}")
+    urls = apple_profile_urls(order, links)
+    if len(urls) == 1:
+        parts.append(f"🍎 نصب پروفایل آیفون:\n{esc(urls[0][1])}")
+    elif urls:
+        # چند سرور: هر کدام با اسم خودش، پیش‌فرض اول
+        parts.append("🍎 نصب پروفایل آیفون:\n" + "\n".join(f"📍 {esc(name)}\n{esc(url)}" for name, url in urls))
     if order["protocol"] not in IPSEC_SERVICES and order["sub_url"]:
         parts.append(f"🔗 لینک اشتراک:\n<code>{esc(public_sub_url(order['sub_url']))}</code>")
     if order["protocol"] == "ikev2":
@@ -2875,7 +3020,6 @@ async def deliver_service(context, chat_id, order, panel, quiet=False):
             log.warning("fetching IPsec details for %s failed: %s", order["username"], e)
 
     details = delivery_details_html(order, panel, links)
-    apple_url = apple_profile_url(order, links)
     card = await asyncio.to_thread(delivery_card_png, order)
     if card:
         # داخل تصویر فقط نشان و بارکد است: تلگرام هیچ نقطه‌ای از یک عکس را قابل لمس نمی‌کند،
@@ -2888,9 +3032,6 @@ async def deliver_service(context, chat_id, order, panel, quiet=False):
         if guide:
             # The picture carries everything: «active», name, service, volume, expiry and what to tap.
             caption = None
-            gb = guide_button(order)
-            if gb:
-                rows.append([gb])
             rows.append([InlineKeyboardButton(ANDROID_BTN, callback_data=f"andr:{order['id']}")])
         if order["protocol"] == "ikev2":
             # IKEv2 روی اندروید با اپ Tifusi: نصب، بعد زدن لینک اشتراک (یا اسکن بارکدش) در اپ
@@ -2898,9 +3039,7 @@ async def deliver_service(context, chat_id, order, panel, quiet=False):
             sub_btn = copy_text_button("🔗 کپی لینک اشتراک (برای اپ)", public_sub_url(order["sub_url"])) if order["sub_url"] else None
             if sub_btn:
                 rows.insert(1, [sub_btn])
-        if apple_url:
-            # U+F8FF روی آیفون و مک همان ارم اپل است — دقیقاً همان دستگاه‌هایی که این دکمه برایشان است.
-            rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
+        rows += apple_profile_buttons(order, links)
         # لینک اشتراک فعلاً فقط برای Xray (سرویس‌های گوشی با تنظیمات خود گوشی وصل می‌شوند)
         copy_btn = copy_text_button("🔗 کپی لینک اشتراک", public_sub_url(order["sub_url"])) if order["sub_url"] and not guide else None
         if copy_btn:
@@ -3047,7 +3186,6 @@ async def show_service_detail(query, uid, oid):
         creds += "\n\n🔧 اطلاعات اتصال (اندروید و ویندوز):\n" + "\n".join(manual)
     elif guide:
         creds += "\n\n👇 برای اتصال، دکمه‌ی گوشی خود را بزنید."
-    apple_url = apple_profile_url(o, fresh) if o["protocol"] in IPSEC_SERVICES else None
     text = (f"{md(service_name(o['protocol']))} — #{o['id']}\n"
             f"🖥 پنل: {md(pname)}\n\n{creds}\n\n{usage_line}\n"
             f"⏳ {remaining_text(o['expire_at'])} | 🕓 {dt}")
@@ -3059,12 +3197,8 @@ async def show_service_detail(query, uid, oid):
             if sub_btn:
                 rows.append([sub_btn])
         if guide:
-            gb = guide_button(o)
-            if gb:
-                rows.append([gb])
             rows.append([btn(ANDROID_BTN, f"andr:{o['id']}")])
-        if apple_url:
-            rows.append([InlineKeyboardButton(" نصب پروفایل آیفون و مک", url=apple_url)])
+        rows += apple_profile_buttons(o, fresh)
         rows.append([btn("♻️ تمدید سرویس", f"renew:{o['id']}")])
         refresh = btn("🔄 بروزرسانی اطلاعات", f"svc:{o['id']}")
         rows.append([btn("📷 QR code", f"qr:{o['id']}"), refresh] if o["sub_url"] and not phone else [refresh])
@@ -3123,11 +3257,6 @@ def account_text(uid):
             f"🧾 کل سفارش‌ها: {len(orders_all)}\n"
             f"🤝 زیرمجموعه‌های شما: {db.referral_count(uid)} نفر")
 
-
-async def show_account_msg(msg, uid):
-    kb = InlineKeyboardMarkup([[btn("💰 افزایش موجودی", "wallet:charge"),
-                                btn("🏠 بازگشت به منوی اصلی", "menu:back")]])
-    await msg.reply_text(account_text(uid), reply_markup=kb)
 
 
 # ---------- فلوی شارژ کیف پول (مرحله تایید) ----------
@@ -3297,7 +3426,7 @@ async def finalize_wallet_purchase(query, context, uid, data):
         await safe_edit(query, "❌ پلن یافت نشد.", reply_markup=back_kb())
         return
     bal_before = db.get_balance(uid)
-    if not db.try_spend(uid, plan["price"]):
+    if not db.try_spend(uid, plan["price"], f"خرید {data.get('username', '')}"):
         save_pending_buy(uid, data)
         await safe_edit(query,
             f"❌ موجودی کیف پول کافی نیست.\n\n"
@@ -3311,15 +3440,18 @@ async def finalize_wallet_purchase(query, context, uid, data):
     clear_pending_buy(uid)
     # جلسه‌ی خرید همین‌جا بسته می‌شود تا زدن دوباره‌ی دکمه‌ی پرداخت سرویس دوم نسازد
     db.set_state(uid, "none")
+    op = db.begin_op(uid, "buy", plan["price"], f"{data['protocol']} {data['username']}")
     await safe_edit(query, "♻️ در حال ساخت سرویس... لطفاً چند ثانیه صبر کنید.")
     try:
         order, panel = await asyncio.to_thread(
             create_service_on_panel, uid, plan, data["protocol"], data["username"], data.get("panel_id"),
             data.get("ipsec_password"))
     except Exception as e:
-        db.add_balance(uid, plan["price"])  # بازگشت وجه
+        db.add_balance(uid, plan["price"], f"برگشت خرید ناموفق {data.get('username', '')}")  # بازگشت وجه
+        db.end_op(op)
         await context.bot.send_message(uid, f"❌ خطا در ساخت سرویس: {e}\n💰 مبلغ به کیف پول برگشت.")
         return
+    db.end_op(op)
     await deliver_service(context, uid, order, panel)
     await context.bot.send_message(uid,
         f"🧾 رسید خرید\n\n"
@@ -3376,9 +3508,12 @@ async def do_renew_and_deliver(query, context, uid, oid, plan_id=None, quiet=Fal
     # فقط شکستِ خودِ تمدید خطا برمی‌گرداند (و باعث بازگشت وجه می‌شود)؛ اگر تمدید انجام شد ولی پیام نرسید،
     # نباید پول برگردد چون سرویس تمدید شده است.
     new_o, panel = await asyncio.to_thread(do_renew, o, plan)
-    notify_group(context.bot,
-                 f"♻️ تمدید سرویس\n👤 {who(new_o['user_id'])}\n🔖 {new_o['username']} — "
-                 f"{vol_text(new_o['volume_gb'])} — {new_o['days']} روز | 💰 {fmt(plan['price'])} تومان", topic="sales")
+    try:
+        notify_group(context.bot,
+                     f"♻️ تمدید سرویس\n👤 {who(new_o['user_id'])}\n🔖 {new_o['username']} — "
+                     f"{vol_text(new_o['volume_gb'])} — {new_o['days']} روز | 💰 {fmt(plan['price'])} تومان", topic="sales")
+    except Exception as e:
+        log.warning("renew report for order %s failed: %s", oid, e)
     if quiet:
         return
     dt = datetime.datetime.fromtimestamp(new_o["expire_at"]).strftime("%Y-%m-%d %H:%M")
@@ -3535,11 +3670,16 @@ async def rc_approve(query, context, rid):
         pass
     notify_group(context.bot, f"✅ رسید R{rid} تأیید شد\n👤 {who(r['user_id'])} | 💸 {fmt(r['amount'])} تومان", topic="pay")
     if r["rtype"] == "wallet_charge":
-        db.add_balance(r["user_id"], r["amount"])
-        await tell(context.bot, r["user_id"],
-            f"💎 مبلغ {fmt(r['amount'])} تومان به کیف پول شما واریز شد. با تشکر از پرداخت شما 🙏\n\n"
-            f"🛒 کد پیگیری شما: R{r['id']}\n"
-            f"💰 موجودی فعلی: {fmt(db.get_balance(r['user_id']))} تومان", kind="wallet")
+        db.add_balance(r["user_id"], r["amount"], f"شارژ رسید R{rid}")
+        # پول نشسته است؛ نرسیدن پیام (مثلاً مشتری ربات را بلاک کرده) نباید تأیید را «ناموفق» نشان دهد،
+        # وگرنه ادمین دوباره دستی شارژ می‌کند.
+        try:
+            await tell(context.bot, r["user_id"],
+                f"💎 مبلغ {fmt(r['amount'])} تومان به کیف پول شما واریز شد. با تشکر از پرداخت شما 🙏\n\n"
+                f"🛒 کد پیگیری شما: R{r['id']}\n"
+                f"💰 موجودی فعلی: {fmt(db.get_balance(r['user_id']))} تومان", kind="wallet")
+        except Exception as e:
+            log.warning("receipt %s approved; message to %s failed: %s", rid, r["user_id"], e)
         await offer_pending_buy(context.bot, r["user_id"])
         await query.message.reply_text(f"✅ رسید #{rid} تایید شد — کیف پول کاربر شارژ شد.",
             reply_markup=InlineKeyboardMarkup([[btn("⚙️ مدیریت کاربر", f"au:panel:{r['user_id']}")]]))
@@ -3547,7 +3687,16 @@ async def rc_approve(query, context, rid):
         # روزهای ویژه‌ی کاربر هم مثل پیش‌فاکتورش
         plan = user_plan(meta.get("plan_id"), r["user_id"])
         if not plan:
-            await query.message.reply_text("❌ پلن حذف شده؛ وجه را دستی برگردانید.")
+            # پول رسیده ولی پلن دیگر نیست: مبلغ خودکار به کیف پول می‌رود تا مشتری با آن پلن دیگری بخرد.
+            db.add_balance(r["user_id"], r["amount"], f"برگشت رسید R{rid} (پلن حذف شده)")
+            if meta.get("direct_order_id"):
+                db.x("UPDATE direct_orders SET status='refunded' WHERE id=?", (meta["direct_order_id"],))
+            try:
+                await tell(context.bot, r["user_id"],
+                    f"⚠️ پلنی که برایش پرداخت کردید دیگر فروخته نمی‌شود.\n💰 مبلغ {fmt(r['amount'])} تومان به کیف پول شما رفت؛ با آن یک پلن دیگر بخرید.", kind="refund")
+            except Exception as e:
+                log.warning("receipt %s refund message to %s failed: %s", rid, r["user_id"], e)
+            await query.message.reply_text("⚠️ پلن این رسید حذف شده؛ مبلغ به‌صورت خودکار به کیف پول کاربر رفت.")
             return
         # سفارش با همان مبلغی ثبت می‌شود که کاربر واقعاً پرداخت کرد (با تخفیف شخصی‌اش)
         plan = dict(plan)
@@ -3557,7 +3706,7 @@ async def rc_approve(query, context, rid):
                 create_service_on_panel, r["user_id"], plan, meta["protocol"], meta["username"], meta.get("panel_id"),
                 meta.get("ipsec_password"))
         except Exception as e:
-            db.add_balance(r["user_id"], r["amount"])  # بازگشت خودکار وجه
+            db.add_balance(r["user_id"], r["amount"], f"برگشت رسید R{rid} (ساخت ناموفق)")  # بازگشت خودکار وجه
             if meta.get("direct_order_id"):
                 db.x("UPDATE direct_orders SET status='refunded' WHERE id=?", (meta["direct_order_id"],))
             await tell(context.bot, r["user_id"],
@@ -4066,8 +4215,6 @@ async def admin_plan_detail(query, pid):
 
 
 # ---------- مدیریت پنل‌ها ----------
-def panel_status_icon(p):
-    return {"offline": "🔴 Offline", "inactive": "⚪ غیرفعال"}.get(p["status"], "🟢")
 
 
 def protocols_text(panel):
@@ -4605,18 +4752,21 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             plan_id = pid
             if parts[1] == "w":
                 bal_before = db.get_balance(uid)
-                if not db.try_spend(uid, price):
+                if not db.try_spend(uid, price, f"تمدید {o['username']}"):
                     await safe_edit(query, "❌ موجودی کیف پول کافی نیست.",
                         reply_markup=InlineKeyboardMarkup([[btn("💰 افزایش موجودی", "wallet:charge")],
                                                            [btn("🔙 بازگشت", f"svc:{oid}")]]))
                     return
+                op = db.begin_op(uid, "renew", price, f"{o['protocol']} {o['username']}")
                 await safe_edit(query, "♻️ در حال تمدید...")
                 try:
                     await do_renew_and_deliver(query, context, uid, oid, plan_id)
                 except Exception as e:
-                    db.add_balance(uid, price)
+                    db.add_balance(uid, price, f"برگشت تمدید ناموفق {o['username']}")
+                    db.end_op(op)
                     await context.bot.send_message(uid, f"❌ خطا در تمدید: {e}\n💰 مبلغ به کیف پول برگشت.")
                     return
+                db.end_op(op)
                 await context.bot.send_message(uid,
                     f"🧾 رسید تمدید\n\n"
                     f"💰 موجودی قبل از تمدید: {fmt(bal_before)} تومان\n"
@@ -5855,8 +6005,28 @@ def per_user(handler):
     return wrapped
 
 
+async def report_open_ops(bot):
+    """کارهای پولی که دفعه‌ی قبل وسطش ربات خاموش شد (پول کم شده، نتیجه نامعلوم): یک بار به ادمین گزارش
+    می‌شود تا خودش سرویس را روی پنل نگاه کند و اگر ساخته نشده، مبلغ را برگرداند. خودکار برنمی‌گردد، چون
+    ممکن است سرویس ساخته شده باشد."""
+    rows = db.q("SELECT * FROM pending_ops WHERE reported=0 ORDER BY id")
+    if not rows:
+        return
+    kinds = {"buy": "خرید", "renew": "تمدید"}
+    lines = [f"• {kinds.get(r['kind'], r['kind'])} — کاربر {r['user_id']} — {fmt(r['amount'])} تومان — {r['detail']} — {jdate(r['created_at'])}"
+             for r in rows]
+    db.x("UPDATE pending_ops SET reported=1 WHERE reported=0")
+    await notify_admin(bot, "⚠️ ربات وسط این کارها خاموش شده بود؛ پول از کیف پول کم شده ولی نتیجه معلوم نیست.\n"
+                            "سرویس را روی پنل نگاه کنید؛ اگر ساخته/تمدید نشده، مبلغ را از «مدیریت کاربر» برگردانید:\n\n"
+                            + "\n".join(lines))
+
+
 async def start_miniapp(application):
     """سرور مینی‌اپ (miniapp.py) کنار ربات؛ اگر نصب نبود یا بالا نیامد، ربات بدون آن کار می‌کند."""
+    try:
+        await report_open_ops(application.bot)
+    except Exception as e:
+        log.warning("open ops report failed: %s", e)
     try:
         import miniapp
         await miniapp.start(application, globals())

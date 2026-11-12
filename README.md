@@ -65,6 +65,7 @@ The bot knows every service, but **only offers a service to customers when the p
 | 🖥️ **Multiple panels** | Several servers with custom capacity; when one panel is full, new purchases move to the next |
 | 🔄 **Smart renewal** | Always renews the same user on the same panel; link, QR and password stay the same |
 | 📊 **Wallet and receipts** | Top up by sending a receipt, approved or rejected by the admin; atomic balance deduction (double tap = one purchase) |
+| 🧾 **Wallet ledger** | Every wallet move is recorded with the balance after it; a purchase or renewal cut off by a restart is reported to the admin on start; a panel reply lost after the panel already did the work is not refunded twice; a receipt for a deleted plan goes to the wallet |
 | ⏰ **Expiry reminders** | Automatic messages 3 days and 1 day before expiry and on expiry, with a renew button |
 | 📢 **Broadcast** | Text or photo to all users at a Telegram-safe rate, with a result report |
 | 💾 **Backup** | Instant backup, automatic daily backup (to the admin and an optional channel) and restore from inside the bot |

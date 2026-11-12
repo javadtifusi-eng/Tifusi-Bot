@@ -26,7 +26,8 @@ try:
 finally:
     os.chdir(_cwd)
 
-TABLES = ("users", "orders", "receipts", "plans", "settings", "tickets", "direct_orders", "notifications", "panels")
+TABLES = ("users", "orders", "receipts", "plans", "settings", "tickets", "direct_orders", "notifications", "panels",
+          "wallet_log", "pending_ops")
 
 
 class FakeBot:
