@@ -248,3 +248,64 @@ def test_two_renewals_at_once_both_add_their_volume(world, monkeypatch):
     for th in threads:
         th.join()
     assert state["data_limit"] == 30 * 1024 ** 3
+
+
+# ---------------------------------------------------------------- expiry reminders follow the panel
+
+class _RemCtx:
+    def __init__(self, app):
+        self.bot = app.bot
+
+
+def _order(uid, expire_at):
+    oid = bot.db.create_order({
+        "user_id": uid, "panel_id": 1, "plan_id": 0, "protocol": "xray", "username": "alice", "password": "",
+        "price": 1000, "volume_gb": 10, "days": 30, "expire_at": expire_at,
+        "sub_url": "https://sub.example/sub/sek", "app_code": ""})
+    return bot.db.get_order(oid)
+
+
+def _panel_says(monkeypatch, expire_ts=None, fail=False):
+    class Client:
+        def find_user(self, name):
+            if fail:
+                raise bot.PanelError("panel down")
+            return {"username": name,
+                    "expire": bot.datetime.datetime.fromtimestamp(expire_ts, bot.datetime.timezone.utc).isoformat()}
+
+    monkeypatch.setattr(bot.db, "get_panel", lambda pid: {"id": pid, "name": "P1"})
+    monkeypatch.setattr(bot, "panel_client", lambda p: Client())
+    told = []
+
+    async def tell(_bot, uid, text, **kw):
+        told.append(text)
+
+    monkeypatch.setattr(bot, "tell", tell)
+    return told
+
+
+@pytest.mark.parametrize("left", [-3600, 12 * 3600, 2 * 86400])
+def test_renewed_on_the_panel_gets_no_reminder(world, monkeypatch, left):
+    uid = customer()
+    o = _order(uid, int(time.time()) + left)
+    later = int(time.time()) + 30 * 86400
+    told = _panel_says(monkeypatch, expire_ts=later)
+    run(bot.reminder_job(_RemCtx(world.app)))
+    assert told == [] and abs(bot.db.get_order(o["id"])["expire_at"] - later) <= 1
+
+
+def test_same_date_on_the_panel_still_reminds_once(world, monkeypatch):
+    uid = customer()
+    o = _order(uid, int(time.time()) + 12 * 3600)
+    told = _panel_says(monkeypatch, expire_ts=o["expire_at"])
+    run(bot.reminder_job(_RemCtx(world.app)))
+    run(bot.reminder_job(_RemCtx(world.app)))
+    assert len(told) == 1
+
+
+def test_panel_down_waits_for_the_next_round(world, monkeypatch):
+    uid = customer()
+    _order(uid, int(time.time()) - 3600)
+    told = _panel_says(monkeypatch, fail=True)
+    run(bot.reminder_job(_RemCtx(world.app)))
+    assert told == []

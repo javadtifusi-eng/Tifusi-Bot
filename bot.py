@@ -5942,6 +5942,24 @@ async def health_job(context: ContextTypes.DEFAULT_TYPE):
                                             f"{protocols_diff_text(before, after)}{note}")
 
 
+def panel_expire_of(order):
+    """This service's expiry on its panel (seconds; 0 = never). The bot's own date when the account
+    or its panel is gone; None when the panel didn't answer."""
+    panel = db.get_panel(order["panel_id"])
+    if not panel:
+        return int(order["expire_at"] or 0)
+    try:
+        user = panel_client(panel).find_user(order["username"])
+    except PanelError:
+        return None
+    if user is None or "expire" not in user:
+        return int(order["expire_at"] or 0)
+    try:
+        return panel_expire_ts(user["expire"])
+    except (ValueError, TypeError, OverflowError):
+        return int(order["expire_at"] or 0)
+
+
 async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
     """هر ساعت: یادآوری انقضا — ۳ روز مانده، ۱ روز مانده، و وقتی منقضی شد. هر یادآوری یک بار ارسال می‌شود
     و با تمدید دوباره فعال می‌شود. اکانت‌های تست (قیمت صفر) یادآوری نمی‌گیرند."""
@@ -5961,6 +5979,17 @@ async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
         elif 86400 < left <= 3 * 86400 and not sent & 1:
             text, mark = f"⏳ کمتر از ۳ روز از اعتبار سرویس «{o['username']}» باقی مانده است.", 1
         else:
+            continue
+        # The panel holds the real date: a service renewed or extended directly on the panel
+        # still has the old date here, and its customer must not be told it is ending.
+        panel_expire = await asyncio.to_thread(panel_expire_of, o)
+        if panel_expire is None:
+            continue  # the panel didn't answer; try again next hour
+        if panel_expire == 0 or panel_expire > o["expire_at"] + 60:
+            if panel_expire:
+                db.x("UPDATE orders SET expire_at=?, reminded=0 WHERE id=? AND expire_at=?",
+                     (panel_expire, o["id"], o["expire_at"]))
+                log.info("order %s: panel expiry is later than the bot's; reminder skipped and date synced", o["id"])
             continue
         try:
             await tell(context.bot, o["user_id"], text, kind="expiry", order_id=o["id"], reply_markup=InlineKeyboardMarkup([
