@@ -181,3 +181,70 @@ def test_two_receipts_for_one_direct_order_have_one_winner(world):
                    "VALUES (?,?,?,?,?,?,?,'open',?)", (uid, 0, 1, "xray", "alice", "", 1000, int(time.time())))
     assert [bot.db.claim_direct(did, "open", "uploading") for _ in range(3)] == [True, False, False]
 
+
+
+# ---------------------------------------------------------------- links unreadable after the work is done
+
+def links_down_api(monkeypatch, user):
+    api = bot.TifusiPanelAPI("https://panel.example", "u", "tifusi_key")
+
+    def _call(path, method="get", **kw):
+        if path.endswith("/links"):
+            raise bot.PanelError("خطای اتصال: read timed out")
+        if method in ("post", "put"):
+            return {**user, **{k: v for k, v in (kw.get("json") or {}).items() if k in ("expire", "data_limit")}}
+        if path == "/api/users":
+            return {"users": [user]}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(api, "_call", _call)
+    return api
+
+
+def test_account_created_but_links_unreadable_is_not_an_error(world, monkeypatch):
+    # An error here used to refund the customer for an account that exists.
+    api = links_down_api(monkeypatch, {"id": 5, "username": "alice", "secret": "s/ek"})
+    res = api.add_user([], "alice", 10, int(time.time()) + 86400)
+    assert res["links_pending"] and res["subscription_url"] == "https://panel.example/sub/s%2Fek"
+    assert res["app_code"] == "" and res["ikev2_configs"] == []
+
+
+def test_renewal_saved_but_links_unreadable_is_not_an_error(world, monkeypatch):
+    api = links_down_api(monkeypatch, {"id": 5, "username": "alice", "secret": "sek", "data_limit": 0, "used_traffic": 0})
+    res = api.renew_user("alice", 10, int(time.time()) + 86400)
+    assert res is not None and res["links_pending"]
+
+
+def test_reading_links_of_an_existing_account_still_reports_the_failure(world, monkeypatch):
+    api = links_down_api(monkeypatch, {"id": 5, "username": "alice", "secret": "sek"})
+    with pytest.raises(bot.PanelError):
+        api.links("alice")
+
+
+def test_two_renewals_at_once_both_add_their_volume(world, monkeypatch):
+    import threading
+
+    state = {"id": 5, "username": "alice", "secret": "sek", "data_limit": 10 * 1024 ** 3, "used_traffic": 0}
+    api = bot.TifusiPanelAPI("https://panel.example", "u", "tifusi_key")
+    gate = threading.Barrier(2, timeout=1)
+
+    def _call(path, method="get", **kw):
+        if path == "/api/users":
+            snapshot = dict(state)
+            try:
+                gate.wait()  # without the lock both renewals read the same old limit here
+            except threading.BrokenBarrierError:
+                pass
+            return {"users": [snapshot]}
+        if method == "put":
+            state["data_limit"] = kw["json"]["data_limit"]
+            return dict(state)
+        return {"subscription_url": "https://panel.example/sub/sek"}
+
+    monkeypatch.setattr(api, "_call", _call)
+    threads = [threading.Thread(target=api.renew_user, args=("alice", 10, int(time.time()) + 86400)) for _ in range(2)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert state["data_limit"] == 30 * 1024 ** 3

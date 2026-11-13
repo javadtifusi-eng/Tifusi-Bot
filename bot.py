@@ -328,9 +328,20 @@ class TifusiPanelAPI:
         except PanelError:
             return None
 
-    def _with_links(self, user):
-        links = self._call(f"/api/users/{int(user['id'])}/links") or {}
-        return {"user": user, "subscription_url": links.get("subscription_url", ""),
+    def _with_links(self, user, committed=False):
+        """committed: the account was just created or renewed on the panel. A failure to read its
+        links then must not surface as an error (the caller would refund a service that exists);
+        the subscription address is rebuilt from the account's own secret instead."""
+        links_pending = False
+        try:
+            links = self._call(f"/api/users/{int(user['id'])}/links") or {}
+        except PanelError:
+            if not committed or not user.get("secret"):
+                raise
+            links = {"subscription_url": self.base + "/sub/" + urllib.parse.quote(user["secret"], safe="")}
+            links_pending = True
+            log.warning("panel user %s saved; connection links temporarily unavailable", user["id"])
+        return {"user": user, "links_pending": links_pending, "subscription_url": links.get("subscription_url", ""),
                 "app_code": links.get("app_code", ""),
                 "share_url": links.get("share_url", ""),
                 "ikev2_configs": links.get("ikev2_configs") or [],
@@ -373,7 +384,7 @@ class TifusiPanelAPI:
             if user is None:
                 raise
             log.warning("panel user %s was created although the reply was lost", username)
-        return self._with_links(user)
+        return self._with_links(user, committed=True)
 
     def _created_just_now(self, username, started):
         """کاربری با همین نام و یادداشت ربات که بعد از شروع همین درخواست ساخته شده؛ وگرنه None.
@@ -393,6 +404,12 @@ class TifusiPanelAPI:
     def renew_user(self, username, total_gb, expire_ts, protocols=None, device_limit=0):
         """همان کاربر به‌روز می‌شود تا لینک اشتراک و شناسه عوض نشوند؛ حجم جدید با حفظ باقی‌مانده
         اضافه می‌شود، چون پنل مصرف را صفر نمی‌کند. اگر کاربر روی پنل نبود None برمی‌گرداند."""
+        # Read, compute, write: one renewal at a time per panel, or two at once both add
+        # their volume to the same old limit and one of them is lost.
+        with self.lock:
+            return self._renew_user(username, total_gb, expire_ts, protocols, device_limit)
+
+    def _renew_user(self, username, total_gb, expire_ts, protocols, device_limit):
         user = self.find_user(username)
         if not user:
             return None
@@ -424,7 +441,7 @@ class TifusiPanelAPI:
                 raise
             log.warning("panel user %s was renewed although the reply was lost", username)
             user = again
-        return self._with_links(user)
+        return self._with_links(user, committed=True)
 
     def set_status(self, username, status):
         """روشن/خاموش کردن کاربر روی پنل (active/disabled)؛ False اگر کاربر روی پنل نبود."""
@@ -3088,7 +3105,10 @@ def do_renew(order, plan):
                               ipsec_password=order["password"] or None)
     db.update_order(order["id"], expire_at=expire_at, volume_gb=plan["volume_gb"], days=plan["days"],
                     price=plan["price"], plan_id=plan.get("id", order["plan_id"]) or order["plan_id"],
-                    status="active", reminded=0, sub_url=res["subscription_url"], app_code=res["app_code"])
+                    status="active", reminded=0,
+                    # links not readable right now: keep the ones the order already has
+                    sub_url=(order["sub_url"] if res.get("links_pending") else res["subscription_url"]),
+                    app_code=(order["app_code"] if res.get("links_pending") else res["app_code"]))
     return db.get_order(order["id"]), panel
 
 
